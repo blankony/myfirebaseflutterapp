@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import '../../widgets/blog_post_card.dart'; 
 import '../../widgets/comment_tile.dart'; 
 import '../../main.dart'; 
@@ -30,6 +31,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  String _formatJoinedDate(Timestamp? timestamp) {
+    if (timestamp == null) {
+      return 'Joined date unknown';
+    }
+    final DateTime date = timestamp.toDate();
+    final String formattedDate = DateFormat('MMMM yyyy').format(date);
+    return 'Joined $formattedDate';
   }
 
   @override
@@ -163,7 +173,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String nim = data['nim'] ?? 'NIM not set'; 
     final String handle = "@${email.split('@')[0]}";
     final String bio = data['bio'] ?? 'No bio set.';
-    final String joinedDate = "Joined March 2020"; 
+    
+    final Timestamp? createdAt = data['createdAt'] as Timestamp?;
+    final String joinedDate = _formatJoinedDate(createdAt);
 
     final List<dynamic> followingList = data['following'] ?? [];
     final List<dynamic> followersList = data['followers'] ?? [];
@@ -192,7 +204,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             children: [
               Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor),
               SizedBox(width: 8),
-              Text(joinedDate, style: theme.textTheme.titleSmall),
+              Text(joinedDate, style: theme.textTheme.titleSmall), 
             ],
           ),
 
