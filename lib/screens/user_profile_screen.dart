@@ -19,6 +19,7 @@ class UserProfileScreen extends StatefulWidget {
 
 class _UserProfileScreenState extends State<UserProfileScreen> with TickerProviderStateMixin {
   late TabController _tabController;
+  final User? _currentUser = _auth.currentUser;
 
   @override
   void initState() {
@@ -32,82 +33,144 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     super.dispose();
   }
 
+  Future<void> _followUser() async {
+    if (_currentUser == null) return;
+    
+    final batch = _firestore.batch();
+    
+    final myDocRef = _firestore.collection('users').doc(_currentUser!.uid);
+    batch.update(myDocRef, {
+      'following': FieldValue.arrayUnion([widget.userId])
+    });
+    
+    final targetDocRef = _firestore.collection('users').doc(widget.userId);
+    batch.update(targetDocRef, {
+      'followers': FieldValue.arrayUnion([_currentUser!.uid])
+    });
+    
+    try {
+      await batch.commit();
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to follow: $e')));
+    }
+  }
+
+  Future<void> _unfollowUser() async {
+    if (_currentUser == null) return;
+    
+    final batch = _firestore.batch();
+    
+    final myDocRef = _firestore.collection('users').doc(_currentUser!.uid);
+    batch.update(myDocRef, {
+      'following': FieldValue.arrayRemove([widget.userId])
+    });
+    
+    final targetDocRef = _firestore.collection('users').doc(widget.userId);
+    batch.update(targetDocRef, {
+      'followers': FieldValue.arrayRemove([_currentUser!.uid])
+    });
+    
+    try {
+      await batch.commit();
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to unfollow: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool isMyProfile = _auth.currentUser?.uid == widget.userId;
+    final bool isMyProfile = _currentUser?.uid == widget.userId;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("Profile"), 
-        elevation: 0,
-      ),
-      body: NestedScrollView(
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            SliverAppBar(
-              // ### PERBAIKAN DI SINI ###
-              expandedHeight: 380.0, 
-              // ### AKHIR PERBAIKAN ###
-              
-              pinned: true, 
-              elevation: 0,
-              automaticallyImplyLeading: false, 
-              backgroundColor: theme.scaffoldBackgroundColor,
-              flexibleSpace: FlexibleSpaceBar(
-                collapseMode: CollapseMode.pin,
-                background: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FutureBuilder<DocumentSnapshot>(
-                      future: _firestore.collection('users').doc(widget.userId).get(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return Container(
-                            height: 380, // Samakan dengan expandedHeight
-                            child: Center(child: CircularProgressIndicator()),
-                          );
-                        }
-                        final data = snapshot.data!.data() as Map<String, dynamic>;
-                        
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildProfileHeader(context, data, isMyProfile),
-                            _buildProfileInfo(context, data),
-                          ],
-                        );
-                      },
+    if (_currentUser == null) {
+      return Scaffold(body: Center(child: Text("Please log in to view profiles.")));
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore.collection('users').doc(_currentUser!.uid).snapshots(),
+      builder: (context, mySnapshot) {
+
+        if (!mySnapshot.hasData) {
+          return Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        
+        final myData = mySnapshot.data!.data() as Map<String, dynamic>;
+        final List<dynamic> myFollowingList = myData['following'] ?? [];
+        final bool amIFollowing = myFollowingList.contains(widget.userId);
+
+        // UI Utama
+        return Scaffold(
+          appBar: AppBar(
+            title: Text("Profile"), 
+            elevation: 0,
+          ),
+          body: NestedScrollView(
+            headerSliverBuilder: (context, innerBoxIsScrolled) {
+              return [
+                SliverAppBar(
+                  expandedHeight: 410.0, 
+                  pinned: true, 
+                  elevation: 0,
+                  automaticallyImplyLeading: false, 
+                  backgroundColor: theme.scaffoldBackgroundColor,
+                  flexibleSpace: FlexibleSpaceBar(
+                    collapseMode: CollapseMode.pin,
+                    background: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // StreamBuilder DALAM: Memantau data TARGET (profil yg dilihat)
+                        StreamBuilder<DocumentSnapshot>(
+                          stream: _firestore.collection('users').doc(widget.userId).snapshots(),
+                          builder: (context, targetSnapshot) {
+                            if (!targetSnapshot.hasData) {
+                              return Container(
+                                height: 410, 
+                                child: Center(child: CircularProgressIndicator()),
+                              );
+                            }
+                            final targetData = targetSnapshot.data!.data() as Map<String, dynamic>;
+                            
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildProfileHeader(context, targetData, isMyProfile, amIFollowing),
+                                _buildProfileInfo(context, targetData), 
+                              ],
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
+                  bottom: TabBar(
+                    controller: _tabController,
+                    tabs: [
+                      Tab(text: 'Posts'),
+                      Tab(text: 'Replies'),
+                    ],
+                    labelColor: theme.primaryColor,
+                    unselectedLabelColor: theme.hintColor,
+                    indicatorColor: theme.primaryColor,
+                  ),
                 ),
-              ),
-              bottom: TabBar(
-                controller: _tabController,
-                tabs: [
-                  Tab(text: 'Posts'),
-                  Tab(text: 'Replies'),
-                ],
-                labelColor: theme.primaryColor,
-                unselectedLabelColor: theme.hintColor,
-                indicatorColor: theme.primaryColor,
-              ),
+              ];
+            },
+            body: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildMyPosts(widget.userId),
+                _buildMyReplies(widget.userId),
+              ],
             ),
-          ];
-        },
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildMyPosts(widget.userId),
-            _buildMyReplies(widget.userId),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
   // --- Widget Header (Banner, Avatar, Tombol Follow) ---
-  Widget _buildProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
+  Widget _buildProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile, bool amIFollowing) {
+    // ... (Fungsi ini sudah benar dan tidak berubah)
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'User';
 
@@ -127,10 +190,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
             child: isMyProfile
               ? OutlinedButton(
                   onPressed: () {
-                    // Jika user mengklik profilnya sendiri dari post,
-                    // arahkan mereka ke tab Profile utama (indeks 1)
-                    // Ini memerlukan cara untuk mengakses BottomNav state,
-                    // untuk saat ini kita hanya pop
                     if(Navigator.of(context).canPop()) {
                       Navigator.of(context).pop();
                     }
@@ -142,15 +201,25 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                 )
-              : ElevatedButton(
-                  onPressed: () { /* TODO: Logika Follow */ },
-                  child: Text("Follow"), 
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: TwitterTheme.blue,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              : amIFollowing
+                ? OutlinedButton( // Tombol Unfollow
+                    onPressed: _unfollowUser,
+                    child: Text("Unfollow"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.textTheme.bodyLarge?.color,
+                      side: BorderSide(color: theme.dividerColor),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  )
+                : ElevatedButton( // Tombol Follow
+                    onPressed: _followUser,
+                    child: Text("Follow"), 
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: TwitterTheme.blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
                   ),
-                ),
           ),
 
           Positioned(
@@ -171,6 +240,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
   }
 
   // --- Widget Info (Nama, Handle, Bio, Stats) ---
+  // Fungsi ini HANYA menggunakan parameter 'data' (yaitu targetData)
   Widget _buildProfileInfo(BuildContext context, Map<String, dynamic> data) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name not set';
@@ -179,6 +249,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     final String handle = "@${email.split('@')[0]}";
     final String bio = data['bio'] ?? 'No bio set.';
     final String joinedDate = "Joined March 2020"; // Placeholder
+
+    // Ambil data list HANYA DARI 'data' (data target)
+    final List<dynamic> followingList = data['following'] ?? [];
+    final List<dynamic> followersList = data['followers'] ?? [];
+    
+    // Hitung panjang list
+    final int followingCount = followingList.length;
+    final int followersCount = followersList.length;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -199,7 +277,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
               Text(joinedDate, style: theme.textTheme.titleSmall),
             ],
           ),
-          // Padding tambahan di bawah agar tidak terlalu mepet TabBar
+          
+          SizedBox(height: 12),
+          Row(
+            children: [
+              _buildStatText(context, followingCount, "Following"),
+              SizedBox(width: 16),
+              _buildStatText(context, followersCount, "Followers"),
+            ],
+          ),
+
           SizedBox(height: 12),
         ],
       ),
@@ -207,7 +294,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
   }
 
 
-  // --- Widget Builder Tab ---
+  Widget _buildStatText(BuildContext context, int count, String label) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        SizedBox(width: 4),
+        Text(label, style: theme.textTheme.titleSmall),
+      ],
+    );
+  }
+
+
 
   Widget _buildMyPosts(String userId) {
     return StreamBuilder<QuerySnapshot>(

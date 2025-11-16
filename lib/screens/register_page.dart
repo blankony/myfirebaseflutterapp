@@ -53,6 +53,10 @@ class _RegisterPageState extends State<RegisterPage> {
           'nim': _nimController.text.trim(), 
           'bio': 'About me...', 
           'createdAt': FieldValue.serverTimestamp(),
+          // ### PERUBAHAN DI SINI ###
+          'following': [], // Tambahkan daftar following kosong
+          'followers': [], // Tambahkan daftar followers kosong
+          // ### AKHIR PERUBAHAN ###
         });
         
         await userCredential.user!.sendEmailVerification();
@@ -62,10 +66,7 @@ class _RegisterPageState extends State<RegisterPage> {
             const SnackBar(content: Text('Registration successful. Please check your email for verification.')),
           );
           
-          // ### PERBAIKAN DI SINI ###
-          // Tutup halaman ini untuk menampilkan AuthGate (layar verifikasi)
           Navigator.of(context).pop();
-          // ### AKHIR PERBAIKAN ###
         }
       }
     } on FirebaseAuthException catch (e) {
@@ -87,6 +88,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (Build method tidak berubah)
     final theme = Theme.of(context);
     
     return Scaffold(

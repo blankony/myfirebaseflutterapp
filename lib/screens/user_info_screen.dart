@@ -36,8 +36,12 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
       await _firestore.collection('users').doc(user.uid).set({
         'name': _nameController.text.trim(),
         'nim': _nimController.text.trim(), 
-        'bio': 'About me...', // Tambahkan bio default
-      }, SetOptions(merge: true)); 
+        'bio': 'About me...', 
+        // ### PERUBAHAN DI SINI ###
+        'following': [], // Tambahkan daftar following kosong
+        'followers': [], // Tambahkan daftar followers kosong
+        // ### AKHIR PERUBAHAN ###
+      }, SetOptions(merge: true)); // merge: true agar tidak menimpa data lama
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -68,6 +72,7 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (Build method tidak berubah)
     return Scaffold(
       appBar: AppBar(title: const Text('Complete Your Profile')),
       body: Padding(

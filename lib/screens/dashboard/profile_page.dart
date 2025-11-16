@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/blog_post_card.dart'; 
 import '../../widgets/comment_tile.dart'; 
 import '../../main.dart'; 
-import '../edit_profile_screen.dart'; // ### IMPOR BARU ###
+import '../edit_profile_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -18,7 +18,6 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
-  // ### Hapus _bioController dan _isEditingBio ###
   late TabController _tabController;
 
   @override
@@ -26,8 +25,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
   }
-
-  // ### Hapus _saveBio ###
 
   @override
   void dispose() {
@@ -48,8 +45,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         headerSliverBuilder: (context, innerBoxIsScrolled) {
           return [
             SliverAppBar(
-              // Setel kembali ke tinggi yang stabil
-              expandedHeight: 330.0, 
+              expandedHeight: 360.0, 
               pinned: true, 
               elevation: 0,
               backgroundColor: theme.scaffoldBackgroundColor,
@@ -62,19 +58,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 background: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Ganti ke StreamBuilder agar profil otomatis update setelah diedit
                     StreamBuilder<DocumentSnapshot>(
                       stream: _firestore.collection('users').doc(user.uid).snapshots(),
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) {
                           return Container(
-                            height: 330, 
+                            height: 360, 
                             child: Center(child: CircularProgressIndicator()),
                           );
                         }
                         final data = snapshot.data!.data() as Map<String, dynamic>;
-                        
-                        // ### Hapus logika sinkronisasi bio ###
                         
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -130,10 +123,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           Positioned(
             top: 130,
             right: 16,
-            // ### PERBARUI ONPRESSED ###
             child: OutlinedButton(
               onPressed: () {
-                // Arahkan ke halaman Edit Profile yang baru
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (context) => EditProfileScreen()),
                 );
@@ -142,7 +133,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               style: OutlinedButton.styleFrom(
                 foregroundColor: theme.textTheme.bodyLarge?.color,
                 side: BorderSide(color: theme.dividerColor),
+                // ### PERBAIKAN DI SINI ###
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                // ### AKHIR PERBAIKAN ###
               ),
             ),
           ),
@@ -166,14 +159,19 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   // --- Widget Info (Nama, Handle, Bio, Stats) ---
   Widget _buildProfileInfo(BuildContext context, User user, Map<String, dynamic> data) {
+    // ... (Fungsi ini tidak berubah dari sebelumnya)
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name not set';
     final String email = user.email ?? 'Email not found';
     final String nim = data['nim'] ?? 'NIM not set'; 
     final String handle = "@${email.split('@')[0]}";
-    final String bio = data['bio'] ?? 'No bio set.'; // Ambil bio terbaru
-    
-    final String joinedDate = "Joined March 2020"; // Placeholder
+    final String bio = data['bio'] ?? 'No bio set.';
+    final String joinedDate = "Joined March 2020"; 
+
+    final List<dynamic> followingList = data['following'] ?? [];
+    final List<dynamic> followersList = data['followers'] ?? [];
+    final int followingCount = followingList.length;
+    final int followersCount = followersList.length;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -185,9 +183,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           SizedBox(height: 4), 
           Text(nim, style: theme.textTheme.titleSmall), 
           SizedBox(height: 12),
-
-          // ### HAPUS LOGIKA TEXTFIELD ###
-          // Tampilkan bio terbaru dari data snapshot
           Text(
             bio.isEmpty ? "No bio set." : bio,
             style: theme.textTheme.bodyLarge?.copyWith(
@@ -203,14 +198,34 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               Text(joinedDate, style: theme.textTheme.titleSmall),
             ],
           ),
+
+          SizedBox(height: 12),
+          Row(
+            children: [
+              _buildStatText(context, followingCount, "Following"),
+              SizedBox(width: 16),
+              _buildStatText(context, followersCount, "Followers"),
+            ],
+          ),
         ],
       ),
     );
   }
 
+  Widget _buildStatText(BuildContext context, int count, String label) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        SizedBox(width: 4),
+        Text(label, style: theme.textTheme.titleSmall),
+      ],
+    );
+  }
+
+
   // --- Widget Builder Tab (Posts & Replies) ---
   // (Tidak berubah)
-
   Widget _buildMyPosts(User user) {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
