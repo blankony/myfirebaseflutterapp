@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:share_plus/share_plus.dart'; // <-- IMPOR BARU
 import '../screens/post_detail_screen.dart'; 
 import '../screens/user_profile_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
@@ -31,7 +32,8 @@ class BlogPostCard extends StatefulWidget {
 }
 
 class _BlogPostCardState extends State<BlogPostCard> {
-  // ... (semua fungsi logika: _toggleLike, _deletePost, dll. tetap sama)
+  // ... (semua state dan fungsi _toggleLike, _deletePost, dll. tetap sama)
+  // ...
   final TextEditingController _editController = TextEditingController();
   late bool _isLiked;
   late int _likeCount;
@@ -60,6 +62,8 @@ class _BlogPostCardState extends State<BlogPostCard> {
   Future<void> _toggleLike() async {
     final user = _auth.currentUser;
     if (user == null) return;
+    
+    // Optimistic update
     final bool originalIsLiked = _isLiked;
     final int originalLikeCount = _likeCount;
     setState(() {
@@ -70,28 +74,38 @@ class _BlogPostCardState extends State<BlogPostCard> {
         _likeCount--;
       }
     });
+
     try {
-      Map<String, dynamic> likes = Map<String, dynamic>.from(widget.postData['likes'] ?? {});
+      // Ambil data 'likes' terbaru dari server
+      final postDoc = await _firestore.collection('posts').doc(widget.postId).get();
+      Map<String, dynamic> likes = Map<String, dynamic>.from(postDoc.data()?['likes'] ?? {});
+      
+      // Lakukan perubahan
       if (likes.containsKey(user.uid)) {
         likes.remove(user.uid); 
       } else {
         likes[user.uid] = true; 
       }
+      
+      // Kirim update ke server
       await _firestore.collection('posts').doc(widget.postId).update({'likes': likes});
+
     } catch (e) {
+      // Jika gagal, kembalikan ke state semula
       setState(() {
         _isLiked = originalIsLiked;
         _likeCount = originalLikeCount;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update like: $e')),
+          SnackBar(content: Text('Failed to update like: ${e.toString()}')),
         );
       }
     }
   }
 
   Future<void> _deletePost() async {
+    // ... (Fungsi ini tidak berubah)
     final didConfirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -117,6 +131,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   Future<void> _showEditDialog() async {
+    // ... (Fungsi ini tidak berubah)
     _editController.text = widget.postData['text'] ?? '';
     await showDialog(
       context: context,
@@ -144,6 +159,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   Future<void> _submitEdit() async {
+    // ... (Fungsi ini tidak berubah)
     try {
       await _firestore.collection('posts').doc(widget.postId).update({
         'text': _editController.text,
@@ -160,6 +176,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   void _navigateToDetail() {
+    // ... (Fungsi ini tidak berubah)
     if (!widget.isClickable) return; 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -172,6 +189,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   void _navigateToUserProfile() {
+    // ... (Fungsi ini tidak berubah)
     final postUserId = widget.postData['userId'];
     if (postUserId == null) return;
     if (postUserId == _auth.currentUser?.uid && !widget.isClickable) return;
@@ -183,9 +201,35 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   String _formatTimestamp(Timestamp? timestamp) {
+    // ... (Fungsi ini tidak berubah)
     if (timestamp == null) return "just now";
     return timeago.format(timestamp.toDate(), locale: 'en_short');
   }
+
+  // ### FUNGSI BARU UNTUK SHARE ###
+  Future<void> _sharePost() async {
+    // Ambil teks dan nama dari postData
+    final String text = widget.postData['text'] ?? 'Check out this post!';
+    final String userName = widget.postData['userName'] ?? 'A user';
+    
+    // Format konten yang akan di-share
+    final String shareContent = '"$text"\n- $userName';
+
+    try {
+      // Panggil fungsi share dari plugin
+      // Ini akan membuka 'share sheet' bawaan OS
+      await Share.share(
+        shareContent,
+        subject: 'Post by $userName', // Subject untuk email
+      );
+    } catch (e) {
+      // Tangani error jika gagal (jarang terjadi)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to share: $e')),
+      );
+    }
+  }
+  // ### AKHIR FUNGSI BARU ###
 
   @override
   void dispose() {
@@ -195,7 +239,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
 
   @override
   Widget build(BuildContext context) {
-    // ### PERUBAHAN: Kembalikan 'userName' dari postData ###
+    // ... (Build method tidak berubah)
     final String userName = widget.postData['userName'] ?? 'Anonymous User';
     final String text = widget.postData['text'] ?? '';
     final Timestamp? timestamp = widget.postData['timestamp'] as Timestamp?;
@@ -209,7 +253,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
       child: Container(
         color: theme.cardColor, 
         padding: const EdgeInsets.all(12.0),
-        // ### PERUBAHAN: Hapus FutureBuilder, kembali ke Row ###
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -231,7 +274,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
                         child: GestureDetector(
                           onTap: _navigateToUserProfile,
                           child: Text(
-                            // ### PERUBAHAN: Gunakan 'userName' lagi ###
                             userName,
                             style: theme.textTheme.titleMedium,
                             overflow: TextOverflow.ellipsis,
@@ -273,8 +315,8 @@ class _BlogPostCardState extends State<BlogPostCard> {
     );
   }
 
-  // ... (Sisa fungsi _build... tidak berubah)
   Widget _buildOptionsButton() {
+    // ... (Fungsi ini tidak berubah)
     return InkWell(
       onTap: () {
         showModalBottomSheet(
@@ -334,18 +376,22 @@ class _BlogPostCardState extends State<BlogPostCard> {
             color: isLiked ? Colors.pink : null,
             onTap: _toggleLike,
           ),
+          // ### PERUBAHAN DI SINI ###
+          // Panggil fungsi _sharePost yang baru
           _buildActionButton(
             context,
             icon: Icons.share_outlined,
             text: null,
-            onTap: () { /* TODO: Share Logic */ },
+            onTap: _sharePost, // <--- UBAH DI SINI
           ),
+          // ### AKHIR PERUBAHAN ###
         ],
       ),
     );
   }
 
   Widget _buildStatsRow(int commentCount, int likeCount) {
+    // ... (Fungsi ini tidak berubah)
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 12.0, bottom: 12.0),
@@ -364,6 +410,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   Widget _buildActionButton(BuildContext context, {required IconData icon, String? text, required VoidCallback onTap, Color? color}) {
+    // ... (Fungsi ini tidak berubah)
     final theme = Theme.of(context);
     final iconColor = color ?? theme.textTheme.titleSmall?.color;
     return InkWell(
