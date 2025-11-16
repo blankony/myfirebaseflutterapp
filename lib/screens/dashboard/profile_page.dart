@@ -23,7 +23,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -85,6 +85,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 controller: _tabController,
                 tabs: [
                   Tab(text: 'Posts'),
+                  Tab(text: 'Reposts'), 
                   Tab(text: 'Replies'),
                 ],
                 labelColor: theme.primaryColor,
@@ -98,6 +99,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           controller: _tabController,
           children: [
             _buildMyPosts(user),
+            _buildMyReposts(user), 
             _buildMyReplies(user),
           ],
         ),
@@ -105,7 +107,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- Widget Header (Banner, Avatar, Tombol Edit) ---
   Widget _buildProfileHeader(BuildContext context, User user, Map<String, dynamic> data) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'User';
@@ -133,9 +134,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               style: OutlinedButton.styleFrom(
                 foregroundColor: theme.textTheme.bodyLarge?.color,
                 side: BorderSide(color: theme.dividerColor),
-                // ### PERBAIKAN DI SINI ###
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                // ### AKHIR PERBAIKAN ###
               ),
             ),
           ),
@@ -157,9 +156,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- Widget Info (Nama, Handle, Bio, Stats) ---
   Widget _buildProfileInfo(BuildContext context, User user, Map<String, dynamic> data) {
-    // ... (Fungsi ini tidak berubah dari sebelumnya)
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name not set';
     final String email = user.email ?? 'Email not found';
@@ -224,8 +221,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
 
-  // --- Widget Builder Tab (Posts & Replies) ---
-  // (Tidak berubah)
   Widget _buildMyPosts(User user) {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
@@ -291,6 +286,57 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               postId: originalPostId, 
               isOwner: true, 
               showPostContext: true, 
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMyReposts(User user) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('posts')
+          .where('repostedBy', arrayContains: user.uid)
+          .orderBy('timestamp', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+        
+        if (snapshot.hasError) {
+          if (snapshot.error.toString().contains('firestore/failed-precondition') || 
+              snapshot.error.toString().contains('requires an index')) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  'Loading reposts failed. Please check Firestore index settings.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            );
+          }
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+        
+        if (snapshot.data!.docs.isEmpty) {
+          return Center(child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text('You have not reposted anything yet.'),
+          ));
+        }
+
+        return ListView.separated(
+          itemCount: snapshot.data!.docs.length,
+          separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
+          itemBuilder: (context, index) {
+            final doc = snapshot.data!.docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            return BlogPostCard(
+              postId: doc.id,
+              postData: data,
+              isOwner: data['userId'] == user.uid,
             );
           },
         );

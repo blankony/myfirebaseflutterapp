@@ -19,14 +19,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _isLoading = false;
   bool _canPost = false; 
 
-  // ### PERUBAHAN: Kembalikan data user ###
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
 
   @override
   void initState() {
     super.initState();
-    // ### PERUBAHAN: Kembalikan _loadUserData() ###
     _loadUserData(); 
     _postController.addListener(() {
       setState(() {
@@ -35,7 +33,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
-  // ### PERUBAHAN: Kembalikan fungsi _loadUserData() ###
   Future<void> _loadUserData() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -64,12 +61,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         'text': _postController.text,
         'timestamp': FieldValue.serverTimestamp(),
         'userId': user.uid,
-        // ### PERUBAHAN: Kembalikan 'userName' dan 'userEmail' ###
         'userName': _userName,
         'userEmail': _userEmail, 
         'likes': {},
         'commentCount': 0,
-        'retweetCount': 0,
+        'retweetCount': 0, 
+        'repostedBy': [],
       });
 
       if (context.mounted) {
