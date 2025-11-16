@@ -31,8 +31,7 @@ class BlogPostCard extends StatefulWidget {
 }
 
 class _BlogPostCardState extends State<BlogPostCard> {
-  // ... (semua fungsi logika: _toggleLike, _deletePost, _showEditDialog, dll. tetap sama)
-  // ...
+  // ... (semua fungsi logika: _toggleLike, _deletePost, dll. tetap sama)
   final TextEditingController _editController = TextEditingController();
   late bool _isLiked;
   late int _likeCount;
@@ -196,6 +195,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
 
   @override
   Widget build(BuildContext context) {
+    // ### PERUBAHAN: Kembalikan 'userName' dari postData ###
     final String userName = widget.postData['userName'] ?? 'Anonymous User';
     final String text = widget.postData['text'] ?? '';
     final Timestamp? timestamp = widget.postData['timestamp'] as Timestamp?;
@@ -209,6 +209,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
       child: Container(
         color: theme.cardColor, 
         padding: const EdgeInsets.all(12.0),
+        // ### PERUBAHAN: Hapus FutureBuilder, kembali ke Row ###
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -224,14 +225,13 @@ class _BlogPostCardState extends State<BlogPostCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ### PERUBAHAN DI SINI ###
                   Row(
                     children: [
-                      // Nama diberi prioritas
                       Expanded(
                         child: GestureDetector(
                           onTap: _navigateToUserProfile,
                           child: Text(
+                            // ### PERUBAHAN: Gunakan 'userName' lagi ###
                             userName,
                             style: theme.textTheme.titleMedium,
                             overflow: TextOverflow.ellipsis,
@@ -239,19 +239,15 @@ class _BlogPostCardState extends State<BlogPostCard> {
                           ),
                         ),
                       ),
-                      // Spasi
                       SizedBox(width: 8),
-                      // Waktu (handle disembunyikan)
                       Text(
                         _formatTimestamp(timestamp),
                         style: theme.textTheme.titleSmall,
                       ),
-                      // Tombol Opsi
                       if (widget.isOwner)
                         _buildOptionsButton(),
                     ],
                   ),
-                  // ### AKHIR PERUBAHAN ###
                   
                   SizedBox(height: 4),
                   Text(
@@ -277,8 +273,8 @@ class _BlogPostCardState extends State<BlogPostCard> {
     );
   }
 
+  // ... (Sisa fungsi _build... tidak berubah)
   Widget _buildOptionsButton() {
-    // ... (Fungsi ini tidak berubah)
     return InkWell(
       onTap: () {
         showModalBottomSheet(
@@ -314,7 +310,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   Widget _buildActionRow(int commentCount, int retweetCount, int likeCount, bool isLiked) {
-    // ... (Fungsi ini tidak berubah)
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
       child: Row(
@@ -351,7 +346,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   Widget _buildStatsRow(int commentCount, int likeCount) {
-    // ... (Fungsi ini tidak berubah)
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 12.0, bottom: 12.0),
@@ -370,7 +364,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
   }
 
   Widget _buildActionButton(BuildContext context, {required IconData icon, String? text, required VoidCallback onTap, Color? color}) {
-    // ... (Fungsi ini tidak berubah)
     final theme = Theme.of(context);
     final iconColor = color ?? theme.textTheme.titleSmall?.color;
     return InkWell(

@@ -31,6 +31,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       return;
     }
 
+    // ### PERUBAHAN: Kembalikan logika 'userName' dan 'userEmail' ###
     String userName = "Anonymous";
     String userEmail = "anonymous@mail.com";
     try {
@@ -47,9 +48,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       'text': _commentController.text,
       'timestamp': FieldValue.serverTimestamp(),
       'userId': _currentUser!.uid,
+      'originalPostId': widget.postId,
+      // ### PERUBAHAN: Kembalikan 'userName' dan 'userEmail' ###
       'userName': userName,
       'userEmail': userEmail,
-      'originalPostId': widget.postId,
     };
 
     try {
@@ -171,8 +173,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       padding: EdgeInsets.only(
         left: 16.0, 
         right: 8.0, 
-        // ### PERBAIKAN DI SINI ###
-        // Hapus 'viewInsets.bottom' dan ganti dengan 'padding.bottom' (Safe Area)
         bottom: MediaQuery.of(context).padding.bottom + 8.0, 
         top: 8.0,
       ),

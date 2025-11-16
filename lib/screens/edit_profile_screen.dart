@@ -17,16 +17,17 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
+  // ... (Variabel tidak berubah)
   final User? _user = _auth.currentUser;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   bool _isLoading = false;
-
   bool _isEmailVerified = false;
   Timer? _verificationTimer;
 
   @override
   void initState() {
+    // ... (initState tidak berubah)
     super.initState();
     if (_user != null) {
       _isEmailVerified = _user!.emailVerified;
@@ -40,7 +41,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // --- Fungsi Verifikasi Email ---
+  // --- Fungsi Verifikasi Email (tidak berubah) ---
   Future<void> _checkEmailVerification(Timer timer) async {
     await _user?.reload();
     final freshUser = _auth.currentUser;
@@ -61,9 +62,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
       }
     } catch (e) {
-      // ### PERBAIKAN DI SINI ###
-      // Tangani error 'too-many-requests' secara spesifik
-      String errorMessage = 'Failed to send email: $e'; // Pesan default
+      String errorMessage = 'Failed to send email: $e'; 
       if (e is FirebaseAuthException && e.code == 'too-many-requests') {
         errorMessage = 'Please wait for a few moments to resend verification...';
       }
@@ -73,13 +72,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           SnackBar(content: Text(errorMessage)),
         );
       }
-      // ### AKHIR PERBAIKAN ###
     }
   }
   // --- Akhir Fungsi Verifikasi Email ---
 
 
   Future<void> _loadCurrentData() async {
+    // ... (loadCurrentData tidak berubah)
     if (_user == null) return;
     final userDoc = await _firestore.collection('users').doc(_user!.uid).get();
     if (userDoc.exists) {
@@ -89,6 +88,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  // ### PERUBAHAN DI FUNGSI INI ###
   Future<void> _saveChanges() async {
     if (_user == null || _nameController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -97,11 +97,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return;
     }
     setState(() { _isLoading = true; });
+
+    final String newName = _nameController.text.trim();
+    final String newBio = _bioController.text.trim();
+
     try {
+      // 1. Update dokumen profil utama
       await _firestore.collection('users').doc(_user!.uid).update({
-        'name': _nameController.text.trim(),
-        'bio': _bioController.text.trim(),
+        'name': newName,
+        'bio': newBio,
       });
+
+      // 2. Update semua postingan dan komentar terkait
+      await _updateAllUsernames(_user!.uid, newName);
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Profile updated successfully!')),
@@ -109,9 +118,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         Navigator.of(context).pop();
       }
     } catch (e) {
+      // PERUBAHAN DI SINI:
+      // Ini sekarang akan menangkap error dari _updateAllUsernames
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update profile: $e')),
+          SnackBar(
+            // Tampilkan error yang lebih jelas
+            content: Text('Update failed. Error: ${e.toString()}'),
+            duration: Duration(seconds: 5), // Tampilkan lebih lama
+          ),
         );
       }
     } finally {
@@ -121,8 +136,45 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  // ### PERUBAHAN DI FUNGSI INI ###
+  Future<void> _updateAllUsernames(String userId, String newName) async {
+    final writeBatch = _firestore.batch();
+    
+    // 1. Cari semua POSTS oleh user ini
+    final postsQuery = _firestore
+        .collection('posts')
+        .where('userId', isEqualTo: userId);
+    
+    final postsSnapshot = await postsQuery.get();
+    for (final doc in postsSnapshot.docs) {
+      writeBatch.update(doc.reference, {'userName': newName});
+    }
+
+    // 2. Cari semua COMMENTS oleh user ini (menggunakan collectionGroup)
+    final commentsQuery = _firestore
+        .collectionGroup('comments')
+        .where('userId', isEqualTo: userId);
+        
+    final commentsSnapshot = await commentsQuery.get();
+    for (final doc in commentsSnapshot.docs) {
+      writeBatch.update(doc.reference, {'userName': newName});
+    }
+    
+    // 3. Jalankan semua update sekaligus
+    try {
+      await writeBatch.commit();
+    } catch (e) {
+      // PERUBAHAN DI SINI:
+      // Lempar error agar bisa ditangkap oleh _saveChanges
+      print('Error updating denormalized usernames: $e');
+      throw Exception('Failed to update old posts/comments: $e');
+    }
+  }
+
+
   @override
   void dispose() {
+    // ... (dispose tidak berubah)
     _verificationTimer?.cancel(); 
     _nameController.dispose();
     _bioController.dispose();
@@ -131,6 +183,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (build method tidak berubah)
     final theme = Theme.of(context);
     
     return Scaffold(
@@ -206,6 +259,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildEmailStatus(ThemeData theme) {
+    // ... (Fungsi _buildEmailStatus tidak berubah)
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -255,6 +309,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required String title,
     required VoidCallback onTap,
   }) {
+    // ... (Fungsi _buildSettingsTile tidak berubah)
     final theme = Theme.of(context);
     return ListTile(
       leading: Icon(icon, color: theme.primaryColor),

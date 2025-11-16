@@ -31,8 +31,7 @@ class CommentTile extends StatefulWidget {
 }
 
 class _CommentTileState extends State<CommentTile> {
-  // ... (semua fungsi logika: _deleteComment, _showEditDialog, _submitEdit, dll. tetap sama)
-  // ...
+  // ... (semua fungsi logika: _deleteComment, _showEditDialog, dll. tetap sama)
   final TextEditingController _editController = TextEditingController();
 
   Future<void> _deleteComment() async {
@@ -162,6 +161,7 @@ class _CommentTileState extends State<CommentTile> {
     final data = widget.commentData;
     final theme = Theme.of(context);
 
+    // ### PERUBAHAN: Kembalikan 'userName' dari data ###
     final String userName = data['userName'] ?? 'Anonymous';
     final String text = data['text'] ?? '';
     final Timestamp? timestamp = data['timestamp'] as Timestamp?;
@@ -171,6 +171,7 @@ class _CommentTileState extends State<CommentTile> {
       child: Container(
         color: theme.cardColor,
         padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        // ### PERUBAHAN: Hapus FutureBuilder, kembali ke Column ###
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -198,14 +199,13 @@ class _CommentTileState extends State<CommentTile> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ### PERUBAHAN DI SINI ###
                       Row(
                         children: [
-                          // Nama diberi prioritas
                           Expanded(
                             child: GestureDetector(
                               onTap: _navigateToUserProfile,
                               child: Text(
+                                // ### PERUBAHAN: Gunakan 'userName' lagi ###
                                 userName,
                                 style: theme.textTheme.titleMedium,
                                 overflow: TextOverflow.ellipsis,
@@ -213,19 +213,15 @@ class _CommentTileState extends State<CommentTile> {
                               ),
                             ),
                           ),
-                          // Spasi
                           SizedBox(width: 8),
-                          // Waktu (handle disembunyikan)
                           Text(
                             _formatTimestamp(timestamp),
                             style: theme.textTheme.titleSmall,
                           ),
-                          // Tombol Opsi
                           if (widget.isOwner)
                             _buildOptionsButton(),
                         ],
                       ),
-                      // ### AKHIR PERUBAHAN ###
                       SizedBox(height: 4),
                       Text(text, style: theme.textTheme.bodyLarge),
                     ],

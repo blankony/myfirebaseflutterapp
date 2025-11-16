@@ -17,17 +17,17 @@ class CreatePostScreen extends StatefulWidget {
 class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _postController = TextEditingController();
   bool _isLoading = false;
-  bool _canPost = false; // Untuk mengaktifkan/menonaktifkan tombol Post
+  bool _canPost = false; 
 
-  // Data user yang akan digunakan untuk posting
+  // ### PERUBAHAN: Kembalikan data user ###
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
-    // Dengarkan perubahan pada text field
+    // ### PERUBAHAN: Kembalikan _loadUserData() ###
+    _loadUserData(); 
     _postController.addListener(() {
       setState(() {
         _canPost = _postController.text.trim().isNotEmpty;
@@ -35,7 +35,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
-  // Ambil data user saat halaman dibuka
+  // ### PERUBAHAN: Kembalikan fungsi _loadUserData() ###
   Future<void> _loadUserData() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -44,7 +44,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
         _userName = userDoc.get('name') ?? _userName;
-        _userEmail = user.email ?? _userEmail;
+        _userEmail = user.email ?? _userEmail; 
       }
     } catch (e) {
       // Gagal mengambil data, gunakan default
@@ -52,7 +52,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<void> _submitPost() async {
-    if (!_canPost || _isLoading) return; // Jangan post jika kosong atau sedang loading
+    if (!_canPost || _isLoading) return; 
 
     final user = _auth.currentUser;
     if (user == null) return;
@@ -64,15 +64,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         'text': _postController.text,
         'timestamp': FieldValue.serverTimestamp(),
         'userId': user.uid,
+        // ### PERUBAHAN: Kembalikan 'userName' dan 'userEmail' ###
         'userName': _userName,
-        'userEmail': _userEmail,
+        'userEmail': _userEmail, 
         'likes': {},
         'commentCount': 0,
         'retweetCount': 0,
       });
 
       if (context.mounted) {
-        Navigator.of(context).pop(); // Tutup halaman jika sukses
+        Navigator.of(context).pop(); 
       }
     } catch (e) {
       if (context.mounted) {
@@ -104,11 +105,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
-          // Tombol Post
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: ElevatedButton(
-              onPressed: _canPost && !_isLoading ? _submitPost : null, // Nonaktif jika tidak bisa post
+              onPressed: _canPost && !_isLoading ? _submitPost : null, 
               child: _isLoading 
                   ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : Text('Post'),
@@ -129,18 +129,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Avatar User
             CircleAvatar(
               radius: 24,
-              child: Icon(Icons.person), // TODO: Ganti dengan foto profil
+              child: Icon(Icons.person), 
             ),
             SizedBox(width: 16),
-            // Text Input
             Expanded(
               child: TextField(
                 controller: _postController,
-                autofocus: true, // Langsung fokus saat halaman terbuka
-                maxLines: null, // Izinkan multiline
+                autofocus: true, 
+                maxLines: null, 
                 style: TextStyle(fontSize: 18),
                 decoration: InputDecoration(
                   hintText: "What's happening?",
@@ -155,7 +153,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ],
         ),
       ),
-      // TODO: Tambahkan toolbar di atas keyboard jika perlu
     );
   }
 }
