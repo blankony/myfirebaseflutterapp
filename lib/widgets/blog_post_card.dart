@@ -383,33 +383,41 @@ class _BlogPostCardState extends State<BlogPostCard> {
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        // mainAxisAlignment: MainAxisAlignment.spaceBetween, // <--- HAPUS INI
         children: [
-          _buildActionButton(
-            context,
-            icon: Icons.chat_bubble_outline,
-            text: commentCount.toString(),
-            onTap: _navigateToDetail,
+          Expanded( // <-- TAMBAHKAN WIDGET INI
+            child: _buildActionButton(
+              context,
+              icon: Icons.chat_bubble_outline,
+              text: commentCount.toString(),
+              onTap: _navigateToDetail,
+            ),
           ),
-          _buildActionButton(
-            context,
-            icon: Icons.repeat,
-            text: repostCount.toString(),
-            color: isReposted ? Colors.green : null, 
-            onTap: _toggleRepost, 
+          Expanded( // <-- TAMBAHKAN WIDGET INI
+            child: _buildActionButton(
+              context,
+              icon: Icons.repeat,
+              text: repostCount.toString(),
+              color: isReposted ? Colors.green : null, 
+              onTap: _toggleRepost, 
+            ),
           ),
-          _buildActionButton(
-            context,
-            icon: isLiked ? Icons.favorite : Icons.favorite_border,
-            text: likeCount.toString(),
-            color: isLiked ? Colors.pink : null,
-            onTap: _toggleLike,
+          Expanded( // <-- TAMBAHKAN WIDGET INI
+            child: _buildActionButton(
+              context,
+              icon: isLiked ? Icons.favorite : Icons.favorite_border,
+              text: likeCount.toString(),
+              color: isLiked ? Colors.pink : null,
+              onTap: _toggleLike,
+            ),
           ),
-          _buildActionButton(
-            context,
-            icon: Icons.share_outlined,
-            text: null,
-            onTap: _sharePost,
+          Expanded( // <-- TAMBAHKAN WIDGET INI
+            child: _buildActionButton(
+              context,
+              icon: Icons.share_outlined,
+              text: null,
+              onTap: _sharePost,
+            ),
           ),
         ],
       ),
@@ -439,19 +447,26 @@ class _BlogPostCardState extends State<BlogPostCard> {
     final iconColor = color ?? theme.textTheme.titleSmall?.color;
     return InkWell(
       onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, color: iconColor, size: 20),
-          if (text != null && text != "0")
-            Padding(
-              padding: const EdgeInsets.only(left: 4.0),
-              child: Text(
-                text,
-                style: theme.textTheme.titleSmall?.copyWith(color: iconColor),
+      // ### PERUBAHAN DI SINI ###
+      // Bungkus Row dengan Center agar ikon berada di tengah 'Expanded'
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min, // Agar Row tidak mengambil spasi penuh
+          mainAxisAlignment: MainAxisAlignment.center, // Sejajarkan ikon & teks di tengah
+          children: [
+            Icon(icon, color: iconColor, size: 20),
+            if (text != null && text != "0")
+              Padding(
+                padding: const EdgeInsets.only(left: 4.0),
+                child: Text(
+                  text,
+                  style: theme.textTheme.titleSmall?.copyWith(color: iconColor),
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
+      // ### AKHIR PERUBAHAN ###
     );
   }
 }
