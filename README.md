@@ -51,9 +51,8 @@ Firebase configuration is required before running the application.
 ### Create a Firebase Project
 - Create a new project in the Firebase Console.
 
-### Add Android App
-- Package name: `com.example.myfirebaseflutterapp`  
-- Place `google-services.json` inside `android/app/`.
+### Add FlutterApp
+- Follow the setup guide
 
 ### Enable Services
 - Authentication → Enable Email/Password  
