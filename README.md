@@ -24,19 +24,19 @@ A Flutter-based social platform for the PNJ community. Backed by Firebase for au
 | <img src="screenshots/landing.png" width="250"/> | <img src="screenshots/login.png" width="250"/> | <img src="screenshots/register.png" width="250"/> |
 
 ### Home & Profile
-| Home | Profile |
-|------|---------|
-| <img src="screenshots/home.png" width="250"/> | <img src="screenshots/profile.png" width="250"/> |
+| Home | Profile | Others Profile |
+|------|--------|-----------------|
+| <img src="screenshots/home.png" width="250"/> | <img src="screenshots/profile.png" width="250"/> | <img src="screenshots/others.png" width="250"/> |
 
 ### Posting & Interacting
 | Post | Reply | Like |
 |------|--------|------|
 | <img src="screenshots/post.png" width="250"/> | <img src="screenshots/reply.png" width="250"/> | <img src="screenshots/repost_like.png" width="250"/> |
 
-### Edit Profile
-| Edit Profile |
-|--------------|
-| <img src="screenshots/edit_profile.png" width="250"/> |
+### Settings
+| Settings | Edit Profile | About |
+|----------|--------------|-------|
+| <img src="screenshots/settings.png" width="250"/> | <img src="screenshots/edit_profile.png" width="250"/> | <img src="screenshots/about.png" width="250"/> |
 
 ---
 
@@ -51,9 +51,8 @@ Firebase configuration is required before running the application.
 ### Create a Firebase Project
 - Create a new project in the Firebase Console.
 
-### Add Android App
-- Package name: `com.example.myfirebaseflutterapp`  
-- Place `google-services.json` inside `android/app/`.
+### Add FlutterApp
+- Follow the setup guide
 
 ### Enable Services
 - Authentication → Enable Email/Password  
