@@ -35,9 +35,9 @@ class _NotificationSheetState extends State<NotificationSheet> {
         .doc(_currentUser!.uid)
         .collection('notifications')
         .where('isRead', isEqualTo: false);
-
+    
     final notifSnapshot = await notifQuery.get();
-
+    
     final batch = _firestore.batch();
     for (final doc in notifSnapshot.docs) {
       batch.update(doc.reference, {'isRead': true});
@@ -54,7 +54,7 @@ class _NotificationSheetState extends State<NotificationSheet> {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       padding: EdgeInsets.only(top: 16),
       child: Column(
@@ -68,7 +68,10 @@ class _NotificationSheetState extends State<NotificationSheet> {
             ),
           ),
           SizedBox(height: 16),
-          Text("Notifications", style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            "Notifications",
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           SizedBox(height: 8),
           Divider(height: 1),
           Expanded(
@@ -78,7 +81,7 @@ class _NotificationSheetState extends State<NotificationSheet> {
                   .doc(_currentUser!.uid)
                   .collection('notifications')
                   .orderBy('timestamp', descending: true)
-                  .limit(50)
+                  .limit(50) 
                   .snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
@@ -94,12 +97,10 @@ class _NotificationSheetState extends State<NotificationSheet> {
                 }
 
                 return ListView.builder(
-                  controller: widget.scrollController,
+                  controller: widget.scrollController, 
                   itemCount: snapshot.data!.docs.length,
                   itemBuilder: (context, index) {
-                    final data =
-                        snapshot.data!.docs[index].data()
-                            as Map<String, dynamic>;
+                    final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
                     return _NotificationTile(notificationData: data);
                   },
                 );
@@ -114,7 +115,7 @@ class _NotificationSheetState extends State<NotificationSheet> {
 
 class _NotificationTile extends StatelessWidget {
   final Map<String, dynamic> notificationData;
-
+  
   const _NotificationTile({required this.notificationData});
 
   Future<DocumentSnapshot> _getSenderData(String senderId) {
@@ -123,22 +124,17 @@ class _NotificationTile extends StatelessWidget {
 
   void _navigateToNotification(BuildContext context) {
     final String type = notificationData['type'];
-
-    Navigator.of(context).pop();
+    
+    Navigator.of(context).pop(); 
 
     if (type == 'follow') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) =>
-              UserProfileScreen(userId: notificationData['senderId']),
-        ),
-      );
-    } else if (type == 'like' || type == 'repost') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PostDetailScreen(postId: notificationData['postId']),
-        ),
-      );
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => UserProfileScreen(userId: notificationData['senderId']),
+      ));
+    } else if (type == 'like' || type == 'repost' || type == 'comment') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PostDetailScreen(postId: notificationData['postId']),
+      ));
     }
   }
 
@@ -152,7 +148,7 @@ class _NotificationTile extends StatelessWidget {
     final String type = notificationData['type'];
     final String senderId = notificationData['senderId'];
     final Timestamp? timestamp = notificationData['timestamp'];
-
+    
     IconData iconData;
     Color iconColor;
 
@@ -168,6 +164,10 @@ class _NotificationTile extends StatelessWidget {
       case 'repost':
         iconData = Icons.repeat;
         iconColor = Colors.green;
+        break;
+      case 'comment':
+        iconData = Icons.chat_bubble;
+        iconColor = Colors.grey; 
         break;
       default:
         iconData = Icons.notifications;
@@ -186,11 +186,11 @@ class _NotificationTile extends StatelessWidget {
             senderInitial = senderName[0].toUpperCase();
           }
         }
-
+        
         String title = '';
         String subtitle = '';
 
-        if (type == 'follow') {
+        if(type == 'follow') {
           title = '$senderName started following you';
         } else if (type == 'like') {
           title = '$senderName liked your post';
@@ -198,12 +198,17 @@ class _NotificationTile extends StatelessWidget {
         } else if (type == 'repost') {
           title = '$senderName reposted your post';
           subtitle = notificationData['postTextSnippet'] ?? '';
+        } else if (type == 'comment') {
+          title = '$senderName replied to your post';
+          subtitle = notificationData['postTextSnippet'] ?? '';
         }
 
         return ListTile(
           leading: Stack(
             children: [
-              CircleAvatar(child: Text(senderInitial)),
+              CircleAvatar(
+                child: Text(senderInitial),
+              ),
               Positioned(
                 bottom: 0,
                 right: 0,
@@ -212,21 +217,16 @@ class _NotificationTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: iconColor,
                     shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      width: 2,
-                    ),
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)
                   ),
                   child: Icon(iconData, size: 12, color: Colors.white),
                 ),
-              ),
+              )
             ],
           ),
           title: Text(title, style: TextStyle(fontWeight: FontWeight.bold)),
           subtitle: Text(
-            subtitle.isNotEmpty
-                ? '$subtitle\n${_formatTimestamp(timestamp)}'
-                : _formatTimestamp(timestamp),
+            subtitle.isNotEmpty ? '$subtitle\n${_formatTimestamp(timestamp)}' : _formatTimestamp(timestamp),
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
           ),

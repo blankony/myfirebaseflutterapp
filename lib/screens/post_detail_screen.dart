@@ -64,7 +64,40 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       writeBatch.update(postDocRef, {
         'commentCount': FieldValue.increment(1),
       });
+
       await writeBatch.commit();
+
+      // ### PERUBAHAN DI SINI: KIRIM NOTIFIKASI ###
+      
+      // Ambil ID pemilik postingan. Kita gunakan 'widget.initialPostData'
+      // Ini mengasumsikan 'initialPostData' selalu ada saat membuka detail
+      final String? postOwnerId = widget.initialPostData?['userId'];
+      
+      // Kirim notifikasi HANYA jika pengomentar bukan pemilik postingan
+      if (postOwnerId != null && postOwnerId != _currentUser!.uid) {
+        
+        // Buat cuplikan komentar
+        String commentSnippet = commentData['text'] as String;
+        if (commentSnippet.length > 50) {
+          commentSnippet = commentSnippet.substring(0, 50) + '...';
+        }
+        
+        // Buat dokumen notifikasi baru
+        _firestore
+            .collection('users')
+            .doc(postOwnerId) // Notifikasi untuk PEMILIK postingan
+            .collection('notifications')
+            .add({
+          'type': 'comment', // Tipe baru: 'comment'
+          'senderId': _currentUser!.uid,
+          'postId': widget.postId,
+          'postTextSnippet': commentSnippet, // Cuplikan dari komentar
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
+      }
+      // ### AKHIR PERUBAHAN ###
+
       _commentController.clear();
       FocusScope.of(context).unfocus();
     } catch (e) {
