@@ -84,16 +84,30 @@ class _BlogPostCardState extends State<BlogPostCard> {
     });
 
     try {
-      final postDoc = await _firestore.collection('posts').doc(widget.postId).get();
+      final postDocRef = _firestore.collection('posts').doc(widget.postId);
+      final postDoc = await postDocRef.get();
       Map<String, dynamic> likes = Map<String, dynamic>.from(postDoc.data()?['likes'] ?? {});
       
-      if (likes.containsKey(user.uid)) {
-        likes.remove(user.uid); 
-      } else {
+      final postOwnerId = widget.postData['userId'];
+      final bool isLiking = !likes.containsKey(user.uid);
+
+      if (isLiking) {
         likes[user.uid] = true; 
+        
+        if (user.uid != postOwnerId) {
+          _sendNotification(
+            ownerId: postOwnerId,
+            senderId: user.uid,
+            type: 'like',
+            postId: widget.postId,
+          );
+        }
+
+      } else {
+        likes.remove(user.uid); 
       }
       
-      await _firestore.collection('posts').doc(widget.postId).update({'likes': likes});
+      await postDocRef.update({'likes': likes});
 
     } catch (e) {
       setState(() {
@@ -124,16 +138,30 @@ class _BlogPostCardState extends State<BlogPostCard> {
     });
 
     try {
-      final postDoc = await _firestore.collection('posts').doc(widget.postId).get();
+      final postDocRef = _firestore.collection('posts').doc(widget.postId);
+      final postDoc = await postDocRef.get();
       List<dynamic> repostedBy = List<dynamic>.from(postDoc.data()?['repostedBy'] ?? []);
       
-      if (repostedBy.contains(user.uid)) {
-        repostedBy.remove(user.uid); // Un-repost
+      final postOwnerId = widget.postData['userId'];
+      final bool isReposting = !repostedBy.contains(user.uid);
+
+      if (isReposting) {
+        repostedBy.add(user.uid);
+        
+        if (user.uid != postOwnerId) {
+          _sendNotification(
+            ownerId: postOwnerId,
+            senderId: user.uid,
+            type: 'repost',
+            postId: widget.postId,
+          );
+        }
+      
       } else {
-        repostedBy.add(user.uid); // Repost
+        repostedBy.remove(user.uid);
       }
       
-      await _firestore.collection('posts').doc(widget.postId).update({'repostedBy': repostedBy});
+      await postDocRef.update({'repostedBy': repostedBy});
 
     } catch (e) {
       setState(() {
@@ -146,6 +174,31 @@ class _BlogPostCardState extends State<BlogPostCard> {
         );
       }
     }
+  }
+
+  void _sendNotification({
+    required String ownerId,
+    required String senderId,
+    required String type,
+    required String postId,
+  }) {
+    String postTextSnippet = (widget.postData['text'] as String);
+    if (postTextSnippet.length > 50) {
+      postTextSnippet = postTextSnippet.substring(0, 50) + '...';
+    }
+
+    _firestore
+        .collection('users')
+        .doc(ownerId)
+        .collection('notifications')
+        .add({
+      'type': type,
+      'senderId': senderId,
+      'postId': postId,
+      'postTextSnippet': postTextSnippet,
+      'timestamp': FieldValue.serverTimestamp(),
+      'isRead': false,
+    });
   }
 
   Future<void> _deletePost() async {
@@ -383,9 +436,8 @@ class _BlogPostCardState extends State<BlogPostCard> {
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
       child: Row(
-        // mainAxisAlignment: MainAxisAlignment.spaceBetween, // <--- HAPUS INI
         children: [
-          Expanded( // <-- TAMBAHKAN WIDGET INI
+          Expanded(
             child: _buildActionButton(
               context,
               icon: Icons.chat_bubble_outline,
@@ -393,7 +445,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
               onTap: _navigateToDetail,
             ),
           ),
-          Expanded( // <-- TAMBAHKAN WIDGET INI
+          Expanded(
             child: _buildActionButton(
               context,
               icon: Icons.repeat,
@@ -402,7 +454,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
               onTap: _toggleRepost, 
             ),
           ),
-          Expanded( // <-- TAMBAHKAN WIDGET INI
+          Expanded(
             child: _buildActionButton(
               context,
               icon: isLiked ? Icons.favorite : Icons.favorite_border,
@@ -411,7 +463,7 @@ class _BlogPostCardState extends State<BlogPostCard> {
               onTap: _toggleLike,
             ),
           ),
-          Expanded( // <-- TAMBAHKAN WIDGET INI
+          Expanded(
             child: _buildActionButton(
               context,
               icon: Icons.share_outlined,
@@ -447,12 +499,10 @@ class _BlogPostCardState extends State<BlogPostCard> {
     final iconColor = color ?? theme.textTheme.titleSmall?.color;
     return InkWell(
       onTap: onTap,
-      // ### PERUBAHAN DI SINI ###
-      // Bungkus Row dengan Center agar ikon berada di tengah 'Expanded'
       child: Center(
         child: Row(
-          mainAxisSize: MainAxisSize.min, // Agar Row tidak mengambil spasi penuh
-          mainAxisAlignment: MainAxisAlignment.center, // Sejajarkan ikon & teks di tengah
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: iconColor, size: 20),
             if (text != null && text != "0")
@@ -466,7 +516,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
           ],
         ),
       ),
-      // ### AKHIR PERUBAHAN ###
     );
   }
 }

@@ -4,17 +4,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/blog_post_card.dart'; 
 import '../create_post_screen.dart'; 
+import '../../widgets/notification_sheet.dart';
+import '../../main.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 class HomePage extends StatefulWidget {
-  // ### BARU: Tambahkan callback ###
   final VoidCallback onProfileTap;
 
   const HomePage({
     super.key,
-    required this.onProfileTap, // ### BARU: Wajibkan di konstruktor ###
+    required this.onProfileTap, 
   });
 
   @override
@@ -32,14 +33,34 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _showNotificationSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, 
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6, 
+          minChildSize: 0.3,     
+          maxChildSize: 0.9,     
+          builder: (context, scrollController) {
+            return NotificationSheet(scrollController: scrollController);
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // ### PERUBAHAN DI SINI ###
-        // Bungkus Padding dengan GestureDetector
         leading: GestureDetector(
-          onTap: widget.onProfileTap, // Panggil callback saat diklik
+          onTap: widget.onProfileTap,
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: CircleAvatar(
@@ -48,17 +69,13 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
-        // ### AKHIR PERUBAHAN ###
         title: Image.asset(
           'images/app_icon.png',
           height: 30, 
         ),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: Icon(Icons.auto_awesome_outlined),
-            onPressed: () { /* Untuk "Top Posts" */ },
-          ),
+          _NotificationButton(onPressed: _showNotificationSheet),
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -102,6 +119,57 @@ class _HomePageState extends State<HomePage> {
         tooltip: 'New Post', 
         child: const Icon(Icons.edit_outlined), 
       ),
+    );
+  }
+}
+
+class _NotificationButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  
+  const _NotificationButton({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return IconButton(icon: Icon(Icons.notifications_none), onPressed: onPressed);
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('isRead', isEqualTo: false)
+          .limit(1) 
+          .snapshots(),
+      builder: (context, snapshot) {
+        final bool hasUnread = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+
+        return Stack(
+          children: [
+            IconButton(
+              icon: Icon(
+                hasUnread ? Icons.notifications : Icons.notifications_none,
+              ),
+              onPressed: onPressed,
+            ),
+            if (hasUnread)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: TwitterTheme.blue,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

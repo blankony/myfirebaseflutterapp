@@ -60,6 +60,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     
     try {
       await batch.commit();
+
+      _firestore
+          .collection('users')
+          .doc(widget.userId)
+          .collection('notifications')
+          .add({
+        'type': 'follow',
+        'senderId': _currentUser!.uid,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+      });
+
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to follow: $e')));
     }

@@ -10,12 +10,12 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 class PostDetailScreen extends StatefulWidget {
   final String postId;
-  final Map<String, dynamic> initialPostData;
+  final Map<String, dynamic>? initialPostData;
 
   const PostDetailScreen({
     super.key,
     required this.postId,
-    required this.initialPostData,
+    this.initialPostData,
   });
 
   @override
@@ -31,7 +31,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       return;
     }
 
-    // ### PERUBAHAN: Kembalikan logika 'userName' dan 'userEmail' ###
     String userName = "Anonymous";
     String userEmail = "anonymous@mail.com";
     try {
@@ -49,7 +48,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       'timestamp': FieldValue.serverTimestamp(),
       'userId': _currentUser!.uid,
       'originalPostId': widget.postId,
-      // ### PERUBAHAN: Kembalikan 'userName' dan 'userEmail' ###
       'userName': userName,
       'userEmail': userEmail,
     };
@@ -99,9 +97,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   StreamBuilder<DocumentSnapshot>(
                     stream: _firestore.collection('posts').doc(widget.postId).snapshots(),
                     builder: (context, snapshot) {
-                      Map<String, dynamic> data = widget.initialPostData;
-                      if (snapshot.hasData) {
-                        data = snapshot.data!.data() as Map<String, dynamic>;
+                      
+                      if (!snapshot.hasData && widget.initialPostData == null) {
+                        return Center(child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: CircularProgressIndicator(),
+                        ));
+                      }
+                      
+                      Map<String, dynamic>? data = snapshot.hasData
+                          ? snapshot.data!.data() as Map<String, dynamic>?
+                          : widget.initialPostData;
+
+                      if (data == null) {
+                         return Center(child: Padding(
+                           padding: const EdgeInsets.all(24.0),
+                           child: Text("Post not found or has been deleted."),
+                         ));
                       }
                       
                       return BlogPostCard(
@@ -113,6 +125,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       );
                     },
                   ),
+                  
                   Divider(height: 1, thickness: 1), 
                   _buildCommentList(),
                 ],
