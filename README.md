@@ -1,43 +1,42 @@
-```md
 # PNJ Media App
 
-A Flutter-based social platform for the PNJ community. Backed entirely by Firebase for authentication, Firestore, and security rules. Styled with a modern dark-first interface.
+A Flutter-based social platform for the PNJ community. Backed by Firebase for authentication, Firestore, and security rules. Built with a dark-first UI.
 
 ## Core Features
 
-- Firebase Authentication with login, register, and password recovery  
+- Firebase Authentication (login, register, password reset)  
 - Persistent sessions  
 - Optional email verification  
 - Real-time Firestore backend  
 - Full CRUD for posts and replies  
-- Post interactions (like/unlike)  
+- Like/Unlike, Repost, Follow/Unfollow interactions
 - Live feed sorted by timestamp  
-- User profiles with bio, name, NIM, and email  
-- Individual profile navigation  
+- User profiles with bio, name, NIM, email  
+- Profile navigation  
 - Light/Dark theme toggle  
 - Profile editing and password change  
 - Logout and account deletion  
 
 ## Screenshots
-
-> Add your images to `./screenshots/` and replace the placeholders below.
-
 ### Landing & Auth
-![Landing](screenshots/landing.png)
-![Login](screenshots/login.png)
-![Register](screenshots/register.png)
+| Landing | Login | Register |
+|--------|--------|----------|
+| <img src="screenshots/landing.png" width="250"/> | <img src="screenshots/login.png" width="250"/> | <img src="screenshots/register.png" width="250"/> |
 
 ### Home & Profile
-![Home](screenshots/home.png)
-![Profile](screenshots/profile.png)
+| Home | Profile |
+|------|---------|
+| <img src="screenshots/home.png" width="250"/> | <img src="screenshots/profile.png" width="250"/> |
 
 ### Posting & Interacting
-![Post](screenshots/post.png)
-![Reply](screenshots/reply.png)
-![Like](screenshots/repost_like.png)
+| Post | Reply | Like |
+|------|--------|------|
+| <img src="screenshots/post.png" width="250"/> | <img src="screenshots/reply.png" width="250"/> | <img src="screenshots/repost_like.png" width="250"/> |
 
 ### Edit Profile
-![Edit Profile](screenshots/edit_profile.png)
+| Edit Profile |
+|--------------|
+| <img src="screenshots/edit_profile.png" width="250"/> |
 
 ---
 
@@ -49,25 +48,18 @@ Firebase configuration is required before running the application.
 
 ## 1. Firebase Project Setup
 
-### Create a Firebase Project  
+### Create a Firebase Project
 - Create a new project in the Firebase Console.
 
-### Add Android App  
+### Add Android App
 - Package name: `com.example.myfirebaseflutterapp`  
-- Obtain SHA-1:  
-```
+- Place `google-services.json` inside `android/app/`.
 
-./gradlew signingReport
-
-````
-- Add SHA-1 to Firebase.  
-- Download `google-services.json` into `android/app/`.
-
-### Enable Services  
+### Enable Services
 - Authentication → Enable Email/Password  
 - Firestore → Create database  
 
-### Firestore Security Rules  
+### Firestore Security Rules
 ```txt
 rules_version = '2';
 service cloud.firestore {
@@ -99,8 +91,7 @@ match /databases/{database}/documents {
   }
 }
 }
-````
-
+```
 ### Firestore Indexes
 
 **Posts Tab (Collection):**
