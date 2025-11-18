@@ -1,0 +1,48 @@
+name: Build Flutter Debug APK
+
+# Memicu workflow setiap kali ada 'push' ke branch 'main'
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-apk:
+    # Menggunakan runner Ubuntu versi terbaru
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout kode dari repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Java (diperlukan oleh Gradle)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 3. Set up Flutter
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable' # Selalu gunakan versi stable terbaru
+          cache: true # Meng-cache Flutter SDK untuk build lebih cepat
+
+      # 4. Install dependensi
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # 5. Build APK Debug
+      # Kita menggunakan --debug karena tidak perlu signing keys
+      - name: Build Debug APK
+        run: flutter build apk --debug
+
+      # 6. Upload APK sebagai artifak
+      # Anda bisa mengunduh APK ini dari halaman "Actions" di GitHub
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
