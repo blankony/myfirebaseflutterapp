@@ -17,17 +17,16 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  // ... (Variabel tidak berubah)
   final User? _user = _auth.currentUser;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   bool _isLoading = false;
+
   bool _isEmailVerified = false;
   Timer? _verificationTimer;
 
   @override
   void initState() {
-    // ... (initState tidak berubah)
     super.initState();
     if (_user != null) {
       _isEmailVerified = _user!.emailVerified;
@@ -41,7 +40,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // --- Fungsi Verifikasi Email (tidak berubah) ---
   Future<void> _checkEmailVerification(Timer timer) async {
     await _user?.reload();
     final freshUser = _auth.currentUser;
@@ -74,11 +72,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     }
   }
-  // --- Akhir Fungsi Verifikasi Email ---
-
 
   Future<void> _loadCurrentData() async {
-    // ... (loadCurrentData tidak berubah)
     if (_user == null) return;
     final userDoc = await _firestore.collection('users').doc(_user!.uid).get();
     if (userDoc.exists) {
@@ -88,7 +83,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // ### PERUBAHAN DI FUNGSI INI ###
   Future<void> _saveChanges() async {
     if (_user == null || _nameController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -102,13 +96,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final String newBio = _bioController.text.trim();
 
     try {
-      // 1. Update dokumen profil utama
       await _firestore.collection('users').doc(_user!.uid).update({
         'name': newName,
         'bio': newBio,
       });
 
-      // 2. Update semua postingan dan komentar terkait
       await _updateAllUsernames(_user!.uid, newName);
 
       if (context.mounted) {
@@ -118,14 +110,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         Navigator.of(context).pop();
       }
     } catch (e) {
-      // PERUBAHAN DI SINI:
-      // Ini sekarang akan menangkap error dari _updateAllUsernames
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            // Tampilkan error yang lebih jelas
             content: Text('Update failed. Error: ${e.toString()}'),
-            duration: Duration(seconds: 5), // Tampilkan lebih lama
+            duration: Duration(seconds: 5),
           ),
         );
       }
@@ -136,11 +125,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // ### PERUBAHAN DI FUNGSI INI ###
   Future<void> _updateAllUsernames(String userId, String newName) async {
     final writeBatch = _firestore.batch();
     
-    // 1. Cari semua POSTS oleh user ini
     final postsQuery = _firestore
         .collection('posts')
         .where('userId', isEqualTo: userId);
@@ -150,7 +137,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       writeBatch.update(doc.reference, {'userName': newName});
     }
 
-    // 2. Cari semua COMMENTS oleh user ini (menggunakan collectionGroup)
     final commentsQuery = _firestore
         .collectionGroup('comments')
         .where('userId', isEqualTo: userId);
@@ -160,12 +146,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       writeBatch.update(doc.reference, {'userName': newName});
     }
     
-    // 3. Jalankan semua update sekaligus
     try {
       await writeBatch.commit();
     } catch (e) {
-      // PERUBAHAN DI SINI:
-      // Lempar error agar bisa ditangkap oleh _saveChanges
       print('Error updating denormalized usernames: $e');
       throw Exception('Failed to update old posts/comments: $e');
     }
@@ -174,7 +157,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   void dispose() {
-    // ... (dispose tidak berubah)
     _verificationTimer?.cancel(); 
     _nameController.dispose();
     _bioController.dispose();
@@ -183,7 +165,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (build method tidak berubah)
     final theme = Theme.of(context);
     
     return Scaffold(
@@ -259,7 +240,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildEmailStatus(ThemeData theme) {
-    // ... (Fungsi _buildEmailStatus tidak berubah)
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -268,6 +248,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center, // Sejajarkan secara vertikal
         children: [
           Flexible(
             child: Column(
@@ -283,6 +264,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ],
             ),
           ),
+          
+          // ### PERUBAHAN DI SINI ###
           _isEmailVerified
               ? Row(
                   children: [
@@ -291,13 +274,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     Text("Verified", style: TextStyle(color: Colors.green)),
                   ],
                 )
-              : TextButton(
-                  onPressed: _sendVerificationEmail,
-                  child: Text(
-                    "Verify", 
-                    style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)
-                  ),
-                ),
+              : Column( // Ganti dari TextButton ke Column
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "Email is not verified",
+                      style: TextStyle(color: Colors.red, fontSize: 13),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero, // Kurangi padding
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap, // Kecilkan area klik
+                        alignment: Alignment.centerRight
+                      ),
+                      onPressed: _sendVerificationEmail,
+                      child: Text(
+                        "Verify", 
+                        style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)
+                      ),
+                    ),
+                  ],
+                )
+          // ### AKHIR PERUBAHAN ###
         ],
       ),
     );
@@ -309,7 +307,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required String title,
     required VoidCallback onTap,
   }) {
-    // ... (Fungsi _buildSettingsTile tidak berubah)
     final theme = Theme.of(context);
     return ListTile(
       leading: Icon(icon, color: theme.primaryColor),

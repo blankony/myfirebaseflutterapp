@@ -14,17 +14,27 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  // Kunci Global untuk Form
+  final _formKey = GlobalKey<FormState>();
+
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   String _errorMessage = '';
-  bool _isLoading = false; // State untuk loading
+  bool _isLoading = false; 
+
+  // State untuk menampilkan/menyembunyikan password
+  bool _isPasswordObscured = true;
 
   Future<void> _signIn() async {
-    // Jangan lakukan apa-apa jika sedang loading
     if (_isLoading) return; 
 
+    // 1. Validasi form
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
     setState(() { 
-      _isLoading = true; // Mulai loading
+      _isLoading = true; 
       _errorMessage = ''; 
     });
 
@@ -35,10 +45,17 @@ class _LoginPageState extends State<LoginPage> {
       );
       
       if (context.mounted) {
+        // Navigasi atau aksi setelah login berhasil
+        // Jika Anda menggunakan AuthGate, pop() mungkin tidak diperlukan
+        // tergantung alur Anda.
+        // Untuk amannya, kita bisa hapus pop() jika AuthGate menangani
+        // navigasi global.
+        
+        // Jika login_page muncul di atas AuthGate/DecisionGate,
+        // maka pop() diperlukan.
         Navigator.of(context).pop();
       }
     } on FirebaseAuthException catch (e) {
-      // Terjemahkan kode error Firebase ke pesan yang ramah
       switch (e.code) {
         case 'invalid-credential':
         case 'user-not-found':
@@ -57,12 +74,32 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
        _errorMessage = 'An unknown error occurred: $e';
     } finally {
-      // Pastikan loading berhenti
       if (mounted) {
         setState(() { _isLoading = false; });
       }
     }
   }
+
+  // --- Fungsi Validator ---
+  String? _validateEmail(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Email cannot be empty.';
+    }
+    String pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
+    RegExp regex = RegExp(pattern);
+    if (!regex.hasMatch(value)) {
+      return 'Enter a valid email address.';
+    }
+    return null;
+  }
+
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Password cannot be empty.';
+    }
+    return null;
+  }
+  // --- Akhir Fungsi Validator ---
 
   @override
   void dispose() {
@@ -80,78 +117,98 @@ class _LoginPageState extends State<LoginPage> {
         title: Image.asset('images/app_icon.png', height: 30),
         centerTitle: true,
       ),
-      // Gunakan Stack untuk menempatkan loading indicator di atas
       body: Stack(
         children: [
           SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Sign in to your account",
-                  style: theme.textTheme.headlineMedium?.copyWith(fontSize: 28),
-                ),
-                SizedBox(height: 32),
-                TextField(
-                  controller: _emailController,
-                  decoration: InputDecoration(labelText: 'Enter email'),
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                SizedBox(height: 16),
-                TextField(
-                  controller: _passwordController,
-                  decoration: InputDecoration(labelText: 'Enter password'),
-                  obscureText: true,
-                ),
-                SizedBox(height: 16),
+            // Bungkus dengan Form
+            child: Form(
+              key: _formKey, // Pasang key
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Sign in to your account",
+                    style: theme.textTheme.headlineMedium?.copyWith(fontSize: 28),
+                  ),
+                  SizedBox(height: 32),
+                  
+                  TextFormField( // Ganti ke TextFormField
+                    controller: _emailController,
+                    decoration: InputDecoration(labelText: 'Enter email'),
+                    keyboardType: TextInputType.emailAddress,
+                    validator: _validateEmail, // Tambah validator
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                  ),
+                  SizedBox(height: 16),
+                  
+                  TextFormField( // Ganti ke TextFormField
+                    controller: _passwordController,
+                    obscureText: _isPasswordObscured, // Gunakan state
+                    decoration: InputDecoration(
+                      labelText: 'Enter password',
+                      // Tambahkan ikon show/hide
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _isPasswordObscured = !_isPasswordObscured;
+                          });
+                        },
+                      ),
+                    ),
+                    validator: _validatePassword, // Tambah validator
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                  ),
+                  SizedBox(height: 16),
 
-                // Tampilkan error jika ada
-                if (_errorMessage.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16, top: 8),
-                    child: Center(
-                      child: Text(
-                        _errorMessage,
-                        style: const TextStyle(color: Colors.red, fontSize: 14),
-                        textAlign: TextAlign.center,
+                  if (_errorMessage.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16, top: 8),
+                      child: Center(
+                        child: Text(
+                          _errorMessage,
+                          style: const TextStyle(color: Colors.red, fontSize: 14),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+
+                  Align(
+                    alignment: Alignment.center,
+                    child: TextButton(
+                      onPressed: () {
+                         Navigator.of(context).push(
+                          MaterialPageRoute(builder: (context) => ForgotPasswordScreen()),
+                        );
+                      },
+                      child: Text('Forgot password?', style: TextStyle(color: TwitterTheme.blue)),
+                    ),
+                  ),
+                  SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _signIn, // Fungsi ini sekarang memvalidasi form
+                      child: Text('Login'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: TwitterTheme.blue,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                     ),
                   ),
-
-                Align(
-                  alignment: Alignment.center,
-                  child: TextButton(
-                    onPressed: () {
-                       Navigator.of(context).push(
-                        MaterialPageRoute(builder: (context) => ForgotPasswordScreen()),
-                      );
-                    },
-                    child: Text('Forgot password?', style: TextStyle(color: TwitterTheme.blue)),
-                  ),
-                ),
-                SizedBox(height: 24),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _signIn,
-                    child: Text('Login'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: TwitterTheme.blue,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
-          // --- Loading Indicator Overlay ---
           if (_isLoading)
             Container(
               color: Colors.black.withOpacity(0.5),
