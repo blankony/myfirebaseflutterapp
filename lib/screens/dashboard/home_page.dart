@@ -156,12 +156,6 @@ class _AppBarAvatarState extends State<_AppBarAvatar> {
             _localImageBytes = bytes;
             _selectedAvatarIconName = null;
           });
-        } else {
-           await prefs.remove('profile_picture_path_$_currentUserId');
-           setState(() {
-             _localImageBytes = null;
-             _selectedAvatarIconName = iconName;
-           });
         }
       } else if (iconName != null) {
         setState(() {
