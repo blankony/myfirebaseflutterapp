@@ -27,20 +27,18 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable' # Selalu gunakan versi stable terbaru
-          cache: true # Meng-cache Flutter SDK untuk build lebih cepat
+          channel: 'stable' # Mengganti 'flutter-version' dengan 'channel'
+          cache: true 
 
       # 4. Install dependensi
       - name: Install Flutter dependencies
         run: flutter pub get
 
       # 5. Build APK Debug
-      # Kita menggunakan --debug karena tidak perlu signing keys
       - name: Build Debug APK
         run: flutter build apk --debug
 
       # 6. Upload APK sebagai artifak
-      # Anda bisa mengunduh APK ini dari halaman "Actions" di GitHub
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
