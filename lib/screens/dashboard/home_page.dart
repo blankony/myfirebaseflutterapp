@@ -1,7 +1,10 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:io';
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/blog_post_card.dart'; 
 import '../create_post_screen.dart'; 
 import '../../widgets/notification_sheet.dart';
@@ -63,10 +66,7 @@ class _HomePageState extends State<HomePage> {
           onTap: widget.onProfileTap,
           child: Padding(
             padding: const EdgeInsets.all(8.0),
-            child: CircleAvatar(
-              child: Icon(Icons.person, size: 20),
-              radius: 18,
-            ),
+            child: _AppBarAvatar(), 
           ),
         ),
         title: Image.asset(
@@ -119,6 +119,105 @@ class _HomePageState extends State<HomePage> {
         tooltip: 'New Post', 
         child: const Icon(Icons.edit_outlined), 
       ),
+    );
+  }
+}
+
+class _AppBarAvatar extends StatefulWidget {
+  const _AppBarAvatar();
+
+  @override
+  State<_AppBarAvatar> createState() => _AppBarAvatarState();
+}
+
+class _AppBarAvatarState extends State<_AppBarAvatar> {
+  Uint8List? _localImageBytes;
+  String? _selectedAvatarIconName;
+  final String? _currentUserId = _auth.currentUser?.uid;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalAvatar();
+  }
+
+  Future<void> _loadLocalAvatar() async {
+    if (_currentUserId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final String? imagePath = prefs.getString('profile_picture_path_$_currentUserId');
+    final String? iconName = prefs.getString('profile_avatar_icon_$_currentUserId');
+    
+    if (mounted) {
+      if (imagePath != null) {
+        final file = File(imagePath);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          setState(() {
+            _localImageBytes = bytes;
+            _selectedAvatarIconName = null;
+          });
+        } else {
+           await prefs.remove('profile_picture_path_$_currentUserId');
+           setState(() {
+             _localImageBytes = null;
+             _selectedAvatarIconName = iconName;
+           });
+        }
+      } else if (iconName != null) {
+        setState(() {
+          _localImageBytes = null;
+          _selectedAvatarIconName = iconName;
+        });
+      } else {
+        setState(() {
+          _localImageBytes = null;
+          _selectedAvatarIconName = null;
+        });
+      }
+    }
+  }
+
+  IconData _getIconDataFromString(String? iconName) {
+    switch (iconName) {
+      case 'face':
+        return Icons.face;
+      case 'rocket':
+        return Icons.rocket_launch;
+      case 'pet':
+        return Icons.pets;
+      default:
+        return Icons.person; 
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _currentUserId != null ? _firestore.collection('users').doc(_currentUserId).snapshots() : null,
+      builder: (context, snapshot) {
+        String initial = 'U';
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          final String name = data['name'] ?? 'U';
+          if (name.isNotEmpty) {
+            initial = name[0].toUpperCase();
+          }
+        }
+
+        return CircleAvatar(
+          radius: 18,
+          backgroundImage: _localImageBytes != null ? MemoryImage(_localImageBytes!) : null,
+          child: (_localImageBytes == null && _selectedAvatarIconName != null)
+            ? Icon(
+                _getIconDataFromString(_selectedAvatarIconName),
+                size: 20,
+                color: TwitterTheme.blue,
+              )
+            : (_localImageBytes == null && _selectedAvatarIconName == null)
+              ? Text(initial)
+              : null,
+        );
+      },
     );
   }
 }

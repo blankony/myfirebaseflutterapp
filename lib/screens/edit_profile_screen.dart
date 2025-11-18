@@ -1,9 +1,15 @@
 // ignore_for_file: prefer_const_constructors
 import 'dart:async'; 
+import 'dart:io'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../main.dart'; // Untuk tema
+import 'package:image_picker/image_picker.dart'; 
+import 'package:image_cropper/image_cropper.dart'; 
+import 'package:path_provider/path_provider.dart'; 
+import 'package:path/path.dart' as p; 
+import 'package:shared_preferences/shared_preferences.dart'; 
+import '../main.dart'; 
 import 'change_password_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -25,18 +31,52 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _isEmailVerified = false;
   Timer? _verificationTimer;
 
+  File? _localImageFile;
+  String? _selectedAvatarIconName;
+
   @override
   void initState() {
     super.initState();
     if (_user != null) {
       _isEmailVerified = _user!.emailVerified;
       _loadCurrentData();
+      _loadLocalAvatar();
       if (!_isEmailVerified) {
         _verificationTimer = Timer.periodic(
           const Duration(seconds: 3),
           _checkEmailVerification,
         );
       }
+    }
+  }
+
+  Future<void> _loadLocalAvatar() async {
+    if (_user == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final String? imagePath = prefs.getString('profile_picture_path_${_user!.uid}');
+    final String? iconName = prefs.getString('profile_avatar_icon_${_user!.uid}');
+
+    File? newFile;
+    String? newIconName;
+
+    if (imagePath != null) {
+      final file = File(imagePath);
+      if (await file.exists()) {
+        newFile = file;
+        newIconName = null;
+      } else {
+        await prefs.remove('profile_picture_path_${_user!.uid}');
+      }
+    } else if (iconName != null) {
+      newFile = null;
+      newIconName = iconName;
+    }
+
+    if (mounted) {
+      setState(() {
+        _localImageFile = newFile;
+        _selectedAvatarIconName = newIconName;
+      });
     }
   }
 
@@ -83,6 +123,198 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  Future<void> _showPickOptions() async {
+    // Reload state sebelum menampilkan modal
+    await _loadLocalAvatar();
+    
+    if (!mounted) return;
+
+    // Cek apakah ada foto atau avatar
+    final bool hasAvatar = _localImageFile != null || _selectedAvatarIconName != null;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.photo_library),
+                title: Text('Pick from Gallery'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.camera_alt),
+                title: Text('Take a picture'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.auto_awesome),
+                title: Text('Choose Avatar Template'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showAvatarPicker();
+                },
+              ),
+              if (hasAvatar)
+                ListTile(
+                  leading: Icon(Icons.delete_outline, color: Colors.red),
+                  title: Text(
+                    'Remove Photo/Avatar',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _removeAvatar();
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showAvatarPicker() async {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Choose an Avatar'),
+          content: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildAvatarOption(context, 'face', Icons.face),
+              _buildAvatarOption(context, 'rocket', Icons.rocket_launch),
+              _buildAvatarOption(context, 'pet', Icons.pets),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAvatarOption(BuildContext context, String iconName, IconData iconData) {
+    return InkWell(
+      onTap: () => _selectAvatarIcon(iconName),
+      child: CircleAvatar(
+        radius: 30,
+        backgroundColor: TwitterTheme.blue.withOpacity(0.2),
+        child: Icon(iconData, size: 30, color: TwitterTheme.blue),
+      ),
+    );
+  }
+
+  Future<void> _selectAvatarIcon(String iconName) async {
+    if (_user == null) return;
+    Navigator.of(context).pop();
+
+    final prefs = await SharedPreferences.getInstance();
+    
+    await prefs.setString('profile_avatar_icon_${_user!.uid}', iconName);
+    
+    final String? imagePath = prefs.getString('profile_picture_path_${_user!.uid}');
+    if (imagePath != null) {
+      final file = File(imagePath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+      await prefs.remove('profile_picture_path_${_user!.uid}');
+    }
+
+    setState(() {
+      _localImageFile = null;
+      _selectedAvatarIconName = iconName;
+    });
+  }
+  
+  Future<void> _removeAvatar() async {
+    if (_user == null) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? imagePath = prefs.getString('profile_picture_path_${_user!.uid}');
+      
+      if (imagePath != null) {
+        final file = File(imagePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+        await prefs.remove('profile_picture_path_${_user!.uid}');
+      }
+      await prefs.remove('profile_avatar_icon_${_user!.uid}');
+
+      setState(() {
+        _localImageFile = null;
+        _selectedAvatarIconName = null;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Avatar removed.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to remove avatar: $e')),
+        );
+      }
+    }
+  }
+  
+  Future<void> _pickImage(ImageSource source) async {
+    if (_user == null) return;
+    final ImagePicker picker = ImagePicker();
+    
+    final XFile? pickedFile = await picker.pickImage(source: source);
+    if (pickedFile == null) return;
+
+    final CroppedFile? croppedFile = await ImageCropper().cropImage(
+      sourcePath: pickedFile.path,
+      aspectRatio: CropAspectRatio(ratioX: 1, ratioY: 1),
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: 'Crop Profile Photo',
+          toolbarColor: TwitterTheme.blue,
+          toolbarWidgetColor: Colors.white,
+          initAspectRatio: CropAspectRatioPreset.square,
+          lockAspectRatio: true,
+          hideBottomControls: false,
+        ),
+        IOSUiSettings(
+          title: 'Crop Profile Photo',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+        ),
+      ],
+    );
+
+    if (croppedFile == null) return;
+
+    final appDir = await getApplicationDocumentsDirectory();
+    final fileName = 'profile_pic_${_user!.uid}.jpg'; 
+    final localFile = File(p.join(appDir.path, fileName));
+
+    final newFile = await File(croppedFile.path).copy(localFile.path);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('profile_picture_path_${_user!.uid}', newFile.path);
+    await prefs.remove('profile_avatar_icon_${_user!.uid}');
+    
+    setState(() {
+      _localImageFile = newFile;
+      _selectedAvatarIconName = null;
+    });
+  }
+
   Future<void> _saveChanges() async {
     if (_user == null || _nameController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -101,7 +333,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'bio': newBio,
       });
 
-      await _updateAllUsernames(_user!.uid, newName);
+      await _updateDenormalizedData(_user!.uid, newName);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -111,7 +343,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     } catch (e) {
       if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Update failed. Error: ${e.toString()}'),
             duration: Duration(seconds: 5),
@@ -125,8 +357,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  Future<void> _updateAllUsernames(String userId, String newName) async {
+  Future<void> _updateDenormalizedData(String userId, String newName) async {
     final writeBatch = _firestore.batch();
+    
+    final Map<String, dynamic> updateData = {
+      'userName': newName,
+    };
     
     final postsQuery = _firestore
         .collection('posts')
@@ -134,7 +370,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     
     final postsSnapshot = await postsQuery.get();
     for (final doc in postsSnapshot.docs) {
-      writeBatch.update(doc.reference, {'userName': newName});
+      writeBatch.update(doc.reference, updateData);
     }
 
     final commentsQuery = _firestore
@@ -143,17 +379,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         
     final commentsSnapshot = await commentsQuery.get();
     for (final doc in commentsSnapshot.docs) {
-      writeBatch.update(doc.reference, {'userName': newName});
+      writeBatch.update(doc.reference, updateData);
     }
     
     try {
       await writeBatch.commit();
     } catch (e) {
-      print('Error updating denormalized usernames: $e');
+      print('Error updating denormalized data: $e');
       throw Exception('Failed to update old posts/comments: $e');
     }
   }
-
 
   @override
   void dispose() {
@@ -161,6 +396,51 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameController.dispose();
     _bioController.dispose();
     super.dispose();
+  }
+
+  IconData _getIconDataFromString(String? iconName) {
+    switch (iconName) {
+      case 'face':
+        return Icons.face;
+      case 'rocket':
+        return Icons.rocket_launch;
+      case 'pet':
+        return Icons.pets;
+      default:
+        return Icons.person;
+    }
+  }
+
+  Widget _buildProfileAvatar() {
+    if (_localImageFile != null) {
+      return CircleAvatar(
+        radius: 50,
+        backgroundImage: FileImage(_localImageFile!),
+      );
+    }
+
+    if (_selectedAvatarIconName != null) {
+      return CircleAvatar(
+        radius: 50,
+        backgroundColor: TwitterTheme.blue.withOpacity(0.2),
+        child: Icon(
+          _getIconDataFromString(_selectedAvatarIconName),
+          size: 60,
+          color: TwitterTheme.blue,
+        ),
+      );
+    }
+    
+    return ValueListenableBuilder(
+      valueListenable: _nameController,
+      builder: (context, value, child) {
+        String initial = value.text.isNotEmpty ? value.text[0].toUpperCase() : 'U';
+        return CircleAvatar(
+          radius: 50,
+          child: Text(initial, style: TextStyle(fontSize: 40)),
+        );
+      },
+    );
   }
 
   @override
@@ -190,23 +470,46 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Container(
-              height: 200, 
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: TwitterTheme.darkGrey,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: Text(
-                  "Image upload feature\nnot yet available",
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleSmall,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  height: 150, 
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: TwitterTheme.darkGrey,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-              ),
+                Positioned(
+                  bottom: -30,
+                  left: 16,
+                  child: CircleAvatar(
+                    radius: 52, 
+                    backgroundColor: theme.scaffoldBackgroundColor,
+                    child: _buildProfileAvatar(),
+                  ),
+                ),
+              ],
             ),
-            SizedBox(height: 24),
+            
+            SizedBox(height: 40),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton(
+                  onPressed: _showPickOptions,
+                  child: Text('Change Photo'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: theme.textTheme.bodyLarge?.color,
+                    side: BorderSide(color: theme.dividerColor),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ),
+                ),
+              ],
+            ),
 
+            SizedBox(height: 24), 
             _buildEmailStatus(theme),
             SizedBox(height: 16),
             
@@ -248,7 +551,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.center, // Sejajarkan secara vertikal
+        crossAxisAlignment: CrossAxisAlignment.center, 
         children: [
           Flexible(
             child: Column(
@@ -265,7 +568,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
           ),
           
-          // ### PERUBAHAN DI SINI ###
           _isEmailVerified
               ? Row(
                   children: [
@@ -274,7 +576,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     Text("Verified", style: TextStyle(color: Colors.green)),
                   ],
                 )
-              : Column( // Ganti dari TextButton ke Column
+              : Column( 
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
@@ -283,8 +585,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                     TextButton(
                       style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero, // Kurangi padding
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap, // Kecilkan area klik
+                        padding: EdgeInsets.zero, 
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap, 
                         alignment: Alignment.centerRight
                       ),
                       onPressed: _sendVerificationEmail,
@@ -295,7 +597,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   ],
                 )
-          // ### AKHIR PERUBAHAN ###
         ],
       ),
     );

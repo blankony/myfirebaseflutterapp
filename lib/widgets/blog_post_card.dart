@@ -1,11 +1,15 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:io'; 
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:share_plus/share_plus.dart'; 
+import 'package:shared_preferences/shared_preferences.dart'; 
 import '../screens/post_detail_screen.dart'; 
 import '../screens/user_profile_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
+import '../main.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -37,12 +41,55 @@ class _BlogPostCardState extends State<BlogPostCard> {
 
   late bool _isReposted;
   late int _repostCount;
+  
+  Uint8List? _localImageBytes;
+  String? _selectedAvatarIconName;
+  String? _currentUserId; 
 
   @override
   void initState() {
     super.initState();
     _syncLikeState();
     _syncRepostState(); 
+    _loadLocalAvatar(); 
+  }
+
+  Future<void> _loadLocalAvatar() async {
+    _currentUserId = _auth.currentUser?.uid;
+    if (widget.isOwner && _currentUserId != null) {
+      final prefs = await SharedPreferences.getInstance();
+      final String? imagePath = prefs.getString('profile_picture_path_$_currentUserId');
+      final String? iconName = prefs.getString('profile_avatar_icon_$_currentUserId');
+      
+      if (mounted) {
+        if (imagePath != null) {
+          final file = File(imagePath);
+          if (await file.exists()) {
+            final bytes = await file.readAsBytes();
+            setState(() {
+              _localImageBytes = bytes;
+              _selectedAvatarIconName = null;
+            });
+          } else {
+            await prefs.remove('profile_picture_path_$_currentUserId');
+            setState(() {
+              _localImageBytes = null;
+              _selectedAvatarIconName = iconName; 
+            });
+          }
+        } else if (iconName != null) {
+          setState(() {
+            _localImageBytes = null;
+            _selectedAvatarIconName = iconName;
+          });
+        } else {
+          setState(() {
+            _localImageBytes = null;
+            _selectedAvatarIconName = null;
+          });
+        }
+      }
+    }
   }
 
   @override
@@ -315,6 +362,19 @@ class _BlogPostCardState extends State<BlogPostCard> {
     }
   }
 
+  IconData _getIconDataFromString(String? iconName) {
+    switch (iconName) {
+      case 'face':
+        return Icons.face;
+      case 'rocket':
+        return Icons.rocket_launch;
+      case 'pet':
+        return Icons.pets;
+      default:
+        return Icons.person; 
+    }
+  }
+
   @override
   void dispose() {
     _editController.dispose();
@@ -330,6 +390,8 @@ class _BlogPostCardState extends State<BlogPostCard> {
     final int commentCount = widget.postData['commentCount'] ?? 0;
     final theme = Theme.of(context);
 
+    final bool showCustomAvatar = widget.isOwner && (_localImageBytes != null || _selectedAvatarIconName != null);
+
     return InkWell( 
       onTap: _navigateToDetail, 
       child: Container(
@@ -342,7 +404,18 @@ class _BlogPostCardState extends State<BlogPostCard> {
               onTap: _navigateToUserProfile,
               child: CircleAvatar(
                 radius: 24,
-                child: Text(userName.isNotEmpty ? userName[0].toUpperCase() : 'A'),
+                backgroundImage: (widget.isOwner && _localImageBytes != null) 
+                  ? MemoryImage(_localImageBytes!) 
+                  : null,
+                child: (showCustomAvatar && _localImageBytes == null)
+                  ? Icon(
+                      _getIconDataFromString(_selectedAvatarIconName),
+                      size: 26,
+                      color: TwitterTheme.blue,
+                    )
+                  : (showCustomAvatar == false) 
+                    ? Text(userName.isNotEmpty ? userName[0].toUpperCase() : 'A')
+                    : null, 
               ),
             ),
             SizedBox(width: 12),

@@ -1,8 +1,11 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:io'; 
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart'; 
 import '../../widgets/blog_post_card.dart'; 
 import '../../widgets/comment_tile.dart'; 
 import '../../main.dart'; 
@@ -20,11 +23,51 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
   late TabController _tabController;
+  Uint8List? _localImageBytes;
+  String? _selectedAvatarIconName;
+  final User? _user = _auth.currentUser;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadLocalAvatar(); 
+  }
+
+  Future<void> _loadLocalAvatar() async {
+    if (_user == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final String? imagePath = prefs.getString('profile_picture_path_${_user!.uid}');
+    final String? iconName = prefs.getString('profile_avatar_icon_${_user!.uid}');
+    
+    if (mounted) {
+      if (imagePath != null) {
+        final file = File(imagePath);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          setState(() {
+            _localImageBytes = bytes;
+            _selectedAvatarIconName = null;
+          });
+        } else {
+          await prefs.remove('profile_picture_path_${_user!.uid}');
+          setState(() {
+            _localImageBytes = null;
+            _selectedAvatarIconName = iconName; 
+          });
+        }
+      } else if (iconName != null) {
+        setState(() {
+          _localImageBytes = null;
+          _selectedAvatarIconName = iconName;
+        });
+      } else {
+        setState(() {
+          _localImageBytes = null;
+          _selectedAvatarIconName = null;
+        });
+      }
+    }
   }
 
   @override
@@ -40,6 +83,19 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final DateTime date = timestamp.toDate();
     final String formattedDate = DateFormat('MMMM yyyy').format(date);
     return 'Joined $formattedDate';
+  }
+
+  IconData _getIconDataFromString(String? iconName) {
+    switch (iconName) {
+      case 'face':
+        return Icons.face;
+      case 'rocket':
+        return Icons.rocket_launch;
+      case 'pet':
+        return Icons.pets;
+      default:
+        return Icons.person; 
+    }
   }
 
   @override
@@ -135,10 +191,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             top: 130,
             right: 16,
             child: OutlinedButton(
-              onPressed: () {
-                Navigator.of(context).push(
+              onPressed: () async {
+                await Navigator.of(context).push(
                   MaterialPageRoute(builder: (context) => EditProfileScreen()),
                 );
+                _loadLocalAvatar(); 
               },
               child: Text("Edit Profile"),
               style: OutlinedButton.styleFrom(
@@ -157,7 +214,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               backgroundColor: theme.scaffoldBackgroundColor,
               child: CircleAvatar(
                 radius: 40,
-                child: Text(name.isNotEmpty ? name[0].toUpperCase() : "A", style: TextStyle(fontSize: 30)),
+                backgroundImage: _localImageBytes != null ? MemoryImage(_localImageBytes!) : null,
+                child: (_localImageBytes == null && _selectedAvatarIconName != null)
+                  ? Icon(
+                      _getIconDataFromString(_selectedAvatarIconName),
+                      size: 45,
+                      color: TwitterTheme.blue,
+                    )
+                  : (_localImageBytes == null && _selectedAvatarIconName == null)
+                    ? Text(name.isNotEmpty ? name[0].toUpperCase() : "A", style: TextStyle(fontSize: 30))
+                    : null,
               ),
             ),
           ),

@@ -1,16 +1,19 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:io';
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/post_detail_screen.dart'; 
 import '../screens/user_profile_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
+import '../main.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 class CommentTile extends StatefulWidget {
-  // ... (konstruktor tetap sama)
   final String commentId;
   final Map<String, dynamic> commentData;
   final String postId; 
@@ -31,8 +34,55 @@ class CommentTile extends StatefulWidget {
 }
 
 class _CommentTileState extends State<CommentTile> {
-  // ... (semua fungsi logika: _deleteComment, _showEditDialog, dll. tetap sama)
   final TextEditingController _editController = TextEditingController();
+
+  Uint8List? _localImageBytes;
+  String? _selectedAvatarIconName;
+  String? _currentUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalAvatar(); 
+  }
+
+  Future<void> _loadLocalAvatar() async {
+    _currentUserId = _auth.currentUser?.uid;
+    if (widget.isOwner && _currentUserId != null) {
+      final prefs = await SharedPreferences.getInstance();
+      final String? imagePath = prefs.getString('profile_picture_path_$_currentUserId');
+      final String? iconName = prefs.getString('profile_avatar_icon_$_currentUserId');
+      
+      if (mounted) {
+        if (imagePath != null) {
+          final file = File(imagePath);
+          if (await file.exists()) {
+            final bytes = await file.readAsBytes();
+            setState(() {
+              _localImageBytes = bytes;
+              _selectedAvatarIconName = null;
+            });
+          } else {
+            await prefs.remove('profile_picture_path_$_currentUserId');
+            setState(() {
+              _localImageBytes = null;
+              _selectedAvatarIconName = iconName; 
+            });
+          }
+        } else if (iconName != null) {
+          setState(() {
+            _localImageBytes = null;
+            _selectedAvatarIconName = iconName;
+          });
+        } else {
+          setState(() {
+            _localImageBytes = null;
+            _selectedAvatarIconName = null;
+          });
+        }
+      }
+    }
+  }
 
   Future<void> _deleteComment() async {
     final didConfirm = await showDialog<bool>(
@@ -150,6 +200,19 @@ class _CommentTileState extends State<CommentTile> {
     return timeago.format(timestamp.toDate(), locale: 'en_short');
   }
 
+  IconData _getIconDataFromString(String? iconName) {
+    switch (iconName) {
+      case 'face':
+        return Icons.face;
+      case 'rocket':
+        return Icons.rocket_launch;
+      case 'pet':
+        return Icons.pets;
+      default:
+        return Icons.person; 
+    }
+  }
+
   @override
   void dispose() {
     _editController.dispose();
@@ -161,17 +224,17 @@ class _CommentTileState extends State<CommentTile> {
     final data = widget.commentData;
     final theme = Theme.of(context);
 
-    // ### PERUBAHAN: Kembalikan 'userName' dari data ###
     final String userName = data['userName'] ?? 'Anonymous';
     final String text = data['text'] ?? '';
     final Timestamp? timestamp = data['timestamp'] as Timestamp?;
+    
+    final bool showCustomAvatar = widget.isOwner && (_localImageBytes != null || _selectedAvatarIconName != null);
 
     return InkWell(
       onTap: _navigateToOriginalPost, 
       child: Container(
         color: theme.cardColor,
         padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        // ### PERUBAHAN: Hapus FutureBuilder, kembali ke Column ###
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -191,7 +254,18 @@ class _CommentTileState extends State<CommentTile> {
                   onTap: _navigateToUserProfile,
                   child: CircleAvatar(
                     radius: 24, 
-                    child: Text(userName.isNotEmpty ? userName[0] : 'A'),
+                    backgroundImage: (widget.isOwner && _localImageBytes != null) 
+                      ? MemoryImage(_localImageBytes!) 
+                      : null,
+                    child: (showCustomAvatar && _localImageBytes == null)
+                      ? Icon(
+                          _getIconDataFromString(_selectedAvatarIconName),
+                          size: 26,
+                          color: TwitterTheme.blue,
+                        )
+                      : (showCustomAvatar == false) 
+                        ? Text(userName.isNotEmpty ? userName[0] : 'A')
+                        : null, 
                   ),
                 ),
                 SizedBox(width: 12),
@@ -205,7 +279,6 @@ class _CommentTileState extends State<CommentTile> {
                             child: GestureDetector(
                               onTap: _navigateToUserProfile,
                               child: Text(
-                                // ### PERUBAHAN: Gunakan 'userName' lagi ###
                                 userName,
                                 style: theme.textTheme.titleMedium,
                                 overflow: TextOverflow.ellipsis,
@@ -236,7 +309,6 @@ class _CommentTileState extends State<CommentTile> {
   }
 
   Widget _buildOptionsButton() {
-    // ... (Fungsi ini tidak berubah)
     return InkWell(
       onTap: () {
         showModalBottomSheet(
