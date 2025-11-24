@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../main.dart'; // Untuk tema
+import '../main.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -21,6 +21,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
+  // New Avatar Defaults
+  int _avatarIconId = 0;
+  String _avatarHex = '';
 
   @override
   void initState() {
@@ -40,11 +43,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
-        _userName = userDoc.get('name') ?? _userName;
-        _userEmail = user.email ?? _userEmail; 
+        final data = userDoc.data() as Map<String, dynamic>;
+        setState(() {
+          _userName = data['name'] ?? _userName;
+          _userEmail = user.email ?? _userEmail;
+          // Load Avatar Info
+          _avatarIconId = data['avatarIconId'] ?? 0;
+          _avatarHex = data['avatarHex'] ?? '';
+        });
       }
     } catch (e) {
-      // Gagal mengambil data, gunakan default
+      // Fail silently
     }
   }
 
@@ -62,7 +71,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         'timestamp': FieldValue.serverTimestamp(),
         'userId': user.uid,
         'userName': _userName,
-        'userEmail': _userEmail, 
+        'userEmail': _userEmail,
+        // Save Avatar Info to Post
+        'avatarIconId': _avatarIconId,
+        'avatarHex': _avatarHex,
         'likes': {},
         'commentCount': 0,
         'retweetCount': 0, 
@@ -126,9 +138,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Preview Current Avatar
             CircleAvatar(
               radius: 24,
-              child: Icon(Icons.person), 
+              backgroundColor: AvatarHelper.getColor(_avatarHex),
+              child: Icon(
+                AvatarHelper.getIcon(_avatarIconId),
+                color: Colors.white,
+                size: 24,
+              ),
             ),
             SizedBox(width: 16),
             Expanded(

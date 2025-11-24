@@ -1,13 +1,13 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
-import 'dart:typed_data';
 import '../main.dart';
 import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
+
+final FirebaseAuth _auth = FirebaseAuth.instance;
 
 class SidePanel extends StatefulWidget {
   final VoidCallback onProfileSelected;
@@ -23,210 +23,201 @@ class SidePanel extends StatefulWidget {
 
 class _SidePanelState extends State<SidePanel> {
   final String? _currentUserId = FirebaseAuth.instance.currentUser?.uid;
-  
-  Uint8List? _localImageBytes;
-  String? _selectedAvatarIconName;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadLocalAvatar();
-  }
-
-  Future<void> _loadLocalAvatar() async {
-    if (_currentUserId == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final String? imagePath = prefs.getString('profile_picture_path_$_currentUserId');
-    final String? iconName = prefs.getString('profile_avatar_icon_$_currentUserId');
-
-    if (mounted) {
-      if (imagePath != null) {
-        final file = File(imagePath);
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          setState(() {
-            _localImageBytes = bytes;
-            _selectedAvatarIconName = null;
-          });
-        }
-      } else if (iconName != null) {
-        setState(() {
-          _localImageBytes = null;
-          _selectedAvatarIconName = iconName;
-        });
-      }
-    }
-  }
-
-  IconData _getIconDataFromString(String? iconName) {
-    switch (iconName) {
-      case 'face': return Icons.face;
-      case 'rocket': return Icons.rocket_launch;
-      case 'pet': return Icons.pets;
-      default: return Icons.person;
-    }
-  }
-
-  Future<void> _confirmSignOut(BuildContext context) async {
-    final bool shouldLogout = await showDialog<bool>(
+  Future<void> _signOut() async {
+    final didConfirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Log Out'),
-        content: Text('Are you sure you want to log out?'),
+        title: Text('Sign Out'),
+        content: Text('Are you sure you want to sign out?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Log Out', style: TextStyle(color: Colors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text('Sign Out')),
         ],
       ),
     ) ?? false;
 
-    if (shouldLogout) {
-      await FirebaseAuth.instance.signOut();
-      if (mounted) {
+    if (didConfirm) {
+      await _auth.signOut();
+      if (context.mounted) {
+        // Pop back to the first route (AuthGate -> WelcomeScreen)
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     }
   }
 
+  // Helper for the "Fly In From Bottom" Page Transition
+  Route _createSlideUpRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(0.0, 1.0); // Start from bottom
+        const end = Offset.zero;        // End at center
+        const curve = Curves.easeInOutQuart;
+
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var offsetAnimation = animation.drive(tween);
+
+        return SlideTransition(
+          position: offsetAnimation,
+          child: child,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
 
     return Drawer(
       backgroundColor: theme.scaffoldBackgroundColor,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack( // Wrap content in Stack for decorative blobs
         children: [
-          // 1. Header
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-                  
-                  StreamBuilder<DocumentSnapshot>(
-                    stream: _currentUserId != null
-                        ? FirebaseFirestore.instance.collection('users').doc(_currentUserId).snapshots()
-                        : null,
-                    builder: (context, snapshot) {
-                      String name = "User";
-                      String handle = "@user";
-                      String initial = "U";
-
-                      if (snapshot.hasData && snapshot.data!.exists) {
-                        final data = snapshot.data!.data() as Map<String, dynamic>;
-                        name = data['name'] ?? "User";
-                        final email = data['email'] ?? "";
-                        handle = email.isNotEmpty ? "@${email.split('@')[0]}" : "@user";
-                        if (name.isNotEmpty) initial = name[0].toUpperCase();
-                      }
-
-                      return InkWell(
-                        onTap: () {
-                          Navigator.pop(context);
-                          widget.onProfileSelected(); 
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 24,
-                              backgroundImage: _localImageBytes != null ? MemoryImage(_localImageBytes!) : null,
-                              child: (_localImageBytes == null && _selectedAvatarIconName != null)
-                                ? Icon(
-                                    _getIconDataFromString(_selectedAvatarIconName),
-                                    size: 24,
-                                    color: TwitterTheme.blue,
-                                  )
-                                : (_localImageBytes == null && _selectedAvatarIconName == null)
-                                  ? Text(initial)
-                                  : null,
-                            ),
-                            SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                                Text(handle, style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ],
+          // --- DECORATIVE BACKGROUND ELEMENTS ---
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: TwitterTheme.blue.withOpacity(isDarkMode ? 0.15 : 0.1),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 150,
+            left: -50,
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: TwitterTheme.blue.withOpacity(isDarkMode ? 0.1 : 0.05),
               ),
             ),
           ),
           
-          Divider(height: 1),
+          // --- MAIN CONTENT ---
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.close),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 20),
+                      
+                      StreamBuilder<DocumentSnapshot>(
+                        stream: _currentUserId != null
+                            ? FirebaseFirestore.instance.collection('users').doc(_currentUserId).snapshots()
+                            : null,
+                        builder: (context, snapshot) {
+                          String name = "User";
+                          String handle = "@user";
+                          
+                          // Avatar Defaults
+                          int iconId = 0;
+                          String? colorHex;
 
-          // 2. Menu Items
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              children: [
-                ListTile(
-                  leading: Icon(Icons.account_circle_outlined),
-                  title: Text('Account Center'),
-                  subtitle: Text('Security, personal details, and more'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (context) => AccountCenterPage()),
-                    );
-                  },
-                ),
-                ListTile(
-                  leading: Icon(Icons.settings_outlined),
-                  title: Text('More Settings'),
-                  subtitle: Text('Privacy, display, and app behavior'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (context) => SettingsPage()),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
+                          if (snapshot.hasData && snapshot.data!.exists) {
+                            final data = snapshot.data!.data() as Map<String, dynamic>;
+                            name = data['name'] ?? "User";
+                            final email = data['email'] ?? "";
+                            handle = email.isNotEmpty ? "@${email.split('@')[0]}" : "@user";
+                            
+                            // Get Avatar Info
+                            iconId = data['avatarIconId'] ?? 0;
+                            colorHex = data['avatarHex'];
+                          }
 
-          // 3. Bottom Actions
-          Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-            child: Column(
-              children: [
-                // FIX: Use the Optimized Switch Tile
-                _ThemeSwitchTile(),
-                
-                ListTile(
-                  leading: Icon(Icons.logout, color: Colors.red),
-                  title: Text('Log Out', style: TextStyle(color: Colors.red)),
-                  onTap: () => _confirmSignOut(context),
+                          // Universal Avatar Display
+                          Widget avatarWidget = CircleAvatar(
+                            radius: 24,
+                            backgroundColor: AvatarHelper.getColor(colorHex),
+                            child: Icon(AvatarHelper.getIcon(iconId), size: 24, color: Colors.white),
+                          );
+
+                          return InkWell(
+                            onTap: () {
+                              Navigator.pop(context);
+                              widget.onProfileSelected(); 
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Row(
+                              children: [
+                                avatarWidget,
+                                SizedBox(width: 12),
+                                // FIX: Expanded prevents the Column from pushing off the screen
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name, 
+                                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                        overflow: TextOverflow.ellipsis, // Adds the "..."
+                                        maxLines: 1, // Ensures single line
+                                      ),
+                                      Text(
+                                        handle, 
+                                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                                        overflow: TextOverflow.ellipsis, // Adds the "..."
+                                        maxLines: 1,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
+              ),
+              Divider(height: 1),
+              
+              Expanded(child: ListView(children: [
+                ListTile(leading: Icon(Icons.account_circle_outlined), title: Text('Account Center'), onTap: () {
+                  Navigator.pop(context); 
+                  Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
+                }),
+                ListTile(leading: Icon(Icons.settings_outlined), title: Text('More Settings'), onTap: () {
+                  Navigator.pop(context); 
+                  Navigator.of(context).push(_createSlideUpRoute(SettingsPage()));
+                }),
+              ])),
+              
+              Divider(height: 1),
+              Padding(padding: EdgeInsets.all(8), child: Column(children: [
+                 _ThemeSwitchTile(),
+                 // --- LOGOUT BUTTON MOVED HERE ---
+                 ListTile(
+                  leading: Icon(Icons.logout, color: Colors.red), 
+                  title: Text('Logout', style: TextStyle(color: Colors.red)), 
+                  onTap: _signOut,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                ),
+                // ------------------------------------
+              ]))
+            ],
           ),
         ],
       ),
@@ -234,59 +225,38 @@ class _SidePanelState extends State<SidePanel> {
   }
 }
 
-// ### NEW: Isolated Widget for Smooth Theme Switching ###
 class _ThemeSwitchTile extends StatefulWidget {
-  @override
-  State<_ThemeSwitchTile> createState() => _ThemeSwitchTileState();
+  @override State<_ThemeSwitchTile> createState() => _ThemeSwitchTileState();
 }
-
 class _ThemeSwitchTileState extends State<_ThemeSwitchTile> {
-  // Local state to update UI instantly
-  late bool _isDark; 
-
-  @override
-  void initState() {
-    super.initState();
-    _isDark = themeNotifier.value == ThemeMode.dark;
+  late bool _isDark;
+  @override void initState() { 
+    super.initState(); 
+    _isDark = themeNotifier.value == ThemeMode.dark; 
   }
-
-  void _handleThemeChange(bool value) async {
-    // 1. Instant visual update (prevents knob lag)
+  
+  void _handleChange(bool value) async {
     setState(() {
       _isDark = value;
     });
-
-    // 2. Delay actual theme switch to let animation finish
     await Future.delayed(Duration(milliseconds: 300));
-
-    // 3. Trigger the heavy app rebuild
     themeNotifier.value = value ? ThemeMode.dark : ThemeMode.light;
   }
-
-  @override
+  
+  @override 
   Widget build(BuildContext context) {
-    // Listen to external changes too (e.g. if changed from Settings Page)
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
-      builder: (context, currentMode, child) {
-        // Sync local state if changed externally
-        final bool actualIsDark = currentMode == ThemeMode.dark;
-        if (_isDark != actualIsDark) {
-           // Only update if we aren't currently toggling (simple check)
-           // Ideally we trust the user interaction, but this keeps it in sync
-           // We use the local _isDark for the Switch value to ensure smoothness
-        }
+    final theme = Theme.of(context);
+    final String subtitleText = _isDark ? 'Switch to Light' : 'Switch to Dark';
 
-        return ListTile(
-          leading: Icon(Icons.color_lens_outlined),
-          title: Text('Theme'),
-          subtitle: Text(_isDark ? 'Switch to Light' : 'Switch to Dark'),
-          trailing: Switch(
-            value: _isDark, 
-            onChanged: _handleThemeChange,
-          ),
-        );
-      },
+    return ListTile(
+      leading: Icon(Icons.color_lens_outlined, color: theme.primaryColor), 
+      title: Text('Theme'), 
+      subtitle: Text(subtitleText), // Dynamic subtitle
+      trailing: Switch(
+        value: _isDark, 
+        onChanged: _handleChange,
+      ),
+      contentPadding: EdgeInsets.symmetric(horizontal: 16),
     );
   }
 }

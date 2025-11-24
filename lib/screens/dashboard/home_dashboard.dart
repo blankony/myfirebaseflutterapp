@@ -3,17 +3,15 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui'; 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:share_plus/share_plus.dart'; 
 import 'package:myfirebaseflutterapp/widgets/side_panel.dart';
 import 'home_page.dart';
 import 'ai_assistant_page.dart';
 import 'search_page.dart';
 import 'profile_tab_page.dart';
-import 'settings_page.dart';
-import 'account_center_page.dart';
 import '../../main.dart'; 
 import '../../widgets/notification_sheet.dart';
 
@@ -27,7 +25,7 @@ class HomeDashboard extends StatefulWidget {
   State<HomeDashboard> createState() => _HomeDashboardState();
 }
 
-class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateMixin {
+class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   int _selectedIndex = 0;
   late TabController _tabController;
   late final PageController _pageController;
@@ -37,10 +35,21 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   final ScrollController _recommendedScrollController = ScrollController();
   bool _isSearching = false;
 
+  // ### NEW: Entrance Animation Controllers ###
+  late AnimationController _entranceController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
+  // Crucial for KeepAliveClientMixin
+  @override
+  bool get wantKeepAlive => true; 
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // Set viewportFraction to 1.0, and keep pages in memory with physics: NeverScrollableScrollPhysics (handled by PageView itself)
+    // No explicit viewportFraction needed here, but we will ensure the PageView keeps pages alive.
     _pageController = PageController();
     _homePageController = PageController();
 
@@ -54,10 +63,27 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         setState(() {});
       }
     });
+
+    // ### START ENTRANCE ANIMATION ###
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _entranceController, curve: Curves.easeOut),
+    );
+
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _entranceController, curve: Curves.easeOutQuart),
+    );
+
+    _entranceController.forward();
   }
 
   @override
   void dispose() {
+    _entranceController.dispose(); // Dispose animation
     _scrollController.dispose();
     _recommendedScrollController.dispose();
     _tabController.dispose();
@@ -86,33 +112,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         );
       },
     );
-  }
-
-  Future<void> _confirmSignOut(BuildContext context) async {
-    final bool shouldLogout = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Log Out'),
-        content: Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Log Out', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    ) ?? false;
-
-    if (shouldLogout) {
-      await FirebaseAuth.instance.signOut();
-      if (mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
-    }
   }
 
   List<Widget> _appBarActions(BuildContext context) {
@@ -147,54 +146,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           ),
         ];
       case 3:
-        final user = _auth.currentUser;
-        return [
-          StreamBuilder<DocumentSnapshot>(
-            stream: user != null 
-                ? _firestore.collection('users').doc(user.uid).snapshots() 
-                : null,
-            builder: (context, snapshot) {
-              final String name = (snapshot.hasData && snapshot.data!.exists)
-                  ? (snapshot.data!.data() as Map<String, dynamic>)['name'] ?? 'User'
-                  : 'User';
-
-              return PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert),
-                onSelected: (value) {
-                  if (value == 'Share Profile') {
-                    Share.share("Hey Check Out $name , On this app Link https://github.com/blankony/myfirebaseflutterapp");
-                  } else if (value == 'Account Center') {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountCenterPage()));
-                  } else if (value == 'Settings') {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
-                  } else if (value == 'Log Out') {
-                    _confirmSignOut(context);
-                  }
-                },
-                itemBuilder: (BuildContext context) {
-                  return [
-                    PopupMenuItem(
-                      value: 'Share Profile',
-                      child: Row(children: [Icon(Icons.share, size: 20), SizedBox(width: 8), Text('Share Profile')]),
-                    ),
-                    PopupMenuItem(
-                      value: 'Account Center',
-                      child: Row(children: [Icon(Icons.account_circle, size: 20), SizedBox(width: 8), Text('Account Center')]),
-                    ),
-                    PopupMenuItem(
-                      value: 'Settings',
-                      child: Row(children: [Icon(Icons.settings, size: 20), SizedBox(width: 8), Text('Settings')]),
-                    ),
-                    PopupMenuItem(
-                      value: 'Log Out',
-                      child: Row(children: [Icon(Icons.logout, color: Colors.red, size: 20), SizedBox(width: 8), Text('Log Out', style: TextStyle(color: Colors.red))]),
-                    ),
-                  ];
-                },
-              );
-            }
-          ),
-        ];
+        return []; 
       default:
         return [];
     }
@@ -218,52 +170,76 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    // Required call for AutomaticKeepAliveClientMixin
+    super.build(context);
+
     final _widgetOptions = <Widget>[
-      Column(
-        children: [
-          Expanded(
-            child: PageView(
-              controller: _homePageController,
-              onPageChanged: (index) {
-                _tabController.animateTo(index);
-                setState(() {});
-              },
-              children: [
-                HomePage(
-                  scrollController: _scrollController,
-                  isRecommended: false,
-                ),
-                HomePage(
-                  scrollController: _recommendedScrollController,
-                  isRecommended: true,
-                ),
-              ],
+      // Home Page (Page 0)
+      KeepAlivePage(
+        child: Column(
+          children: [
+            Expanded(
+              child: PageView(
+                controller: _homePageController,
+                onPageChanged: (index) {
+                  _tabController.animateTo(index);
+                  setState(() {});
+                },
+                children: [
+                  // This internal PageView should also keep its pages alive
+                  KeepAlivePage(
+                    child: HomePage(
+                      scrollController: _scrollController,
+                      isRecommended: false,
+                    ),
+                  ),
+                  KeepAlivePage(
+                    child: HomePage(
+                      scrollController: _recommendedScrollController,
+                      isRecommended: true,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-      AiAssistantPage(),
-      SearchPage(
-        isSearching: _isSearching,
-        onSearchPressed: () {
-          setState(() {
-            _isSearching = !_isSearching;
-          });
-        },
+      // AI Assistant Page (Page 1)
+      KeepAlivePage(child: AiAssistantPage()),
+      // Search Page (Page 2)
+      KeepAlivePage(
+        child: SearchPage(
+          isSearching: _isSearching,
+          onSearchPressed: () {
+            setState(() {
+              _isSearching = !_isSearching;
+            });
+          },
+        ),
       ),
-      ProfileTabPage(),
+      // Profile Tab Page (Page 3)
+      KeepAlivePage(child: ProfileTabPage()),
     ];
+
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       key: _scaffoldKey,
       extendBodyBehindAppBar: true,
       appBar: _selectedIndex == 3
-          ? null // Hide duplicate AppBar on Profile Tab
+          ? null
           : AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
+              systemOverlayStyle: isDarkMode 
+                  ? SystemUiOverlayStyle.light 
+                  : SystemUiOverlayStyle.dark,
               leading: GestureDetector(
-                onTap: () => _scaffoldKey.currentState!.openDrawer(),
+                onTap: () {
+                  if (hapticNotifier.value) HapticFeedback.lightImpact();
+                  _scaffoldKey.currentState!.openDrawer();
+                },
                 child: Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: _AppBarAvatar(),
@@ -297,25 +273,32 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           _onItemTapped(3);
         },
       ),
-      // FIX: Restored NotificationListener for Swipe Right to Open Drawer
-      body: NotificationListener<OverscrollNotification>(
-        onNotification: (overscroll) {
-          if (overscroll.metrics.axis == Axis.horizontal) {
-            // Check if we are at start (pixel 0) and pulling left (negative overscroll)
-            if (overscroll.metrics.pixels == 0 && overscroll.overscroll < 0) {
-              _scaffoldKey.currentState?.openDrawer();
-            }
-          }
-          return false;
-        },
-        child: PageView(
-          controller: _pageController,
-          onPageChanged: (index) {
-            setState(() {
-              _selectedIndex = index;
-            });
-          },
-          children: _widgetOptions,
+      // ### APPLY ENTRANCE ANIMATION ###
+      body: FadeTransition(
+        opacity: _fadeAnimation,
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: NotificationListener<OverscrollNotification>(
+            onNotification: (overscroll) {
+              if (overscroll.metrics.axis == Axis.horizontal) {
+                if (overscroll.metrics.pixels == 0 && overscroll.overscroll < 0) {
+                  _scaffoldKey.currentState?.openDrawer();
+                }
+              }
+              return false;
+            },
+            child: PageView(
+              controller: _pageController,
+              // Keep all pages alive to prevent full rebuilds on screen switch
+              physics: NeverScrollableScrollPhysics(), // Prevent manual swiping
+              onPageChanged: (index) {
+                setState(() {
+                  _selectedIndex = index;
+                });
+              },
+              children: _widgetOptions,
+            ),
+          ),
         ),
       ),
       bottomNavigationBar: CustomAnimatedBottomBar(
@@ -352,7 +335,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 }
 
-// ... (Helper classes: _ScrollAwareAppBarBackground, _AppBarAvatar, _NotificationButton, CustomAnimatedBottomBar remain the same)
+// ... (Rest of HomeDashboard helper classes remain the same) ...
 class _ScrollAwareAppBarBackground extends StatefulWidget {
   final ScrollController scrollController;
   
@@ -417,7 +400,6 @@ class _ScrollAwareAppBarBackgroundState extends State<_ScrollAwareAppBarBackgrou
     );
   }
 }
-
 class _AppBarAvatar extends StatefulWidget {
   const _AppBarAvatar();
 
@@ -426,90 +408,35 @@ class _AppBarAvatar extends StatefulWidget {
 }
 
 class _AppBarAvatarState extends State<_AppBarAvatar> {
-  Uint8List? _localImageBytes;
-  String? _selectedAvatarIconName;
-  final String? _currentUserId = _auth.currentUser?.uid;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadLocalAvatar();
-  }
-
-  Future<void> _loadLocalAvatar() async {
-    if (_currentUserId == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final String? imagePath =
-        prefs.getString('profile_picture_path_$_currentUserId');
-    final String? iconName =
-        prefs.getString('profile_avatar_icon_$_currentUserId');
-
-    if (mounted) {
-      if (imagePath != null) {
-        final file = File(imagePath);
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          setState(() {
-            _localImageBytes = bytes;
-            _selectedAvatarIconName = null;
-          });
-        }
-      } else if (iconName != null) {
-        setState(() {
-          _localImageBytes = null;
-          _selectedAvatarIconName = iconName;
-        });
-      } else {
-        setState(() {
-          _localImageBytes = null;
-          _selectedAvatarIconName = null;
-        });
-      }
-    }
-  }
-
-  IconData _getIconDataFromString(String? iconName) {
-    switch (iconName) {
-      case 'face':
-        return Icons.face;
-      case 'rocket':
-        return Icons.rocket_launch;
-      case 'pet':
-        return Icons.pets;
-      default:
-        return Icons.person;
-    }
-  }
+  final String? _currentUserId = FirebaseAuth.instance.currentUser?.uid;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: _currentUserId != null
-          ? _firestore.collection('users').doc(_currentUserId).snapshots()
+          ? FirebaseFirestore.instance.collection('users').doc(_currentUserId).snapshots()
           : null,
       builder: (context, snapshot) {
-        String initial = 'U';
+        
+        // Defaults
+        int iconId = 0;
+        String? colorHex;
+
         if (snapshot.hasData && snapshot.data!.exists) {
           final data = snapshot.data!.data() as Map<String, dynamic>;
-          final String name = data['name'] ?? 'U';
-          if (name.isNotEmpty) {
-            initial = name[0].toUpperCase();
-          }
+          iconId = data['avatarIconId'] ?? 0;
+          colorHex = data['avatarHex'];
         }
 
+        // Use Universal System
         return CircleAvatar(
           radius: 18,
-          backgroundImage:
-              _localImageBytes != null ? MemoryImage(_localImageBytes!) : null,
-          child: (_localImageBytes == null && _selectedAvatarIconName != null)
-              ? Icon(
-                  _getIconDataFromString(_selectedAvatarIconName),
-                  size: 20,
-                  color: TwitterTheme.blue,
-                )
-              : (_localImageBytes == null && _selectedAvatarIconName == null)
-                  ? Text(initial)
-                  : null,
+          backgroundColor: AvatarHelper.getColor(colorHex),
+          child: Icon(
+            AvatarHelper.getIcon(iconId),
+            size: 20,
+            color: Colors.white,
+          ),
         );
       },
     );
@@ -523,14 +450,14 @@ class _NotificationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = _auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return IconButton(
           icon: Icon(Icons.notifications_none), onPressed: onPressed);
     }
 
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
+      stream: FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection('notifications')
@@ -568,6 +495,27 @@ class _NotificationButton extends StatelessWidget {
     );
   }
 }
+
+// ### NEW KeepAlive Wrapper ###
+class KeepAlivePage extends StatefulWidget {
+  const KeepAlivePage({super.key, required this.child});
+  final Widget child;
+
+  @override
+  State<KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<KeepAlivePage> with AutomaticKeepAliveClientMixin {
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+  
+  @override
+  bool get wantKeepAlive => true;
+}
+
 
 class CustomAnimatedBottomBar extends StatelessWidget {
   const CustomAnimatedBottomBar({

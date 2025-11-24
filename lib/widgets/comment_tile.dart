@@ -1,10 +1,7 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:io';
-import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/post_detail_screen.dart'; 
 import '../screens/user_profile_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
@@ -35,54 +32,6 @@ class CommentTile extends StatefulWidget {
 
 class _CommentTileState extends State<CommentTile> {
   final TextEditingController _editController = TextEditingController();
-
-  Uint8List? _localImageBytes;
-  String? _selectedAvatarIconName;
-  String? _currentUserId;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadLocalAvatar(); 
-  }
-
-  Future<void> _loadLocalAvatar() async {
-    _currentUserId = _auth.currentUser?.uid;
-    if (widget.isOwner && _currentUserId != null) {
-      final prefs = await SharedPreferences.getInstance();
-      final String? imagePath = prefs.getString('profile_picture_path_$_currentUserId');
-      final String? iconName = prefs.getString('profile_avatar_icon_$_currentUserId');
-      
-      if (mounted) {
-        if (imagePath != null) {
-          final file = File(imagePath);
-          if (await file.exists()) {
-            final bytes = await file.readAsBytes();
-            setState(() {
-              _localImageBytes = bytes;
-              _selectedAvatarIconName = null;
-            });
-          } else {
-            await prefs.remove('profile_picture_path_$_currentUserId');
-            setState(() {
-              _localImageBytes = null;
-              _selectedAvatarIconName = iconName; 
-            });
-          }
-        } else if (iconName != null) {
-          setState(() {
-            _localImageBytes = null;
-            _selectedAvatarIconName = iconName;
-          });
-        } else {
-          setState(() {
-            _localImageBytes = null;
-            _selectedAvatarIconName = null;
-          });
-        }
-      }
-    }
-  }
 
   Future<void> _deleteComment() async {
     final didConfirm = await showDialog<bool>(
@@ -169,6 +118,7 @@ class _CommentTileState extends State<CommentTile> {
   }
 
   void _navigateToOriginalPost() {
+    if (!widget.showPostContext) return; 
     _firestore.collection('posts').doc(widget.postId).get().then((doc) {
       if (doc.exists && mounted) {
         Navigator.of(context).push(
@@ -199,15 +149,6 @@ class _CommentTileState extends State<CommentTile> {
     return timeago.format(timestamp.toDate(), locale: 'en_short');
   }
 
-  IconData _getIconDataFromString(String? iconName) {
-    switch (iconName) {
-      case 'face': return Icons.face;
-      case 'rocket': return Icons.rocket_launch;
-      case 'pet': return Icons.pets;
-      default: return Icons.person; 
-    }
-  }
-
   @override
   void dispose() {
     _editController.dispose();
@@ -222,7 +163,7 @@ class _CommentTileState extends State<CommentTile> {
         builder: (context, snapshot) {
           if (!snapshot.hasData) return SizedBox.shrink(); 
           if (!snapshot.data!.exists) {
-             return _buildReplyTile(context); 
+             return _buildReplyTile(context, isThreaded: false); 
           }
           final parentData = snapshot.data!.data() as Map<String, dynamic>;
           
@@ -230,13 +171,13 @@ class _CommentTileState extends State<CommentTile> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildParentPostSnippet(context, parentData),
-              _buildReplyTile(context),
+              _buildReplyTile(context, isThreaded: true),
             ],
           );
         },
       );
     }
-    return _buildReplyTile(context);
+    return _buildReplyTile(context, isThreaded: true);
   }
 
   Widget _buildParentPostSnippet(BuildContext context, Map<String, dynamic> parentData) {
@@ -244,24 +185,27 @@ class _CommentTileState extends State<CommentTile> {
     final String parentName = parentData['userName'] ?? 'Unknown';
     final String parentText = parentData['text'] ?? '';
 
+    final int parentIconId = parentData['avatarIconId'] ?? 0;
+    final String? parentColorHex = parentData['avatarHex'];
+    final Color parentAvatarBg = AvatarHelper.getColor(parentColorHex);
+
     return InkWell(
       onTap: _navigateToOriginalPost,
       child: Container(
         color: theme.cardColor,
-        padding: EdgeInsets.fromLTRB(12, 12, 16, 0), // Adjusted padding for alignment
+        padding: EdgeInsets.fromLTRB(12, 12, 16, 0), 
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Parent Trunk Column
               SizedBox(
                 width: 40,
                 child: Column(
                   children: [
                     CircleAvatar(
-                      radius: 16, // Smaller avatar for parent context
-                      backgroundColor: theme.dividerColor,
-                      child: Text(parentName.isNotEmpty ? parentName[0].toUpperCase() : '?', style: TextStyle(fontSize: 12, color: theme.cardColor)),
+                      radius: 16, 
+                      backgroundColor: parentAvatarBg,
+                      child: Icon(AvatarHelper.getIcon(parentIconId), size: 16, color: Colors.white),
                     ),
                     Expanded(
                       child: Container(
@@ -296,45 +240,44 @@ class _CommentTileState extends State<CommentTile> {
     );
   }
 
-  // ### FIXED: L-Shape Visual Implementation ###
-  Widget _buildReplyTile(BuildContext context) {
+  Widget _buildReplyTile(BuildContext context, {required bool isThreaded}) {
     final data = widget.commentData;
     final theme = Theme.of(context);
     final String userName = data['userName'] ?? 'Anonymous';
     final String text = data['text'] ?? '';
     final Timestamp? timestamp = data['timestamp'] as Timestamp?;
-    final bool showCustomAvatar = widget.isOwner && (_localImageBytes != null || _selectedAvatarIconName != null);
+
+    final int iconId = data['avatarIconId'] ?? 0;
+    final String? colorHex = data['avatarHex'];
+    final Color avatarBg = AvatarHelper.getColor(colorHex);
 
     return InkWell(
       onTap: _navigateToOriginalPost,
       child: Container(
         color: theme.cardColor,
-        // We remove standard padding here because we structure the tree manually
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 1. THE TREE STRUCTURE (L-Shape)
+              // Tree Structure
               Container(
-                width: 48, // Fixed width for the tree visual area
+                width: 48,
                 color: Colors.transparent,
                 child: Stack(
                   children: [
-                    // Trunk (Vertical Line)
                     Positioned(
                       top: 0,
                       bottom: 0,
-                      left: 20, // Center of the 40px area
+                      left: 20, 
                       child: Container(
                         width: 2,
-                        color: theme.dividerColor, // The tree line color
+                        color: theme.dividerColor, 
                       ),
                     ),
-                    // Branch (Horizontal Line)
                     Positioned(
-                      top: 24, // Align with center of Avatar
-                      left: 20, // Start from Trunk
-                      width: 16, // Reach to Avatar
+                      top: 24, 
+                      left: 20, 
+                      width: 16, 
                       child: Container(
                         height: 2,
                         color: theme.dividerColor,
@@ -344,32 +287,22 @@ class _CommentTileState extends State<CommentTile> {
                 ),
               ),
 
-              // 2. AVATAR
+              // Avatar
               Padding(
                 padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
                 child: GestureDetector(
                   onTap: _navigateToUserProfile,
                   child: CircleAvatar(
                     radius: 18, 
-                    backgroundImage: (widget.isOwner && _localImageBytes != null) 
-                      ? MemoryImage(_localImageBytes!) 
-                      : null,
-                    child: (showCustomAvatar && _localImageBytes == null)
-                      ? Icon(
-                          _getIconDataFromString(_selectedAvatarIconName),
-                          size: 20,
-                          color: TwitterTheme.blue,
-                        )
-                      : (showCustomAvatar == false) 
-                        ? Text(userName.isNotEmpty ? userName[0] : 'A', style: TextStyle(fontSize: 14))
-                        : null, 
+                    backgroundColor: avatarBg,
+                    child: Icon(AvatarHelper.getIcon(iconId), size: 20, color: Colors.white),
                   ),
                 ),
               ),
 
               SizedBox(width: 10),
 
-              // 3. CONTENT
+              // Content
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),

@@ -1,12 +1,10 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart'; 
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../main.dart';
@@ -33,8 +31,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   late TabController _tabController;
   final ScrollController _scrollController = ScrollController();
   
-  Uint8List? _localImageBytes;
-  String? _selectedAvatarIconName;
   late final User? _user;
   late final String _userId;
   
@@ -48,7 +44,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _tabController = TabController(length: 3, vsync: this);
     
     _scrollController.addListener(_scrollListener);
-    _loadLocalAvatar();
   }
   
   void _scrollListener() {
@@ -57,42 +52,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       if (scrolled != _isScrolled) {
         setState(() {
           _isScrolled = scrolled;
-        });
-      }
-    }
-  }
-
-  Future<void> _loadLocalAvatar() async {
-    if (_userId == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final String? imagePath = prefs.getString('profile_picture_path_$_userId');
-    final String? iconName = prefs.getString('profile_avatar_icon_$_userId');
-
-    if (mounted) {
-      if (imagePath != null) {
-        final file = File(imagePath);
-        if (await file.exists()) {
-          final bytes = await file.readAsBytes();
-          setState(() {
-            _localImageBytes = bytes;
-            _selectedAvatarIconName = null;
-          });
-        } else {
-          await prefs.remove('profile_picture_path_$_userId');
-          setState(() {
-            _localImageBytes = null;
-            _selectedAvatarIconName = iconName;
-          });
-        }
-      } else if (iconName != null) {
-        setState(() {
-          _localImageBytes = null;
-          _selectedAvatarIconName = iconName;
-        });
-      } else {
-        setState(() {
-          _localImageBytes = null;
-          _selectedAvatarIconName = null;
         });
       }
     }
@@ -126,7 +85,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _shareProfile(String name) {
-    Share.share("Check out $name's profile on PNJ Media: https://github.com/blankony/myfirebaseflutterapp");
+    Share.share("Check out $name's profile on Sapa PNJ!");
   }
 
   void _blockUser(String name) {
@@ -181,15 +140,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return 'Joined $formattedDate';
   }
 
-  IconData _getIconDataFromString(String? iconName) {
-    switch (iconName) {
-      case 'face': return Icons.face;
-      case 'rocket': return Icons.rocket_launch;
-      case 'pet': return Icons.pets;
-      default: return Icons.person;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_userId == null) {
@@ -197,18 +147,69 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
     
     final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
 
-    Widget scrollView = DefaultTabController(
+    Widget content = DefaultTabController(
       length: 3,
       child: NestedScrollView(
         controller: _scrollController,
         headerSliverBuilder: (context, innerBoxIsScrolled) {
           return [
+            // 1. Pinned App Bar with Actions
+            StreamBuilder<DocumentSnapshot>(
+              stream: _firestore.collection('users').doc(_userId).snapshots(),
+              builder: (context, snapshot) {
+                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+                final String name = data['name'] ?? '';
+                final bool isMyProfile = _user?.uid == _userId;
+                
+                // Determine the pinned app bar's background color.
+                final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
+                
+                // Determine icon color based on scroll state AND theme
+                final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
+                final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
+
+                return SliverAppBar(
+                  pinned: true,
+                  elevation: 0,
+                  // FIX: Set explicit background color (or animated fade) to prevent transparency issue
+                  backgroundColor: _isScrolled ? appBarBgColor : appBarBgColor, 
+                  // FIX: Set Status Bar icons to be consistent with AppBar background
+                  systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+                  automaticallyImplyLeading: widget.includeScaffold,
+                  iconTheme: IconThemeData(
+                    color: iconColor, 
+                  ),
+                  title: AnimatedOpacity(
+                    opacity: _isScrolled ? 1.0 : 0.0,
+                    duration: Duration(milliseconds: 200),
+                    child: Text(
+                      name, 
+                      style: TextStyle(
+                        color: titleColor,
+                        fontWeight: FontWeight.bold
+                      )
+                    ),
+                  ),
+                  centerTitle: false,
+                  actions: [
+                    // FIX: Ensure three dots are always visible
+                    IconButton(
+                      icon: Icon(Icons.more_vert, color: iconColor),
+                      onPressed: () => _showMoreOptions(context, name, isMyProfile),
+                    ),
+                  ],
+                );
+              },
+            ),
+
+            // 2. Profile Info (Banner + Avatar + Details)
             SliverToBoxAdapter(
               child: StreamBuilder<DocumentSnapshot>(
                 stream: _firestore.collection('users').doc(_userId).snapshots(),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData) return SizedBox(height: 300, child: Center(child: CircularProgressIndicator()));
+                  if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
                   
                   final data = snapshot.data!.data() as Map<String, dynamic>;
                   final bool isMyProfile = _user?.uid == _userId;
@@ -217,6 +218,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 },
               ),
             ),
+
+            // 3. Tabs
             SliverPersistentHeader(
               delegate: _SliverAppBarDelegate(
                 TabBar(
@@ -246,202 +249,153 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       ),
     );
 
-    Widget floatingAppBar = StreamBuilder<DocumentSnapshot>(
-      stream: _firestore.collection('users').doc(_userId).snapshots(),
-      builder: (context, snapshot) {
-        final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-        final String name = data['name'] ?? '';
-        final bool isMyProfile = _user?.uid == _userId;
-
-        return Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: AppBar(
-            backgroundColor: _isScrolled ? theme.scaffoldBackgroundColor : Colors.transparent,
-            elevation: 0,
-            automaticallyImplyLeading: widget.includeScaffold,
-            iconTheme: IconThemeData(
-              color: _isScrolled ? theme.iconTheme.color : Colors.white,
-            ),
-            title: AnimatedOpacity(
-              opacity: _isScrolled ? 1.0 : 0.0,
-              duration: Duration(milliseconds: 200),
-              child: Text(
-                name, 
-                style: TextStyle(
-                  color: theme.textTheme.titleLarge?.color,
-                  fontWeight: FontWeight.bold
-                )
-              ),
-            ),
-            centerTitle: false,
-            actions: [
-              // Menu is now always available via the floating AppBar
-              IconButton(
-                icon: Icon(Icons.more_vert),
-                onPressed: () => _showMoreOptions(context, name, isMyProfile),
-              ),
-            ],
-          ),
-        );
-      }
-    );
-
-    Widget content = Stack(
-      children: [
-        scrollView, 
-        floatingAppBar,
-      ],
-    );
-
     if (widget.includeScaffold) {
       return Scaffold(
+        extendBodyBehindAppBar: true, 
         body: content,
       );
     }
-
     return content;
   }
+Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
+  final theme = Theme.of(context);
+  final String name = data['name'] ?? 'Name';
+  final String email = data['email'] ?? '';
+  final String nim = data['nim'] ?? '';
+  final String bio = data['bio'] ?? '';
+  final List<dynamic> following = data['following'] ?? [];
+  final List<dynamic> followers = data['followers'] ?? [];
 
-  Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
-    final theme = Theme.of(context);
-    final String name = data['name'] ?? 'Name';
-    final String email = data['email'] ?? '';
-    final String nim = data['nim'] ?? '';
-    final String bio = data['bio'] ?? '';
-    final List<dynamic> following = data['following'] ?? [];
-    final List<dynamic> followers = data['followers'] ?? [];
-    final bool amIFollowing = followers.contains(_user?.uid);
+  const double bannerHeight = 150.0;
+  const double avatarRadius = 45.0;
+  
+  // This height reserves space for the banner plus the elements hanging below it (avatar/button)
+  // Banner (150) + Space for Avatar/Button (~60)
+  const double headerStackHeight = bannerHeight + 60.0;
 
-    const double bannerHeight = 150.0;
-    const double avatarRadius = 45.0;
-    final double topPadding = MediaQuery.of(context).padding.top + kToolbarHeight;
-
-    return Column(
-      children: [
-        Stack(
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      // 1. VISUAL HEADER STACK (Banner + Avatar + Button)
+      SizedBox(
+        height: headerStackHeight,
+        child: Stack(
           clipBehavior: Clip.none,
           children: [
+            // Layer 1: Banner
             Container(
-              height: bannerHeight + topPadding, 
+              height: bannerHeight,
               width: double.infinity,
               color: TwitterTheme.darkGrey,
             ),
+            
+            // Layer 2: Avatar
             Positioned(
-              bottom: -avatarRadius, 
+              top: bannerHeight - avatarRadius,
               left: 16,
               child: CircleAvatar(
-                radius: avatarRadius + 4, 
+                radius: avatarRadius + 4,
                 backgroundColor: theme.scaffoldBackgroundColor,
                 child: _buildAvatarImage(data),
               ),
             ),
+
+            // Layer 3: Action Button
+            Positioned(
+              top: bannerHeight + 16,
+              right: 16,
+              child: isMyProfile
+                  ? OutlinedButton(
+                      onPressed: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(builder: (context) => EditProfileScreen()),
+                        );
+                        if (mounted) setState(() {});
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: theme.textTheme.bodyLarge?.color,
+                        side: BorderSide(color: theme.dividerColor),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: Text("Edit Profile"),
+                    )
+                  : _buildFollowButton(followers),
+            ),
           ],
         ),
+      ),
 
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 12.0), 
-                  child: isMyProfile
-                      ? OutlinedButton(
-                          onPressed: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(builder: (context) => EditProfileScreen()),
-                            );
-                            _loadLocalAvatar();
-                          },
-                          child: Text("Edit Profile"),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: theme.textTheme.bodyLarge?.color,
-                            side: BorderSide(color: theme.dividerColor),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        )
-                      : amIFollowing 
-                          ? OutlinedButton(
-                              onPressed: _unfollowUser,
-                              child: Text("Unfollow"),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: theme.textTheme.bodyLarge?.color,
-                                side: BorderSide(color: theme.dividerColor),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            )
-                          : ElevatedButton(
-                              onPressed: _followUser,
-                              child: Text("Follow"),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: TwitterTheme.blue,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ),
-                ),
-              ),
-              
-              SizedBox(height: 4), 
-              Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22)),
-              Text("@${email.split('@')[0]}", style: theme.textTheme.titleSmall),
-              SizedBox(height: 4),
-              Text(nim, style: theme.textTheme.titleSmall),
-              SizedBox(height: 8),
-              Text(
-                bio.isEmpty ? "No bio set." : bio,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal
-                ),
-              ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor),
-                  SizedBox(width: 8),
-                  Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall),
-                ],
-              ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildStatText(context, following.length, "Following"),
-                  SizedBox(width: 16),
-                  _buildStatText(context, followers.length, "Followers"),
-                ],
-              ),
-              SizedBox(height: 4),
-            ],
-          ),
+      // 2. TEXT INFO COLUMN (Moved OUT of the Stack)
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22)),
+            Text("@${email.split('@')[0]}", style: theme.textTheme.titleSmall),
+            SizedBox(height: 4),
+            Text(nim, style: theme.textTheme.titleSmall),
+            SizedBox(height: 8),
+            Text(
+              bio.isEmpty ? "No bio set." : bio,
+              style: theme.textTheme.bodyLarge?.copyWith(fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal),
+            ),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor),
+                SizedBox(width: 8),
+                Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall),
+              ],
+            ),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                _buildStatText(context, following.length, "Following"),
+                SizedBox(width: 16),
+                _buildStatText(context, followers.length, "Followers"),
+              ],
+            ),
+            SizedBox(height: 16), // Bottom padding before tabs
+          ],
         ),
-      ],
+      ),
+    ],
+  );
+}
+
+  Widget _buildAvatarImage(Map<String, dynamic> data) {
+    final int iconId = data['avatarIconId'] ?? 0;
+    final String? colorHex = data['avatarHex'];
+    final Color bgColor = AvatarHelper.getColor(colorHex);
+    
+    return CircleAvatar(
+      radius: 45,
+      backgroundColor: bgColor,
+      child: Icon(
+        AvatarHelper.getIcon(iconId),
+        size: 50,
+        color: Colors.white,
+      ),
     );
   }
 
-  Widget _buildAvatarImage(Map<String, dynamic> data) {
-    final String name = data['name'] ?? 'U';
-    const double avatarRadius = 45.0;
-    
-    return CircleAvatar(
-      radius: avatarRadius,
-      backgroundImage: _localImageBytes != null ? MemoryImage(_localImageBytes!) : null,
-      child: (_localImageBytes == null && _selectedAvatarIconName != null)
-        ? Icon(
-            _getIconDataFromString(_selectedAvatarIconName),
-            size: 50,
-            color: TwitterTheme.blue,
-          )
-        : (_localImageBytes == null && _selectedAvatarIconName == null)
-          ? Text(name.isNotEmpty ? name[0].toUpperCase() : "A", style: TextStyle(fontSize: 35))
-          : null,
-    );
+  Widget _buildFollowButton(List<dynamic> followers) {
+    final bool amIFollowing = followers.contains(_user?.uid);
+    return amIFollowing
+      ? OutlinedButton(
+          onPressed: _unfollowUser,
+          child: Text("Unfollow"),
+        )
+      : ElevatedButton(
+          onPressed: _followUser,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TwitterTheme.blue,
+            foregroundColor: Colors.white,
+          ),
+          child: Text("Follow"),
+        );
   }
 
   Widget _buildStatText(BuildContext context, int count, String label) {
@@ -455,27 +409,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // FIX: Use ListView.builder to avoid stripes
   Widget _buildMyPosts(String userId) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('posts')
-          .where('userId', isEqualTo: userId)
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
+      stream: _firestore.collection('posts').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-        if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
-        if (snapshot.data!.docs.isEmpty) {
-          return Center(child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text('You have not created any posts yet.'),
-          ));
-        }
+        if (snapshot.data!.docs.isEmpty) return Center(child: Text('No posts yet.'));
 
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 100), 
-          physics: const AlwaysScrollableScrollPhysics(), 
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
           itemCount: snapshot.data!.docs.length,
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
@@ -483,7 +427,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             return BlogPostCard(
               postId: doc.id,
               postData: data,
-              isOwner: true,
+              isOwner: data['userId'] == _auth.currentUser?.uid,
             );
           },
         );
@@ -493,23 +437,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   Widget _buildMyReplies(String userId) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collectionGroup('comments')
-          .where('userId', isEqualTo: userId)
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
+      stream: _firestore.collectionGroup('comments').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-        if (snapshot.data!.docs.isEmpty) {
-          return Center(child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text('You have not replied to any posts yet.'),
-          ));
-        }
+        if (snapshot.data!.docs.isEmpty) return Center(child: Text('No replies yet.'));
 
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 100),
-          physics: const AlwaysScrollableScrollPhysics(),
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
           itemCount: snapshot.data!.docs.length,
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
@@ -531,26 +467,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   Widget _buildMyReposts(String userId) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('posts')
-          .where('repostedBy', arrayContains: userId)
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
+      stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-        
-        if (snapshot.hasError) return Center(child: Text('No reposts (or missing index).'));
-        
-        if (snapshot.data!.docs.isEmpty) {
-          return Center(child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text('You have not reposted anything yet.'),
-          ));
-        }
+        if (snapshot.data!.docs.isEmpty) return Center(child: Text('No reposts yet.'));
 
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 100),
-          physics: const AlwaysScrollableScrollPhysics(),
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
           itemCount: snapshot.data!.docs.length,
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
@@ -570,23 +495,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   _SliverAppBarDelegate(this._tabBar);
   final TabBar _tabBar;
-
-  @override
-  double get minExtent => _tabBar.preferredSize.height;
-  @override
-  double get maxExtent => _tabBar.preferredSize.height;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: _tabBar,
-    );
+  @override double get minExtent => _tabBar.preferredSize.height;
+  @override double get maxExtent => _tabBar.preferredSize.height;
+  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return Container(color: Theme.of(context).scaffoldBackgroundColor, child: _tabBar);
   }
-
-  @override
-  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) {
-    return false;
-  }
+  @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
 }

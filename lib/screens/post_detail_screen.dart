@@ -26,6 +26,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final TextEditingController _commentController = TextEditingController();
   final User? _currentUser = _auth.currentUser;
 
+  // Helper for Slide Left Animation
+  Route _createSlideLeftRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0); 
+        const end = Offset.zero;
+        const curve = Curves.easeInOutQuart;
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        return SlideTransition(position: animation.drive(tween), child: child);
+      },
+    );
+  }
+
   Future<void> _postComment() async {
     if (_commentController.text.isEmpty || _currentUser == null) {
       return;
@@ -33,15 +47,19 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     String userName = "Anonymous";
     String userEmail = "anonymous@mail.com";
+    int iconId = 0;
+    String hex = '';
+
     try {
       final userDoc = await _firestore.collection('users').doc(_currentUser!.uid).get();
       if (userDoc.exists) {
-        userName = userDoc.data()?['name'] ?? userName;
-        userEmail = userDoc.data()?['email'] ?? userEmail;
+        final data = userDoc.data();
+        userName = data?['name'] ?? userName;
+        userEmail = data?['email'] ?? userEmail;
+        iconId = data?['avatarIconId'] ?? 0;
+        hex = data?['avatarHex'] ?? '';
       }
-    } catch (e) {
-      // Use default
-    }
+    } catch (e) {}
 
     final commentData = {
       'text': _commentController.text,
@@ -50,6 +68,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       'originalPostId': widget.postId,
       'userName': userName,
       'userEmail': userEmail,
+      'avatarIconId': iconId,
+      'avatarHex': hex,
     };
 
     try {
@@ -150,7 +170,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     },
                   ),
                   
-                  // FIX: Removed manual Divider
                   _buildCommentList(),
                 ],
               ),
@@ -184,7 +203,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           );
         }
 
-        // FIX: Use ListView.builder (no separators)
         return ListView.builder(
           itemCount: snapshot.data!.docs.length,
           shrinkWrap: true,

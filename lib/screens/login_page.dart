@@ -1,7 +1,8 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'forgot_password_screen.dart'; 
+import 'forgot_password_screen.dart';
+import 'register_page.dart'; 
 import '../main.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -14,21 +15,30 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  // Kunci Global untuk Form
   final _formKey = GlobalKey<FormState>();
-
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   String _errorMessage = '';
   bool _isLoading = false; 
-
-  // State untuk menampilkan/menyembunyikan password
   bool _isPasswordObscured = true;
+
+  // Helper for custom transition
+  Route _createSlideUpRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(0.0, 1.0);
+        const end = Offset.zero;
+        const curve = Curves.easeInOutQuart;
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        return SlideTransition(position: animation.drive(tween), child: child);
+      },
+    );
+  }
 
   Future<void> _signIn() async {
     if (_isLoading) return; 
 
-    // 1. Validasi form
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -45,15 +55,7 @@ class _LoginPageState extends State<LoginPage> {
       );
       
       if (context.mounted) {
-        // Navigasi atau aksi setelah login berhasil
-        // Jika Anda menggunakan AuthGate, pop() mungkin tidak diperlukan
-        // tergantung alur Anda.
-        // Untuk amannya, kita bisa hapus pop() jika AuthGate menangani
-        // navigasi global.
-        
-        // Jika login_page muncul di atas AuthGate/DecisionGate,
-        // maka pop() diperlukan.
-        Navigator.of(context).pop();
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on FirebaseAuthException catch (e) {
       switch (e.code) {
@@ -80,26 +82,18 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // --- Fungsi Validator ---
   String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Email cannot be empty.';
-    }
+    if (value == null || value.trim().isEmpty) return 'Email cannot be empty.';
     String pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
     RegExp regex = RegExp(pattern);
-    if (!regex.hasMatch(value)) {
-      return 'Enter a valid email address.';
-    }
+    if (!regex.hasMatch(value)) return 'Enter a valid email address.';
     return null;
   }
 
   String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password cannot be empty.';
-    }
+    if (value == null || value.isEmpty) return 'Password cannot be empty.';
     return null;
   }
-  // --- Akhir Fungsi Validator ---
 
   @override
   void dispose() {
@@ -111,100 +105,190 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
 
     return Scaffold(
+      extendBodyBehindAppBar: true, // Allow blobs to sit behind AppBar
       appBar: AppBar(
-        title: Image.asset('images/app_icon.png', height: 30),
-        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: IconThemeData(color: theme.primaryColor),
       ),
       body: Stack(
         children: [
-          SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-            // Bungkus dengan Form
-            child: Form(
-              key: _formKey, // Pasang key
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Sign in to your account",
-                    style: theme.textTheme.headlineMedium?.copyWith(fontSize: 28),
-                  ),
-                  SizedBox(height: 32),
-                  
-                  TextFormField( // Ganti ke TextFormField
-                    controller: _emailController,
-                    decoration: InputDecoration(labelText: 'Enter email'),
-                    keyboardType: TextInputType.emailAddress,
-                    validator: _validateEmail, // Tambah validator
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
-                  ),
-                  SizedBox(height: 16),
-                  
-                  TextFormField( // Ganti ke TextFormField
-                    controller: _passwordController,
-                    obscureText: _isPasswordObscured, // Gunakan state
-                    decoration: InputDecoration(
-                      labelText: 'Enter password',
-                      // Tambahkan ikon show/hide
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordObscured = !_isPasswordObscured;
-                          });
-                        },
-                      ),
-                    ),
-                    validator: _validatePassword, // Tambah validator
-                    autovalidateMode: AutovalidateMode.onUserInteraction,
-                  ),
-                  SizedBox(height: 16),
+          // --- DECORATIVE BACKGROUND (Matches Welcome Screen) ---
+          Positioned(
+            top: -100,
+            right: -100,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: TwitterTheme.blue.withOpacity(isDarkMode ? 0.15 : 0.1),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 150,
+            left: -50,
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: TwitterTheme.blue.withOpacity(isDarkMode ? 0.1 : 0.05),
+              ),
+            ),
+          ),
 
-                  if (_errorMessage.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16, top: 8),
-                      child: Center(
-                        child: Text(
-                          _errorMessage,
-                          style: const TextStyle(color: Colors.red, fontSize: 14),
-                          textAlign: TextAlign.center,
+          // --- MAIN CONTENT ---
+          TweenAnimationBuilder(
+            tween: Tween<double>(begin: 1.0, end: 0.0),
+            duration: const Duration(milliseconds: 800),
+            curve: Curves.easeOutQuart,
+            builder: (context, double value, child) {
+              return Transform.translate(
+                offset: Offset(0, value * 200),
+                child: Opacity(
+                  opacity: 1 - value,
+                  child: child,
+                ),
+              );
+            },
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Rebranding Header
+                      Row(
+                        children: [
+                          Text(
+                            "SAPA", 
+                            style: theme.textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: TwitterTheme.blue,
+                              letterSpacing: -1.0,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "PNJ", 
+                            style: theme.textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -1.0,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 40),
+
+                      Text(
+                        "Sign in to your account",
+                        style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 32),
+                      
+                      TextFormField( 
+                        controller: _emailController,
+                        decoration: InputDecoration(labelText: 'Enter email'),
+                        keyboardType: TextInputType.emailAddress,
+                        validator: _validateEmail,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                      ),
+                      SizedBox(height: 16),
+                      
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: _isPasswordObscured,
+                        decoration: InputDecoration(
+                          labelText: 'Enter password',
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isPasswordObscured = !_isPasswordObscured;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: _validatePassword,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                      ),
+                      SizedBox(height: 16),
+
+                      if (_errorMessage.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16, top: 8),
+                          child: Center(
+                            child: Text(
+                              _errorMessage,
+                              style: const TextStyle(color: Colors.red, fontSize: 14),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+
+                      Align(
+                        alignment: Alignment.center,
+                        child: TextButton(
+                          onPressed: () {
+                             Navigator.of(context).push(
+                              MaterialPageRoute(builder: (context) => ForgotPasswordScreen()),
+                            );
+                          },
+                          child: Text('Forgot password?', style: TextStyle(color: TwitterTheme.blue)),
                         ),
                       ),
-                    ),
+                      SizedBox(height: 24),
 
-                  Align(
-                    alignment: Alignment.center,
-                    child: TextButton(
-                      onPressed: () {
-                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (context) => ForgotPasswordScreen()),
-                        );
-                      },
-                      child: Text('Forgot password?', style: TextStyle(color: TwitterTheme.blue)),
-                    ),
-                  ),
-                  SizedBox(height: 24),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _signIn, // Fungsi ini sekarang memvalidasi form
-                      child: Text('Login'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: TwitterTheme.blue,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _signIn,
+                          child: Text('Login'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: TwitterTheme.blue,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      
+                      SizedBox(height: 24),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text("Don't have an account? ", style: TextStyle(color: theme.hintColor)),
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).pushReplacement(_createSlideUpRoute(RegisterPage()));
+                            },
+                            child: Text(
+                              "Create one",
+                              style: TextStyle(
+                                color: TwitterTheme.blue,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 24),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

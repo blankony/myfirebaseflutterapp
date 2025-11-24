@@ -49,7 +49,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   }
 
   @override
-  bool get wantKeepAlive => true;
+  bool get wantKeepAlive => true; // CRUCIAL
 
   void _navigateToCreatePost() {
     Navigator.of(context).push(
@@ -62,7 +62,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
+    super.build(context); // CRUCIAL
 
     final double contentTopPadding = 160.0; 
     final double refreshIndicatorOffset = 120.0;

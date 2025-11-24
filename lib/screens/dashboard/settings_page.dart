@@ -10,17 +10,35 @@ final FirebaseAuth _auth = FirebaseAuth.instance;
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
+  
+  // Helper for the "Fly In From Right" Page Transition
+  Route _createSlideRightRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0); // Start from Right
+        const end = Offset.zero;        // End at Center
+        const curve = Curves.easeInOutQuart;
+
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var offsetAnimation = animation.drive(tween);
+
+        return SlideTransition(
+          position: offsetAnimation,
+          child: child,
+        );
+      },
+    );
+  }
+
 
   void _goToAboutPage(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => AboutPage()),
-    );
+    Navigator.of(context).push(_createSlideRightRoute(AboutPage()));
   }
   
   void _goToAccountCenter(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => AccountCenterPage()),
-    );
+    // When opened from Settings, it should be Slide Right.
+    Navigator.of(context).push(_createSlideRightRoute(AccountCenterPage()));
   }
 
   Future<void> _signOut(BuildContext context) async {
@@ -116,7 +134,7 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// ### NEW: Helper Widget for Settings Page ###
+// ### NEW: Helper Widget for Settings Page (with dynamic subtitle) ###
 class _OptimizedThemeTile extends StatefulWidget {
   @override
   State<_OptimizedThemeTile> createState() => _OptimizedThemeTileState();
@@ -141,13 +159,15 @@ class _OptimizedThemeTileState extends State<_OptimizedThemeTile> {
 
   @override
   Widget build(BuildContext context) {
+    final subtitleText = _isDark ? 'Switch to Light' : 'Switch to Dark';
+    
     return ListTile(
       leading: Icon(
         _isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
         color: Theme.of(context).primaryColor
       ),
       title: Text('Theme'),
-      subtitle: Text(_isDark ? 'Dark' : 'Light'),
+      subtitle: Text(subtitleText),
       trailing: Switch(
         value: _isDark,
         onChanged: _handleChange,

@@ -13,6 +13,27 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 class AccountCenterPage extends StatelessWidget {
   const AccountCenterPage({super.key});
 
+  // Helper for the "Fly In From Right" Page Transition
+  Route _createSlideRightRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0); // Start from Right
+        const end = Offset.zero;        // End at Center
+        const curve = Curves.easeInOutQuart;
+
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var offsetAnimation = animation.drive(tween);
+
+        return SlideTransition(
+          position: offsetAnimation,
+          child: child,
+        );
+      },
+    );
+  }
+
+
   // --- Step 1: Prompt Password ---
   Future<void> _promptPasswordForDeletion(BuildContext context) async {
     final TextEditingController passwordController = TextEditingController();
@@ -199,9 +220,8 @@ class AccountCenterPage extends StatelessWidget {
             subtitle: Text('Change Name, Bio, and Avatar'),
             trailing: Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => EditProfileScreen()),
-              );
+              // Apply Slide Right Animation
+              Navigator.of(context).push(_createSlideRightRoute(EditProfileScreen()));
             },
           ),
           ListTile(
@@ -209,9 +229,8 @@ class AccountCenterPage extends StatelessWidget {
             title: Text('Change Password'),
             trailing: Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => ChangePasswordScreen()),
-              );
+              // Apply Slide Right Animation
+              Navigator.of(context).push(_createSlideRightRoute(ChangePasswordScreen()));
             },
           ),
           

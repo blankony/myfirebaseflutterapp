@@ -1,11 +1,8 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:io'; 
-import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:share_plus/share_plus.dart'; 
-import 'package:shared_preferences/shared_preferences.dart'; 
 import '../screens/post_detail_screen.dart'; 
 import '../screens/dashboard/profile_page.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
@@ -42,10 +39,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   late bool _isReposted;
   late int _repostCount;
-  
-  Uint8List? _localImageBytes;
-  String? _selectedAvatarIconName;
-  String? _currentUserId; 
 
   // Animation Controllers
   late AnimationController _likeController;
@@ -54,7 +47,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   late AnimationController _repostController;
   late Animation<double> _repostAnimation;
 
-  // ### NEW: Share Animation & State ###
   late AnimationController _shareController;
   late Animation<double> _shareAnimation;
   bool _isSharing = false;
@@ -64,9 +56,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.initState();
     _syncLikeState();
     _syncRepostState(); 
-    _loadLocalAvatar(); 
 
-    // Like Animation
     _likeController = AnimationController(
       duration: const Duration(milliseconds: 100), 
       vsync: this,
@@ -75,7 +65,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       CurvedAnimation(parent: _likeController, curve: Curves.easeInOut),
     );
 
-    // Repost Animation
     _repostController = AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: this,
@@ -84,7 +73,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       CurvedAnimation(parent: _repostController, curve: Curves.easeInOut),
     );
 
-    // ### NEW: Share Animation Init ###
     _shareController = AnimationController(
       duration: const Duration(milliseconds: 100),
       vsync: this,
@@ -92,44 +80,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _shareAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
       CurvedAnimation(parent: _shareController, curve: Curves.easeInOut),
     );
-  }
-
-  Future<void> _loadLocalAvatar() async {
-    _currentUserId = _auth.currentUser?.uid;
-    if (widget.isOwner && _currentUserId != null) {
-      final prefs = await SharedPreferences.getInstance();
-      final String? imagePath = prefs.getString('profile_picture_path_$_currentUserId');
-      final String? iconName = prefs.getString('profile_avatar_icon_$_currentUserId');
-      
-      if (mounted) {
-        if (imagePath != null) {
-          final file = File(imagePath);
-          if (await file.exists()) {
-            final bytes = await file.readAsBytes();
-            setState(() {
-              _localImageBytes = bytes;
-              _selectedAvatarIconName = null;
-            });
-          } else {
-            await prefs.remove('profile_picture_path_$_currentUserId');
-            setState(() {
-              _localImageBytes = null;
-              _selectedAvatarIconName = iconName; 
-            });
-          }
-        } else if (iconName != null) {
-          setState(() {
-            _localImageBytes = null;
-            _selectedAvatarIconName = iconName;
-          });
-        } else {
-          setState(() {
-            _localImageBytes = null;
-            _selectedAvatarIconName = null;
-          });
-        }
-      }
-    }
   }
 
   @override
@@ -269,16 +219,13 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
-  // ### MODIFIED: Share with Feedback ###
   Future<void> _sharePost() async {
-    // 1. Feedback: Animate & Color Change
     setState(() {
       _isSharing = true;
     });
     _shareController.forward().then((_) => _shareController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
 
-    // 2. Reset color after delay
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) {
         setState(() {
@@ -399,11 +346,26 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
+  // Helper for Slide Left Animation
+  Route _createSlideLeftRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0); 
+        const end = Offset.zero;
+        const curve = Curves.easeInOutQuart;
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        return SlideTransition(position: animation.drive(tween), child: child);
+      },
+    );
+  }
+  
+  // New: Navigation to Post Detail with slide animation
   void _navigateToDetail() {
     if (!widget.isClickable) return; 
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => PostDetailScreen(
+      _createSlideLeftRoute(
+        PostDetailScreen(
           postId: widget.postId,
           initialPostData: widget.postData, 
         ),
@@ -425,8 +387,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
 
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ProfilePage(userId: postUserId, includeScaffold: true), 
+      _createSlideLeftRoute(
+        ProfilePage(userId: postUserId, includeScaffold: true), 
       ),
     );
   }
@@ -436,25 +398,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     return timeago.format(timestamp.toDate(), locale: 'en_short');
   }
 
-  IconData _getIconDataFromString(String? iconName) {
-    switch (iconName) {
-      case 'face':
-        return Icons.face;
-      case 'rocket':
-        return Icons.rocket_launch;
-      case 'pet':
-        return Icons.pets;
-      default:
-        return Icons.person; 
-    }
-  }
-
   @override
   void dispose() {
     _editController.dispose();
     _likeController.dispose();
     _repostController.dispose();
-    _shareController.dispose(); // Dispose new controller
+    _shareController.dispose(); 
     super.dispose();
   }
 
@@ -464,10 +413,13 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final String text = widget.postData['text'] ?? '';
     final Timestamp? timestamp = widget.postData['timestamp'] as Timestamp?;
     
+    // UPDATED: Avatar Retrieval
+    final int iconId = widget.postData['avatarIconId'] ?? 0;
+    final String? colorHex = widget.postData['avatarHex'];
+    final Color avatarBg = AvatarHelper.getColor(colorHex);
+
     final int commentCount = widget.postData['commentCount'] ?? 0;
     final theme = Theme.of(context);
-
-    final bool showCustomAvatar = widget.isOwner && (_localImageBytes != null || _selectedAvatarIconName != null);
 
     return InkWell( 
       onTap: _navigateToDetail, 
@@ -481,18 +433,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
               onTap: _navigateToUserProfile,
               child: CircleAvatar(
                 radius: 24,
-                backgroundImage: (widget.isOwner && _localImageBytes != null) 
-                  ? MemoryImage(_localImageBytes!) 
-                  : null,
-                child: (showCustomAvatar && _localImageBytes == null)
-                  ? Icon(
-                      _getIconDataFromString(_selectedAvatarIconName),
-                      size: 26,
-                      color: TwitterTheme.blue,
-                    )
-                  : (showCustomAvatar == false) 
-                    ? Text(userName.isNotEmpty ? userName[0].toUpperCase() : 'A')
-                    : null, 
+                backgroundColor: avatarBg,
+                child: Icon(
+                  AvatarHelper.getIcon(iconId),
+                  size: 26,
+                  color: Colors.white,
+                ),
               ),
             ),
             SizedBox(width: 12),
@@ -601,7 +547,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
             onTap: _toggleRepost, 
             animation: _repostAnimation
           ),
-          // ### MODIFIED: Added _isSharing check for blue feedback ###
           _buildActionButton(context, 
             icon: Icons.share_outlined, 
             text: 'Share', 
@@ -628,7 +573,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           Expanded(
             child: _buildActionButton(context, icon: isLiked ? Icons.favorite : Icons.favorite_border, text: likeCount.toString(), color: isLiked ? Colors.pink : null, onTap: _toggleLike, animation: _likeAnimation),
           ),
-          // ### MODIFIED: Added _isSharing check for blue feedback ###
           Expanded(
             child: _buildActionButton(context, icon: Icons.share_outlined, text: null, color: _isSharing ? TwitterTheme.blue : null, onTap: _sharePost, animation: _shareAnimation),
           ),
