@@ -125,7 +125,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
             title: Text("Profile"), 
             elevation: 0,
           ),
-          body: NestedScrollView(
+          body: RefreshIndicator(
+            onRefresh: () async {
+              // Simulate a network request
+              await Future.delayed(Duration(seconds: 2));
+              // In a real app, you would re-fetch the user data here.
+              // For demonstration, we can just rebuild the state.
+              setState(() {});
+            },
+            child: NestedScrollView(
             headerSliverBuilder: (context, innerBoxIsScrolled) {
               return [
                 SliverAppBar(
@@ -185,6 +193,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
               ],
             ),
           ),
+          )
         );
       },
     );
@@ -339,6 +348,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
           ));
         }
         return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: snapshot.data!.docs.length,
           separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
           itemBuilder: (context, index) {
@@ -372,6 +383,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
           ));
         }
         return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: snapshot.data!.docs.length,
           separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
           itemBuilder: (context, index) {
@@ -426,6 +439,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
         }
 
         return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: snapshot.data!.docs.length,
           separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
           itemBuilder: (context, index) {

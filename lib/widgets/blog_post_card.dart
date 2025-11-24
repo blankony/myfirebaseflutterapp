@@ -7,9 +7,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:share_plus/share_plus.dart'; 
 import 'package:shared_preferences/shared_preferences.dart'; 
 import '../screens/post_detail_screen.dart'; 
-import '../screens/user_profile_screen.dart'; 
+import '../screens/dashboard/profile_page.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
 import '../main.dart';
+import 'package:flutter/services.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -34,7 +35,7 @@ class BlogPostCard extends StatefulWidget {
   State<BlogPostCard> createState() => _BlogPostCardState();
 }
 
-class _BlogPostCardState extends State<BlogPostCard> {
+class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMixin {
   final TextEditingController _editController = TextEditingController();
   late bool _isLiked;
   late int _likeCount;
@@ -46,12 +47,51 @@ class _BlogPostCardState extends State<BlogPostCard> {
   String? _selectedAvatarIconName;
   String? _currentUserId; 
 
+  // Animation Controllers
+  late AnimationController _likeController;
+  late Animation<double> _likeAnimation;
+
+  late AnimationController _repostController;
+  late Animation<double> _repostAnimation;
+
+  // ### NEW: Share Animation & State ###
+  late AnimationController _shareController;
+  late Animation<double> _shareAnimation;
+  bool _isSharing = false;
+
   @override
   void initState() {
     super.initState();
     _syncLikeState();
     _syncRepostState(); 
     _loadLocalAvatar(); 
+
+    // Like Animation
+    _likeController = AnimationController(
+      duration: const Duration(milliseconds: 100), 
+      vsync: this,
+    );
+    _likeAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
+      CurvedAnimation(parent: _likeController, curve: Curves.easeInOut),
+    );
+
+    // Repost Animation
+    _repostController = AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: this,
+    );
+    _repostAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
+      CurvedAnimation(parent: _repostController, curve: Curves.easeInOut),
+    );
+
+    // ### NEW: Share Animation Init ###
+    _shareController = AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: this,
+    );
+    _shareAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
+      CurvedAnimation(parent: _shareController, curve: Curves.easeInOut),
+    );
   }
 
   Future<void> _loadLocalAvatar() async {
@@ -119,6 +159,9 @@ class _BlogPostCardState extends State<BlogPostCard> {
     final user = _auth.currentUser;
     if (user == null) return;
     
+    _likeController.forward().then((_) => _likeController.reverse());
+    if (hapticNotifier.value) HapticFeedback.lightImpact();
+
     final bool originalIsLiked = _isLiked;
     final int originalLikeCount = _likeCount;
     setState(() {
@@ -173,6 +216,9 @@ class _BlogPostCardState extends State<BlogPostCard> {
     final user = _auth.currentUser;
     if (user == null) return;
     
+    _repostController.forward().then((_) => _repostController.reverse());
+    if (hapticNotifier.value) HapticFeedback.lightImpact();
+
     final bool originalIsReposted = _isReposted;
     final int originalRepostCount = _repostCount;
     setState(() {
@@ -218,6 +264,43 @@ class _BlogPostCardState extends State<BlogPostCard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to repost: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  // ### MODIFIED: Share with Feedback ###
+  Future<void> _sharePost() async {
+    // 1. Feedback: Animate & Color Change
+    setState(() {
+      _isSharing = true;
+    });
+    _shareController.forward().then((_) => _shareController.reverse());
+    if (hapticNotifier.value) HapticFeedback.lightImpact();
+
+    // 2. Reset color after delay
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _isSharing = false;
+        });
+      }
+    });
+
+    final String text = widget.postData['text'] ?? 'Check out this post!';
+    final String userName = widget.postData['userName'] ?? 'A user';
+    
+    final String shareContent = '"$text"\n- $userName';
+
+    try {
+      await Share.share(
+        shareContent,
+        subject: 'Post by $userName', 
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share: $e')),
         );
       }
     }
@@ -331,10 +414,19 @@ class _BlogPostCardState extends State<BlogPostCard> {
   void _navigateToUserProfile() {
     final postUserId = widget.postData['userId'];
     if (postUserId == null) return;
-    if (postUserId == _auth.currentUser?.uid && !widget.isClickable) return;
+
+    if (widget.isOwner) {
+      final scaffold = Scaffold.maybeOf(context);
+      if (scaffold != null && scaffold.hasDrawer) {
+        if (hapticNotifier.value) HapticFeedback.lightImpact();
+        scaffold.openDrawer();
+        return;
+      }
+    }
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => UserProfileScreen(userId: postUserId),
+        builder: (context) => ProfilePage(userId: postUserId, includeScaffold: true), 
       ),
     );
   }
@@ -342,24 +434,6 @@ class _BlogPostCardState extends State<BlogPostCard> {
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return "just now";
     return timeago.format(timestamp.toDate(), locale: 'en_short');
-  }
-
-  Future<void> _sharePost() async {
-    final String text = widget.postData['text'] ?? 'Check out this post!';
-    final String userName = widget.postData['userName'] ?? 'A user';
-    
-    final String shareContent = '"$text"\n- $userName';
-
-    try {
-      await Share.share(
-        shareContent,
-        subject: 'Post by $userName', 
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share: $e')),
-      );
-    }
   }
 
   IconData _getIconDataFromString(String? iconName) {
@@ -378,6 +452,9 @@ class _BlogPostCardState extends State<BlogPostCard> {
   @override
   void dispose() {
     _editController.dispose();
+    _likeController.dispose();
+    _repostController.dispose();
+    _shareController.dispose(); // Dispose new controller
     super.dispose();
   }
 
@@ -457,10 +534,9 @@ class _BlogPostCardState extends State<BlogPostCard> {
                   ),
                   
                   if (widget.isDetailView)
-                    _buildStatsRow(commentCount, _likeCount),
-                  
-                  if (!widget.isDetailView)
-                    _buildActionRow(commentCount, _repostCount, _isReposted, _likeCount, _isLiked),
+                    _buildDetailActionRow(_likeCount, _repostCount, _isLiked, _isReposted)
+                  else
+                    _buildFeedActionRow(commentCount, _repostCount, _isReposted, _likeCount, _isLiked),
                 ],
               ),
             ),
@@ -505,71 +581,80 @@ class _BlogPostCardState extends State<BlogPostCard> {
     );
   }
 
-  Widget _buildActionRow(int commentCount, int repostCount, bool isReposted, int likeCount, bool isLiked) {
+  Widget _buildDetailActionRow(int likeCount, int repostCount, bool isLiked, bool isReposted) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _buildActionButton(context, 
+            icon: isLiked ? Icons.favorite : Icons.favorite_border, 
+            text: '$likeCount Likes', 
+            color: isLiked ? Colors.pink : null, 
+            onTap: _toggleLike, 
+            animation: _likeAnimation
+          ),
+          _buildActionButton(context, 
+            icon: Icons.repeat, 
+            text: '$repostCount Reposts', 
+            color: isReposted ? Colors.green : null, 
+            onTap: _toggleRepost, 
+            animation: _repostAnimation
+          ),
+          // ### MODIFIED: Added _isSharing check for blue feedback ###
+          _buildActionButton(context, 
+            icon: Icons.share_outlined, 
+            text: 'Share', 
+            color: _isSharing ? TwitterTheme.blue : null,
+            onTap: _sharePost,
+            animation: _shareAnimation
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeedActionRow(int commentCount, int repostCount, bool isReposted, int likeCount, bool isLiked) {
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
       child: Row(
         children: [
           Expanded(
-            child: _buildActionButton(
-              context,
-              icon: Icons.chat_bubble_outline,
-              text: commentCount.toString(),
-              onTap: _navigateToDetail,
-            ),
+            child: _buildActionButton(context, icon: Icons.chat_bubble_outline, text: commentCount.toString(), onTap: _navigateToDetail),
           ),
           Expanded(
-            child: _buildActionButton(
-              context,
-              icon: Icons.repeat,
-              text: repostCount.toString(),
-              color: isReposted ? Colors.green : null, 
-              onTap: _toggleRepost, 
-            ),
+            child: _buildActionButton(context, icon: Icons.repeat, text: repostCount.toString(), color: isReposted ? Colors.green : null, onTap: _toggleRepost, animation: _repostAnimation),
           ),
           Expanded(
-            child: _buildActionButton(
-              context,
-              icon: isLiked ? Icons.favorite : Icons.favorite_border,
-              text: likeCount.toString(),
-              color: isLiked ? Colors.pink : null,
-              onTap: _toggleLike,
-            ),
+            child: _buildActionButton(context, icon: isLiked ? Icons.favorite : Icons.favorite_border, text: likeCount.toString(), color: isLiked ? Colors.pink : null, onTap: _toggleLike, animation: _likeAnimation),
           ),
+          // ### MODIFIED: Added _isSharing check for blue feedback ###
           Expanded(
-            child: _buildActionButton(
-              context,
-              icon: Icons.share_outlined,
-              text: null,
-              onTap: _sharePost,
-            ),
+            child: _buildActionButton(context, icon: Icons.share_outlined, text: null, color: _isSharing ? TwitterTheme.blue : null, onTap: _sharePost, animation: _shareAnimation),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatsRow(int commentCount, int likeCount) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: 12.0, bottom: 12.0),
-      child: Row(
-        children: [
-          Text(likeCount.toString(), style: theme.textTheme.titleMedium),
-          SizedBox(width: 4),
-          Text("Likes", style: theme.textTheme.titleSmall),
-          SizedBox(width: 16),
-          Text(commentCount.toString(), style: theme.textTheme.titleMedium),
-          SizedBox(width: 4),
-          Text("Replies", style: theme.textTheme.titleSmall),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton(BuildContext context, {required IconData icon, String? text, required VoidCallback onTap, Color? color}) {
+  Widget _buildActionButton(BuildContext context, {
+    required IconData icon, 
+    String? text, 
+    required VoidCallback onTap, 
+    Color? color,
+    Animation<double>? animation, 
+  }) {
     final theme = Theme.of(context);
     final iconColor = color ?? theme.textTheme.titleSmall?.color;
+    
+    Widget iconWidget = Icon(icon, color: iconColor, size: 22);
+    if (animation != null) {
+      iconWidget = ScaleTransition(
+        scale: animation,
+        child: iconWidget,
+      );
+    }
+
     return InkWell(
       onTap: onTap,
       child: Center(
@@ -577,13 +662,13 @@ class _BlogPostCardState extends State<BlogPostCard> {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: iconColor, size: 20),
+            iconWidget, 
             if (text != null && text != "0")
               Padding(
-                padding: const EdgeInsets.only(left: 4.0),
+                padding: const EdgeInsets.only(left: 6.0),
                 child: Text(
                   text,
-                  style: theme.textTheme.titleSmall?.copyWith(color: iconColor),
+                  style: theme.textTheme.titleSmall?.copyWith(color: iconColor, fontSize: 13),
                 ),
               ),
           ],

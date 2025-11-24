@@ -40,7 +40,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         userEmail = userDoc.data()?['email'] ?? userEmail;
       }
     } catch (e) {
-      // Biarkan nama default
+      // Use default
     }
 
     final commentData = {
@@ -67,36 +67,27 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
       await writeBatch.commit();
 
-      // ### PERUBAHAN DI SINI: KIRIM NOTIFIKASI ###
-      
-      // Ambil ID pemilik postingan. Kita gunakan 'widget.initialPostData'
-      // Ini mengasumsikan 'initialPostData' selalu ada saat membuka detail
       final String? postOwnerId = widget.initialPostData?['userId'];
       
-      // Kirim notifikasi HANYA jika pengomentar bukan pemilik postingan
       if (postOwnerId != null && postOwnerId != _currentUser!.uid) {
-        
-        // Buat cuplikan komentar
         String commentSnippet = commentData['text'] as String;
         if (commentSnippet.length > 50) {
           commentSnippet = commentSnippet.substring(0, 50) + '...';
         }
         
-        // Buat dokumen notifikasi baru
         _firestore
             .collection('users')
-            .doc(postOwnerId) // Notifikasi untuk PEMILIK postingan
+            .doc(postOwnerId) 
             .collection('notifications')
             .add({
-          'type': 'comment', // Tipe baru: 'comment'
+          'type': 'comment', 
           'senderId': _currentUser!.uid,
           'postId': widget.postId,
-          'postTextSnippet': commentSnippet, // Cuplikan dari komentar
+          'postTextSnippet': commentSnippet, 
           'timestamp': FieldValue.serverTimestamp(),
           'isRead': false,
         });
       }
-      // ### AKHIR PERUBAHAN ###
 
       _commentController.clear();
       FocusScope.of(context).unfocus();
@@ -159,7 +150,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     },
                   ),
                   
-                  Divider(height: 1, thickness: 1), 
+                  // FIX: Removed Divider here to eliminate the "stripe"
                   _buildCommentList(),
                 ],
               ),
@@ -193,11 +184,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           );
         }
 
-        return ListView.separated(
+        return ListView.builder(
           itemCount: snapshot.data!.docs.length,
           shrinkWrap: true,
           physics: NeverScrollableScrollPhysics(),
-          separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>;

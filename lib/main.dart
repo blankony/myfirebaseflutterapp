@@ -1,11 +1,15 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/services.dart'; 
 import 'firebase_options.dart'; 
 import 'screens/splash_screen.dart'; 
 
 // Notifier global, di-set ke dark mode secara default
-final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
+final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
+
+// ### NEW: Global Haptic Feedback Setting (Default: On) ###
+final ValueNotifier<bool> hapticNotifier = ValueNotifier(true);
 
 // Definisikan warna tema
 class TwitterTheme {
@@ -16,13 +20,25 @@ class TwitterTheme {
   static const Color extraLightGrey = Color(0xFFE1E8ED);
   static const Color white = Color(0xFFFFFFFF);
 
-  // --- TEMA GELAP (Sudah Benar) ---
+  // --- TEMA GELAP ---
   static ThemeData darkTheme = ThemeData(
-    primarySwatch: Colors.blue,
+    colorScheme: ColorScheme(
+      brightness: Brightness.dark,
+      primary: blue,
+      onPrimary: white,
+      secondary: blue,
+      onSecondary: white,
+      error: Colors.redAccent,
+      onError: white,
+      background: Color(0xFF15202B),
+      onBackground: white,
+      surface: Color(0xFF192734),
+      onSurface: white,
+    ),
     useMaterial3: true,
     brightness: Brightness.dark,
     scaffoldBackgroundColor: Color(0xFF15202B), 
-    cardColor: Color(0xFF192734), 
+    cardColor: Color(0xFF15202B), 
     primaryColor: blue,
     hintColor: darkGrey,
     dividerColor: Color(0xFF38444D), 
@@ -32,6 +48,7 @@ class TwitterTheme {
       elevation: 0,
       iconTheme: IconThemeData(color: blue), 
       titleTextStyle: TextStyle(color: white, fontSize: 20, fontWeight: FontWeight.bold),
+      systemOverlayStyle: SystemUiOverlayStyle.light,
     ),
 
     inputDecorationTheme: InputDecorationTheme(
@@ -76,28 +93,40 @@ class TwitterTheme {
     ),
   );
 
-  // ### TEMA TERANG BARU ###
+  // --- TEMA TERANG ---
   static ThemeData lightTheme = ThemeData(
-    primarySwatch: Colors.blue,
+    colorScheme: ColorScheme(
+      brightness: Brightness.light,
+      primary: blue,
+      onPrimary: white,
+      secondary: blue,
+      onSecondary: white,
+      error: Colors.redAccent,
+      onError: white,
+      background: white,
+      onBackground: black,
+      surface: white,
+      onSurface: black,
+    ),
     useMaterial3: true,
     brightness: Brightness.light,
-    scaffoldBackgroundColor: TwitterTheme.white, // Latar belakang putih
-    cardColor: TwitterTheme.white, // Kartu putih
+    scaffoldBackgroundColor: TwitterTheme.white, 
+    cardColor: TwitterTheme.white, 
     primaryColor: blue,
     hintColor: darkGrey,
-    dividerColor: extraLightGrey, // Garis pemisah abu-abu muda
+    dividerColor: extraLightGrey, 
     
     appBarTheme: AppBarTheme(
-      color: TwitterTheme.white, // AppBar putih
+      color: TwitterTheme.white, 
       elevation: 0,
       iconTheme: IconThemeData(color: blue),
-      // Teks AppBar hitam agar terlihat
-      titleTextStyle: TextStyle(color: black, fontSize: 20, fontWeight: FontWeight.bold), 
+      titleTextStyle: TextStyle(color: black, fontSize: 20, fontWeight: FontWeight.bold),
+      systemOverlayStyle: SystemUiOverlayStyle.dark, 
     ),
 
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: extraLightGrey, // Isian abu-abu muda
+      fillColor: extraLightGrey, 
       hintStyle: TextStyle(color: darkGrey),
       labelStyle: TextStyle(color: darkGrey),
       border: OutlineInputBorder(
@@ -125,15 +154,15 @@ class TwitterTheme {
     ),
 
     iconTheme: IconThemeData(
-      color: darkGrey, // Ikon abu-abu gelap
+      color: darkGrey, 
     ),
 
     textTheme: TextTheme(
-      bodyLarge: TextStyle(color: black), // Teks hitam
-      bodyMedium: TextStyle(color: black), // Teks hitam
+      bodyLarge: TextStyle(color: black), 
+      bodyMedium: TextStyle(color: black), 
       titleMedium: TextStyle(color: black, fontWeight: FontWeight.bold),
       titleSmall: TextStyle(color: darkGrey),
-      headlineMedium: TextStyle(color: black, fontWeight: FontWeight.bold), // Teks hitam
+      headlineMedium: TextStyle(color: black, fontWeight: FontWeight.bold), 
     ),
   );
 }
@@ -158,11 +187,8 @@ class MyApp extends StatelessWidget {
       builder: (context, currentMode, child) {
         return MaterialApp(
           title: 'Firebase Auth Demo',
-          
-          // ### PERBAIKAN DI SINI ###
-          theme: TwitterTheme.lightTheme, // Gunakan lightTheme yang baru
+          theme: TwitterTheme.lightTheme, 
           darkTheme: TwitterTheme.darkTheme, 
-          
           themeMode: currentMode, 
           home: const SplashScreen(),
           debugShowCheckedModeBanner: false, 

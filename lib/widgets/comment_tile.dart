@@ -169,7 +169,6 @@ class _CommentTileState extends State<CommentTile> {
   }
 
   void _navigateToOriginalPost() {
-    if (!widget.showPostContext) return; 
     _firestore.collection('posts').doc(widget.postId).get().then((doc) {
       if (doc.exists && mounted) {
         Navigator.of(context).push(
@@ -202,14 +201,10 @@ class _CommentTileState extends State<CommentTile> {
 
   IconData _getIconDataFromString(String? iconName) {
     switch (iconName) {
-      case 'face':
-        return Icons.face;
-      case 'rocket':
-        return Icons.rocket_launch;
-      case 'pet':
-        return Icons.pets;
-      default:
-        return Icons.person; 
+      case 'face': return Icons.face;
+      case 'rocket': return Icons.rocket_launch;
+      case 'pet': return Icons.pets;
+      default: return Icons.person; 
     }
   }
 
@@ -221,88 +216,183 @@ class _CommentTileState extends State<CommentTile> {
 
   @override
   Widget build(BuildContext context) {
+    // If showing context (Profile Page), render Parent Post + Reply
+    if (widget.showPostContext) {
+      return FutureBuilder<DocumentSnapshot>(
+        future: _firestore.collection('posts').doc(widget.postId).get(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return SizedBox.shrink(); // Loading or error
+          
+          // If parent post is deleted, just show the reply normally
+          if (!snapshot.data!.exists) {
+             return _buildReplyTile(context, isThreaded: false); 
+          }
+
+          final parentData = snapshot.data!.data() as Map<String, dynamic>;
+          
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. Parent Post Snippet
+              _buildParentPostSnippet(context, parentData),
+              // 2. The Reply (Threaded)
+              _buildReplyTile(context, isThreaded: true),
+            ],
+          );
+        },
+      );
+    }
+
+    // Standard View (Post Detail Page)
+    return _buildReplyTile(context, isThreaded: true); // Threaded look for consistency
+  }
+
+  // --- WIDGET: Parent Post Snippet (The "Original Post") ---
+  Widget _buildParentPostSnippet(BuildContext context, Map<String, dynamic> parentData) {
+    final theme = Theme.of(context);
+    final String parentName = parentData['userName'] ?? 'Unknown';
+    final String parentText = parentData['text'] ?? '';
+    final String parentUserId = parentData['userId'];
+
+    return InkWell(
+      onTap: _navigateToOriginalPost,
+      child: Container(
+        color: theme.cardColor,
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Parent Avatar Column
+              Column(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: theme.dividerColor,
+                    child: Text(parentName.isNotEmpty ? parentName[0].toUpperCase() : '?', style: TextStyle(fontSize: 12, color: theme.cardColor)),
+                  ),
+                  // Vertical Line (Thread connector)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: theme.dividerColor,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(width: 12),
+              // Parent Content
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(parentName, style: theme.textTheme.titleMedium?.copyWith(fontSize: 14, color: theme.hintColor)),
+                        SizedBox(width: 4),
+                        Text("• Original Post", style: theme.textTheme.bodySmall?.copyWith(fontSize: 10, fontStyle: FontStyle.italic)),
+                      ],
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      parentText, 
+                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                      maxLines: 2, 
+                      overflow: TextOverflow.ellipsis
+                    ),
+                    SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- WIDGET: The Actual Reply ---
+  Widget _buildReplyTile(BuildContext context, {required bool isThreaded}) {
     final data = widget.commentData;
     final theme = Theme.of(context);
-
     final String userName = data['userName'] ?? 'Anonymous';
     final String text = data['text'] ?? '';
     final Timestamp? timestamp = data['timestamp'] as Timestamp?;
-    
     final bool showCustomAvatar = widget.isOwner && (_localImageBytes != null || _selectedAvatarIconName != null);
 
     return InkWell(
-      onTap: _navigateToOriginalPost, 
+      onTap: _navigateToOriginalPost,
       child: Container(
         color: theme.cardColor,
         padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (widget.showPostContext)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8.0, left: 36.0), 
-                child: Text(
-                  "Replying to post", 
-                  style: theme.textTheme.titleSmall
-                ),
-              ),
-            
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Tree Visuals
+              if (isThreaded)
+                Container(
+                  width: 36, // Adjust based on parent avatar size
+                  alignment: Alignment.topCenter,
+                  child: showCustomAvatar && _localImageBytes == null
+                    ? CircleAvatar(
+                        radius: 18,
+                        backgroundColor: theme.cardColor,
+                        child: Icon(_getIconDataFromString(_selectedAvatarIconName), size: 20, color: TwitterTheme.blue),
+                      )
+                    : CircleAvatar(
+                        radius: 18,
+                        backgroundImage: (widget.isOwner && _localImageBytes != null) 
+                          ? MemoryImage(_localImageBytes!) 
+                          : null,
+                        child: (!showCustomAvatar) 
+                          ? Text(userName.isNotEmpty ? userName[0] : 'A') 
+                          : null,
+                      ),
+                )
+              else 
+                // Fallback simple avatar if not threaded
                 GestureDetector(
                   onTap: _navigateToUserProfile,
-                  child: CircleAvatar(
-                    radius: 24, 
-                    backgroundImage: (widget.isOwner && _localImageBytes != null) 
-                      ? MemoryImage(_localImageBytes!) 
-                      : null,
-                    child: (showCustomAvatar && _localImageBytes == null)
-                      ? Icon(
-                          _getIconDataFromString(_selectedAvatarIconName),
-                          size: 26,
-                          color: TwitterTheme.blue,
-                        )
-                      : (showCustomAvatar == false) 
-                        ? Text(userName.isNotEmpty ? userName[0] : 'A')
-                        : null, 
-                  ),
+                  child: CircleAvatar(radius: 18, child: Text(userName[0])),
                 ),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: _navigateToUserProfile,
-                              child: Text(
-                                userName,
-                                style: theme.textTheme.titleMedium,
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
+
+              SizedBox(width: 12),
+              
+              // Reply Content
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: _navigateToUserProfile,
+                            child: Text(
+                              userName,
+                              style: theme.textTheme.titleMedium,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
-                          SizedBox(width: 8),
-                          Text(
-                            _formatTimestamp(timestamp),
-                            style: theme.textTheme.titleSmall,
-                          ),
-                          if (widget.isOwner)
-                            _buildOptionsButton(),
-                        ],
-                      ),
-                      SizedBox(height: 4),
-                      Text(text, style: theme.textTheme.bodyLarge),
-                    ],
-                  ),
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          _formatTimestamp(timestamp),
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        if (widget.isOwner)
+                          _buildOptionsButton(),
+                      ],
+                    ),
+                    SizedBox(height: 2),
+                    Text(text, style: theme.textTheme.bodyLarge),
+                  ],
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
