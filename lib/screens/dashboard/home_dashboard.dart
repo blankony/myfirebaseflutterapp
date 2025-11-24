@@ -6,11 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart'; 
 import 'package:myfirebaseflutterapp/widgets/side_panel.dart';
 import 'home_page.dart';
 import 'ai_assistant_page.dart';
 import 'search_page.dart';
 import 'profile_tab_page.dart';
+import 'settings_page.dart';
+import 'account_center_page.dart';
 import '../../main.dart'; 
 import '../../widgets/notification_sheet.dart';
 
@@ -85,6 +88,33 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     );
   }
 
+  Future<void> _confirmSignOut(BuildContext context) async {
+    final bool shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Log Out'),
+        content: Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Log Out', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    ) ?? false;
+
+    if (shouldLogout) {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
   List<Widget> _appBarActions(BuildContext context) {
     switch (_selectedIndex) {
       case 0:
@@ -116,7 +146,55 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             },
           ),
         ];
-      // Case 3 (Profile) removed from here because we return null AppBar
+      case 3:
+        final user = _auth.currentUser;
+        return [
+          StreamBuilder<DocumentSnapshot>(
+            stream: user != null 
+                ? _firestore.collection('users').doc(user.uid).snapshots() 
+                : null,
+            builder: (context, snapshot) {
+              final String name = (snapshot.hasData && snapshot.data!.exists)
+                  ? (snapshot.data!.data() as Map<String, dynamic>)['name'] ?? 'User'
+                  : 'User';
+
+              return PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert),
+                onSelected: (value) {
+                  if (value == 'Share Profile') {
+                    Share.share("Hey Check Out $name , On this app Link https://github.com/blankony/myfirebaseflutterapp");
+                  } else if (value == 'Account Center') {
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountCenterPage()));
+                  } else if (value == 'Settings') {
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
+                  } else if (value == 'Log Out') {
+                    _confirmSignOut(context);
+                  }
+                },
+                itemBuilder: (BuildContext context) {
+                  return [
+                    PopupMenuItem(
+                      value: 'Share Profile',
+                      child: Row(children: [Icon(Icons.share, size: 20), SizedBox(width: 8), Text('Share Profile')]),
+                    ),
+                    PopupMenuItem(
+                      value: 'Account Center',
+                      child: Row(children: [Icon(Icons.account_circle, size: 20), SizedBox(width: 8), Text('Account Center')]),
+                    ),
+                    PopupMenuItem(
+                      value: 'Settings',
+                      child: Row(children: [Icon(Icons.settings, size: 20), SizedBox(width: 8), Text('Settings')]),
+                    ),
+                    PopupMenuItem(
+                      value: 'Log Out',
+                      child: Row(children: [Icon(Icons.logout, color: Colors.red, size: 20), SizedBox(width: 8), Text('Log Out', style: TextStyle(color: Colors.red))]),
+                    ),
+                  ];
+                },
+              );
+            }
+          ),
+        ];
       default:
         return [];
     }
@@ -179,9 +257,8 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     return Scaffold(
       key: _scaffoldKey,
       extendBodyBehindAppBar: true,
-      // FIX: Return NULL for Profile Tab to avoid double AppBar/Menu
       appBar: _selectedIndex == 3
-          ? null
+          ? null // Hide duplicate AppBar on Profile Tab
           : AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
@@ -220,14 +297,26 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           _onItemTapped(3);
         },
       ),
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
+      // FIX: Restored NotificationListener for Swipe Right to Open Drawer
+      body: NotificationListener<OverscrollNotification>(
+        onNotification: (overscroll) {
+          if (overscroll.metrics.axis == Axis.horizontal) {
+            // Check if we are at start (pixel 0) and pulling left (negative overscroll)
+            if (overscroll.metrics.pixels == 0 && overscroll.overscroll < 0) {
+              _scaffoldKey.currentState?.openDrawer();
+            }
+          }
+          return false;
         },
-        children: _widgetOptions,
+        child: PageView(
+          controller: _pageController,
+          onPageChanged: (index) {
+            setState(() {
+              _selectedIndex = index;
+            });
+          },
+          children: _widgetOptions,
+        ),
       ),
       bottomNavigationBar: CustomAnimatedBottomBar(
         selectedIndex: _selectedIndex,
@@ -263,7 +352,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 }
 
-// ... Helper classes (_ScrollAwareAppBarBackground, etc.) remain unchanged ...
+// ... (Helper classes: _ScrollAwareAppBarBackground, _AppBarAvatar, _NotificationButton, CustomAnimatedBottomBar remain the same)
 class _ScrollAwareAppBarBackground extends StatefulWidget {
   final ScrollController scrollController;
   

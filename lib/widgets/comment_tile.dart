@@ -216,83 +216,68 @@ class _CommentTileState extends State<CommentTile> {
 
   @override
   Widget build(BuildContext context) {
-    // If showing context (Profile Page), render Parent Post + Reply
     if (widget.showPostContext) {
       return FutureBuilder<DocumentSnapshot>(
         future: _firestore.collection('posts').doc(widget.postId).get(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) return SizedBox.shrink(); // Loading or error
-          
-          // If parent post is deleted, just show the reply normally
+          if (!snapshot.hasData) return SizedBox.shrink(); 
           if (!snapshot.data!.exists) {
-             return _buildReplyTile(context, isThreaded: false); 
+             return _buildReplyTile(context); 
           }
-
           final parentData = snapshot.data!.data() as Map<String, dynamic>;
           
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Parent Post Snippet
               _buildParentPostSnippet(context, parentData),
-              // 2. The Reply (Threaded)
-              _buildReplyTile(context, isThreaded: true),
+              _buildReplyTile(context),
             ],
           );
         },
       );
     }
-
-    // Standard View (Post Detail Page)
-    return _buildReplyTile(context, isThreaded: true); // Threaded look for consistency
+    return _buildReplyTile(context);
   }
 
-  // --- WIDGET: Parent Post Snippet (The "Original Post") ---
   Widget _buildParentPostSnippet(BuildContext context, Map<String, dynamic> parentData) {
     final theme = Theme.of(context);
     final String parentName = parentData['userName'] ?? 'Unknown';
     final String parentText = parentData['text'] ?? '';
-    final String parentUserId = parentData['userId'];
 
     return InkWell(
       onTap: _navigateToOriginalPost,
       child: Container(
         color: theme.cardColor,
-        padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+        padding: EdgeInsets.fromLTRB(12, 12, 16, 0), // Adjusted padding for alignment
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Parent Avatar Column
-              Column(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: theme.dividerColor,
-                    child: Text(parentName.isNotEmpty ? parentName[0].toUpperCase() : '?', style: TextStyle(fontSize: 12, color: theme.cardColor)),
-                  ),
-                  // Vertical Line (Thread connector)
-                  Expanded(
-                    child: Container(
-                      width: 2,
-                      color: theme.dividerColor,
+              // Parent Trunk Column
+              SizedBox(
+                width: 40,
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 16, // Smaller avatar for parent context
+                      backgroundColor: theme.dividerColor,
+                      child: Text(parentName.isNotEmpty ? parentName[0].toUpperCase() : '?', style: TextStyle(fontSize: 12, color: theme.cardColor)),
                     ),
-                  ),
-                ],
+                    Expanded(
+                      child: Container(
+                        width: 2,
+                        color: theme.dividerColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              SizedBox(width: 12),
-              // Parent Content
+              SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Text(parentName, style: theme.textTheme.titleMedium?.copyWith(fontSize: 14, color: theme.hintColor)),
-                        SizedBox(width: 4),
-                        Text("• Original Post", style: theme.textTheme.bodySmall?.copyWith(fontSize: 10, fontStyle: FontStyle.italic)),
-                      ],
-                    ),
+                    Text("$parentName • Original Post", style: theme.textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic)),
                     SizedBox(height: 2),
                     Text(
                       parentText, 
@@ -311,8 +296,8 @@ class _CommentTileState extends State<CommentTile> {
     );
   }
 
-  // --- WIDGET: The Actual Reply ---
-  Widget _buildReplyTile(BuildContext context, {required bool isThreaded}) {
+  // ### FIXED: L-Shape Visual Implementation ###
+  Widget _buildReplyTile(BuildContext context) {
     final data = widget.commentData;
     final theme = Theme.of(context);
     final String userName = data['userName'] ?? 'Anonymous';
@@ -324,71 +309,99 @@ class _CommentTileState extends State<CommentTile> {
       onTap: _navigateToOriginalPost,
       child: Container(
         color: theme.cardColor,
-        padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        // We remove standard padding here because we structure the tree manually
         child: IntrinsicHeight(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Tree Visuals
-              if (isThreaded)
-                Container(
-                  width: 36, // Adjust based on parent avatar size
-                  alignment: Alignment.topCenter,
-                  child: showCustomAvatar && _localImageBytes == null
-                    ? CircleAvatar(
-                        radius: 18,
-                        backgroundColor: theme.cardColor,
-                        child: Icon(_getIconDataFromString(_selectedAvatarIconName), size: 20, color: TwitterTheme.blue),
-                      )
-                    : CircleAvatar(
-                        radius: 18,
-                        backgroundImage: (widget.isOwner && _localImageBytes != null) 
-                          ? MemoryImage(_localImageBytes!) 
-                          : null,
-                        child: (!showCustomAvatar) 
-                          ? Text(userName.isNotEmpty ? userName[0] : 'A') 
-                          : null,
-                      ),
-                )
-              else 
-                // Fallback simple avatar if not threaded
-                GestureDetector(
-                  onTap: _navigateToUserProfile,
-                  child: CircleAvatar(radius: 18, child: Text(userName[0])),
-                ),
-
-              SizedBox(width: 12),
-              
-              // Reply Content
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              // 1. THE TREE STRUCTURE (L-Shape)
+              Container(
+                width: 48, // Fixed width for the tree visual area
+                color: Colors.transparent,
+                child: Stack(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: _navigateToUserProfile,
-                            child: Text(
-                              userName,
-                              style: theme.textTheme.titleMedium,
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
+                    // Trunk (Vertical Line)
+                    Positioned(
+                      top: 0,
+                      bottom: 0,
+                      left: 20, // Center of the 40px area
+                      child: Container(
+                        width: 2,
+                        color: theme.dividerColor, // The tree line color
+                      ),
+                    ),
+                    // Branch (Horizontal Line)
+                    Positioned(
+                      top: 24, // Align with center of Avatar
+                      left: 20, // Start from Trunk
+                      width: 16, // Reach to Avatar
+                      child: Container(
+                        height: 2,
+                        color: theme.dividerColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // 2. AVATAR
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                child: GestureDetector(
+                  onTap: _navigateToUserProfile,
+                  child: CircleAvatar(
+                    radius: 18, 
+                    backgroundImage: (widget.isOwner && _localImageBytes != null) 
+                      ? MemoryImage(_localImageBytes!) 
+                      : null,
+                    child: (showCustomAvatar && _localImageBytes == null)
+                      ? Icon(
+                          _getIconDataFromString(_selectedAvatarIconName),
+                          size: 20,
+                          color: TwitterTheme.blue,
+                        )
+                      : (showCustomAvatar == false) 
+                        ? Text(userName.isNotEmpty ? userName[0] : 'A', style: TextStyle(fontSize: 14))
+                        : null, 
+                  ),
+                ),
+              ),
+
+              SizedBox(width: 10),
+
+              // 3. CONTENT
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: _navigateToUserProfile,
+                              child: Text(
+                                userName,
+                                style: theme.textTheme.titleMedium,
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
                             ),
                           ),
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          _formatTimestamp(timestamp),
-                          style: theme.textTheme.titleSmall,
-                        ),
-                        if (widget.isOwner)
-                          _buildOptionsButton(),
-                      ],
-                    ),
-                    SizedBox(height: 2),
-                    Text(text, style: theme.textTheme.bodyLarge),
-                  ],
+                          SizedBox(width: 8),
+                          Text(
+                            _formatTimestamp(timestamp),
+                            style: theme.textTheme.titleSmall,
+                          ),
+                          if (widget.isOwner)
+                            _buildOptionsButton(),
+                        ],
+                      ),
+                      SizedBox(height: 2),
+                      Text(text, style: theme.textTheme.bodyLarge),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -429,7 +442,7 @@ class _CommentTileState extends State<CommentTile> {
           },
         );
       },
-      child: Icon(Icons.more_horiz, color: Theme.of(context).textTheme.titleSmall?.color, size: 20),
+      child: Icon(Icons.more_horiz, color: Theme.of(context).textTheme.titleSmall?.color, size: 18),
     );
   }
 }

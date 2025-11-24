@@ -150,7 +150,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     },
                   ),
                   
-                  // FIX: Removed Divider here to eliminate the "stripe"
+                  // FIX: Removed manual Divider
                   _buildCommentList(),
                 ],
               ),
@@ -184,6 +184,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           );
         }
 
+        // FIX: Use ListView.builder (no separators)
         return ListView.builder(
           itemCount: snapshot.data!.docs.length,
           shrinkWrap: true,
