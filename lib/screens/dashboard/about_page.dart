@@ -1,9 +1,22 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart'; // Required for opening links
 import '../../main.dart'; 
 
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
+
+  // Function to launch the URL
+  Future<void> _launchRepo() async {
+    final Uri url = Uri.parse('https://github.com/blankony/myfirebaseflutterapp');
+    try {
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        throw Exception('Could not launch $url');
+      }
+    } catch (e) {
+      debugPrint('Error launching URL: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -147,6 +160,26 @@ class AboutPage extends StatelessWidget {
                   ),
                   
                   SizedBox(height: 40),
+
+                  // --- REPOSITORY LINK BUTTON ---
+                  OutlinedButton.icon(
+                    onPressed: _launchRepo,
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      side: BorderSide(color: theme.dividerColor),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    icon: Icon(Icons.code, size: 20, color: theme.primaryColor),
+                    label: Text(
+                      "View Source Code",
+                      style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                    ),
+                  ),
+
+                  SizedBox(height: 24),
+                  
                   Text(
                     'Version 1.0.0',
                     style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
