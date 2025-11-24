@@ -1,21 +1,28 @@
-# PNJ Media App
+# SAPA PNJ (Sarana Pengguna Aplikasi Politeknik Negeri Jakarta)
 
+SAPA PNJ is a specialized social media and communication platform designed exclusively for the Politeknik Negeri Jakarta (PNJ) community.
+
+## Meaning of the Name
+
+Sarana Pengguna Aplikasi: Refers to its primary function as a digital tool or container designed for use by PNJ community members (students, lecturers, staff). It emphasizes that this platform is the application infrastructure for its users.
+
+Politeknik Negeri Jakarta (PNJ): Affirms that this application focuses exclusively on the PNJ academic environment.
+Overall, SAPA PNJ serves as a medium to facilitate communication, information sharing, and real-time social interaction among all users in the Politeknik Negeri Jakarta campus environment.
+
+## Project Overview
 A Flutter-based social platform for the PNJ community. Backed by Firebase for authentication, Firestore, and security rules. Built with a dark-first UI.
 
 ## Core Features
 
-- Firebase Authentication (login, register, password reset)  
-- Persistent sessions  
-- Optional email verification  
-- Real-time Firestore backend  
-- Full CRUD for posts and replies  
-- Like/Unlike, Repost, Follow/Unfollow interactions
-- Live feed sorted by timestamp  
-- User profiles with bio, name, NIM, email  
-- Profile navigation  
-- Light/Dark theme toggle  
-- Profile editing and password change  
-- Logout and account deletion  
+- Authentication: Firebase Authentication (login, register, password reset), persistent sessions, and optional email verification.
+- Real-time Interaction: Real-time Firestore backend with full CRUD for posts and replies.
+- Social Features: Like/Unlike, Repost, Follow/Unfollow interactions.
+- Feed: Live feed sorted by timestamp.
+- User Profiles: Profiles with bio, name, NIM, email, and navigation to other profiles.
+- Customization: Light/Dark theme toggle.
+- Account Management: Profile editing, password change, logout, delete account, and change profile picture.
+- AI Assistent: Real Gemini Based Backended AI Assistant integrated
+- Search: Search for posts, and users
 
 ## Screenshots
 ### Landing & Auth
