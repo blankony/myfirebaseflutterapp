@@ -10,7 +10,7 @@ Politeknik Negeri Jakarta (PNJ): Affirms that this application focuses exclusive
 Overall, SAPA PNJ serves as a medium to facilitate communication, information sharing, and real-time social interaction among all users in the Politeknik Negeri Jakarta campus environment.
 
 ## Project Overview
-A Flutter-based social platform for the PNJ community. Backed by Firebase for authentication, Firestore, and security rules. Built with a dark-first UI.
+A Flutter-based social platform for the PNJ community. Backed by Firebase for authentication, Firestore, and security rules. Built with a light-first UI.
 
 ## Core Features
 
