@@ -1,8 +1,8 @@
-// ignore_for_file: prefer_const_constructors
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
-import '../../main.dart'; // Import for TwitterTheme
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import '../../main.dart';
 
 class AiAssistantPage extends StatefulWidget {
   const AiAssistantPage({super.key});
@@ -14,38 +14,39 @@ class AiAssistantPage extends StatefulWidget {
 class _AiAssistantPageState extends State<AiAssistantPage> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<ChatMessage> _messages = []; // Start empty
+  final List<ChatMessage> _messages = [];
   bool _isTyping = false;
 
-  // The "Big Bold Text" Greetings
-  final List<String> _greetings = [
-    'Hello, How is your day?',
-    'How can I help you?',
-    'Ask me anything!',
-    'I am here to assist you.',
-  ];
-  late String _currentGreeting;
+  static const String _apiKey = 'AIzaSyDJskrMI0YRYQ6se0Lq0k-4K_evktY8XPI';
 
-  final List<String> _randomResponses = [
-    'That is an interesting perspective! Tell me more.',
-    'I can certainly help with that. Here is what I found...',
-    'Could you clarify what you mean?',
-    'That sounds great! How does that make you feel?',
-    'I am just a demo AI, but I am learning every day!',
-  ];
+  late GenerativeModel _model;
+  late ChatSession _chatSession;
 
   @override
   void initState() {
     super.initState();
-    _currentGreeting = _greetings[Random().nextInt(_greetings.length)];
-    // Note: We do NOT add an initial AI message here anymore.
+
+    try {
+      _model = GenerativeModel(
+        model: 'gemini-2.5-pro',
+        apiKey: _apiKey,
+      );
+      _chatSession = _model.startChat();
+    } catch (e) {
+      print('Model gemini-2.5-pro gagal -> fallback ke 2.5-flash');
+      _model = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: _apiKey,
+      );
+      _chatSession = _model.startChat();
+    }
   }
 
-  void _handleSubmitted(String text) {
+  Future<void> _handleSubmitted(String text) async {
     _textController.clear();
     if (text.trim().isEmpty) return;
 
-    // 1. Add User Message immediately
+    // Tambah pesan user
     setState(() {
       _messages.add(ChatMessage(
         text: text,
@@ -54,33 +55,92 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       ));
       _isTyping = true;
     });
-    
-    // Scroll to bottom if list is visible
-    if (_messages.isNotEmpty) _scrollToBottom();
 
-    // 2. Simulate AI Response Delay
-    Timer(Duration(milliseconds: 1500), () {
+    _scrollToBottom();
+
+    try {
+      // Kirim ke Gemini
+      final response = await _chatSession.sendMessage(Content.text(text));
+
+      String aiText = "";
+
+      // Parse berbagai format respons
+      try {
+        if (response == null) {
+          aiText = "Tidak ada respons dari server.";
+        } else {
+          final dynamic maybeText = (response as dynamic).text;
+
+          if (maybeText != null && maybeText is String && maybeText.isNotEmpty) {
+            aiText = maybeText;
+          } else {
+            // === Format 1: candidates ===
+            try {
+              final c = (response as dynamic).candidates;
+              if (c != null && c is List && c.isNotEmpty) {
+                final part = c[0]?['content']?['parts']?[0]?['text'];
+                if (part != null && part is String) aiText = part;
+              }
+            } catch (_) {}
+
+            // === Format 2: outputs ===
+            if (aiText.isEmpty) {
+              try {
+                final outputs = (response as dynamic).outputs;
+                if (outputs != null && outputs is List && outputs.isNotEmpty) {
+                  final outText =
+                      outputs[0]?['content']?['text'] ?? outputs[0].toString();
+                  if (outText is String) aiText = outText;
+                }
+              } catch (_) {}
+            }
+
+            // fallback
+            if (aiText.isEmpty) {
+              aiText = response.toString();
+            }
+          }
+        }
+      } catch (e) {
+        aiText = "Terjadi kesalahan parsing respons: $e";
+      }
+
+      if (aiText.trim().isEmpty) aiText = "Maaf, saya tidak mengerti.";
+
       if (mounted) {
         setState(() {
           _isTyping = false;
           _messages.add(ChatMessage(
-            text: _randomResponses[Random().nextInt(_randomResponses.length)],
+            text: aiText,
             isUser: false,
             timestamp: DateTime.now(),
           ));
         });
         _scrollToBottom();
       }
-    });
+    } catch (e) {
+      print("ERROR GEMINI: $e");
+
+      if (mounted) {
+        setState(() {
+          _isTyping = false;
+          _messages.add(ChatMessage(
+            text: "Error terhubung ke AI:\n${e.toString()}",
+            isUser: false,
+            timestamp: DateTime.now(),
+          ));
+        });
+      }
+    }
   }
 
+  // Scroll otomatis
   void _scrollToBottom() {
-    // Small delay to allow the list to build the new item first
-    Future.delayed(Duration(milliseconds: 100), () {
+    Future.delayed(Duration(milliseconds: 120), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
+          duration: Duration(milliseconds: 350),
           curve: Curves.easeOut,
         );
       }
@@ -94,20 +154,19 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     return Scaffold(
       body: Column(
         children: [
-          // 1. Content Area (Empty State OR Chat List)
           Expanded(
             child: _messages.isEmpty
-                ? _buildEmptyState(theme) // Show Big Bold Text
-                : _buildChatList(),       // Show Chat Bubbles
+                ? _buildEmptyState(theme)
+                : _buildChatList(),
           ),
 
-          // 2. Input Area
+          // INPUT BAR
           Container(
             decoration: BoxDecoration(
               color: theme.scaffoldBackgroundColor,
               border: Border(top: BorderSide(color: theme.dividerColor)),
             ),
-            padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: SafeArea(
               top: false,
               child: Row(
@@ -115,37 +174,35 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
                   Expanded(
                     child: TextField(
                       controller: _textController,
-                      onSubmitted: _handleSubmitted,
+                      onSubmitted:
+                          _isTyping ? null : _handleSubmitted,
                       decoration: InputDecoration(
                         hintText: 'Ask anything...',
-                        hintStyle: TextStyle(color: theme.hintColor),
                         filled: true,
-                        fillColor: theme.brightness == Brightness.dark 
-                            ? TwitterTheme.darkGrey.withOpacity(0.2) 
+                        fillColor: theme.brightness == Brightness.dark
+                            ? TwitterTheme.darkGrey.withOpacity(0.2)
                             : TwitterTheme.extraLightGrey,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        contentPadding: EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide(color: TwitterTheme.blue, width: 1.5),
                         ),
                       ),
                     ),
                   ),
                   SizedBox(width: 8),
-                  
-                  // Send Button
                   Container(
                     decoration: BoxDecoration(
                       color: TwitterTheme.blue,
                       shape: BoxShape.circle,
                     ),
                     child: IconButton(
-                      icon: Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                      onPressed: () => _handleSubmitted(_textController.text),
+                      icon: Icon(Icons.send_rounded,
+                          color: Colors.white, size: 20),
+                      onPressed: _isTyping
+                          ? null
+                          : () => _handleSubmitted(_textController.text),
                     ),
                   ),
                 ],
@@ -157,24 +214,25 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     );
   }
 
-  // The "Big Bold Text" View
+  // ================== UI builders ==================
+
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32.0),
+        padding: EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Optional: Add an icon above the text
-            Icon(Icons.auto_awesome, size: 48, color: TwitterTheme.blue.withOpacity(0.5)),
+            Icon(Icons.auto_awesome, size: 48,
+                color: TwitterTheme.blue.withOpacity(0.5)),
             SizedBox(height: 16),
             Text(
-              _currentGreeting,
+              "Hello! I am your AI Assistant.\nAsk me about anything.",
+              textAlign: TextAlign.center,
               style: theme.textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
-                color: theme.textTheme.bodyLarge?.color,
+                fontSize: 20,
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -182,11 +240,10 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     );
   }
 
-  // The Chat List View
   Widget _buildChatList() {
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 120, 16, 16), // Top padding for AppBar clearance
+      padding: EdgeInsets.fromLTRB(16, 120, 16, 16),
       itemCount: _messages.length + (_isTyping ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _messages.length) {
@@ -205,26 +262,22 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomRight: Radius.circular(16),
-            bottomLeft: Radius.zero,
-          ),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: SizedBox(
           width: 40,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: List.generate(3, (index) => 
-              Container(
-                width: 6, 
-                height: 6, 
+            children: List.generate(
+              3,
+              (_) => Container(
+                width: 6,
+                height: 6,
                 decoration: BoxDecoration(
-                  color: TwitterTheme.blue.withOpacity(0.5), 
-                  shape: BoxShape.circle
-                )
-              )
+                  color: TwitterTheme.blue.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                ),
+              ),
             ),
           ),
         ),
@@ -233,7 +286,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   }
 }
 
-// --- HELPER WIDGETS & MODELS ---
+// ======================================================
+// ===================== MODEL =========================
+// ======================================================
 
 class ChatMessage {
   final String text;
@@ -249,7 +304,6 @@ class ChatMessage {
 
 class _ChatBubble extends StatelessWidget {
   final ChatMessage message;
-
   const _ChatBubble({required this.message});
 
   @override
@@ -257,39 +311,53 @@ class _ChatBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final isUser = message.isUser;
 
+    // Tentukan warna teks dasar
+    final textColor = isUser ? Colors.white : theme.textTheme.bodyLarge?.color ?? Colors.black;
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: EdgeInsets.only(bottom: 12),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.85,
+        ),
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isUser ? TwitterTheme.blue : theme.cardColor,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: isUser ? Radius.circular(16) : Radius.zero,
-            bottomRight: isUser ? Radius.zero : Radius.circular(16),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 2,
-              offset: Offset(0, 1),
-            )
-          ],
+          borderRadius: BorderRadius.circular(16),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message.text,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: isUser ? Colors.white : theme.textTheme.bodyLarge?.color,
-                fontSize: 15,
-              ),
+        child: MarkdownBody(
+          data: message.text,
+          selectable: true, 
+          styleSheet: MarkdownStyleSheet(
+            p: TextStyle(
+              color: textColor,
+              fontSize: 15,
             ),
-          ],
+            strong: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.bold,
+            ),
+            h1: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 24),
+            h2: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 22),
+            h3: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 20),
+            h4: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 18),
+            h5: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 16),
+            h6: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
+            listBullet: TextStyle(
+              color: textColor,
+              fontSize: 16,
+            ),
+            code: TextStyle(
+              color: isUser ? Colors.white70 : Colors.black87,
+              backgroundColor: isUser ? Colors.white24 : Colors.grey.shade200,
+              fontFamily: 'monospace',
+            ),
+            codeblockDecoration: BoxDecoration(
+              color: isUser ? Colors.white24 : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
         ),
       ),
     );
