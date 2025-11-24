@@ -71,44 +71,46 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // USERS: Allow user to update their own profile fields
     match /users/{userId} {
       allow read, create: if request.auth.uid != null;
       allow delete: if request.auth.uid == userId;
       
       allow update: if request.auth.uid != null && (
-        (request.auth.uid == userId) ||
-        (request.auth.uid != userId &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers']))
+        (request.auth.uid == userId) || // User updates own profile
+        (request.auth.uid != userId && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers'])) // Other user follows
       );
     }
 
+    // NOTIFICATIONS
     match /users/{userId}/notifications/{notificationId} {
       allow create: if request.auth.uid != null;
       allow read, update, delete: if request.auth.uid == userId;
     }
 
+    // POSTS: Allow updating avatar fields on own posts
     match /posts/{postId} {
       allow read, create: if request.auth != null;
       allow delete: if request.auth.uid == resource.data.userId;
 
       allow update: if request.auth != null && (
-        (request.auth.uid == resource.data.userId &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text'])) ||
-        (request.auth.uid == resource.data.userId &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userName'])) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount'])) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['repostedBy']))
+        // Allow updating profile info on old posts
+        (request.auth.uid == resource.data.userId && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'userName', 'avatarIconId', 'avatarHex'])) ||
+        
+        // Allow updating likes/comments count by others
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'commentCount', 'repostedBy']))
       );
     }
 
+    // COMMENTS: Allow updating avatar fields on own comments
     match /posts/{postId}/comments/{commentId} {
       allow read, create: if request.auth != null;
       allow delete: if request.auth.uid == resource.data.userId;
       
       allow update: if request.auth.uid == resource.data.userId && (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text']) ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userName'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'userName', 'avatarIconId', 'avatarHex'])
       );
     }
     
