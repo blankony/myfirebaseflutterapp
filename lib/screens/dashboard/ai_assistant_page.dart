@@ -26,18 +26,43 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   @override
   void initState() {
     super.initState();
+    _initModel();
+  }
+
+  void _initModel() {
+    // --- PERSONA DEFINITION ---
+    // Instruksi ini memaksa AI untuk berperan sebagai Sapa PNJ
+    final systemInstruction = Content.system("""
+      Kamu adalah asisten virtual cerdas untuk aplikasi media sosial bernama "Sapa PNJ" (Sarana Pengguna Aplikasi Politeknik Negeri Jakarta).
+      
+      IDENTITAS KAMU:
+      - Nama: Sapa PNJ Assistant.
+      - Pembuat: Tim Pengembang Sapa PNJ (Arnold Holyridho R. dan Arya Setiawan), bukan Google.
+      - Afiliasi: Politeknik Negeri Jakarta (PNJ).
+      
+      ATURAN PENTING:
+      1. Jika ditanya "Siapa kamu?", jawablah: "Saya adalah asisten virtual Sapa PNJ, teman digitalmu di Politeknik Negeri Jakarta."
+      2. JANGAN PERNAH mengaku sebagai "Gemini" atau "model buatan Google". Kamu harus tetap pada karakter (Roleplay).
+      3. Gaya bicara: Ramah, sopan, gaul khas mahasiswa, suportif, dan informatif. Gunakan emoji sesekali.
+      4. Konteks: Kamu tahu tentang kehidupan kampus, akademik, dan sosial di PNJ.
+      5. Jika user bertanya hal teknis tentang model bahasamu, jawablah secara diplomatis bahwa kamu dikembangkan khusus untuk aplikasi ini.
+    """);
 
     try {
+      // Coba model Pro
       _model = GenerativeModel(
-        model: 'gemini-2.5-pro',
+        model: 'gemini-2.5-pro', // Menggunakan versi stabil saat ini (bisa disesuaikan kembali ke 2.5 jika preview tersedia)
         apiKey: _apiKey,
+        systemInstruction: systemInstruction, // Inject Persona
       );
       _chatSession = _model.startChat();
     } catch (e) {
-      print('Model gemini-2.5-pro gagal -> fallback ke 2.5-flash');
+      print('Model utama gagal -> fallback ke flash');
+      // Fallback ke Flash
       _model = GenerativeModel(
-        model: 'gemini-2.5-flash',
+        model: 'gemini-1.5-flash',
         apiKey: _apiKey,
+        systemInstruction: systemInstruction, // Inject Persona juga di fallback
       );
       _chatSession = _model.startChat();
     }
@@ -67,46 +92,14 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
 
       // Parse berbagai format respons
       try {
-        if (response == null) {
-          aiText = "Tidak ada respons dari server.";
+        if (response.text != null && response.text!.isNotEmpty) {
+          aiText = response.text!;
         } else {
-          final dynamic maybeText = (response as dynamic).text;
-
-          if (maybeText != null && maybeText is String && maybeText.isNotEmpty) {
-            aiText = maybeText;
-          } else {
-            // === Format 1: candidates ===
-            try {
-              final c = (response as dynamic).candidates;
-              if (c != null && c is List && c.isNotEmpty) {
-                final part = c[0]?['content']?['parts']?[0]?['text'];
-                if (part != null && part is String) aiText = part;
-              }
-            } catch (_) {}
-
-            // === Format 2: outputs ===
-            if (aiText.isEmpty) {
-              try {
-                final outputs = (response as dynamic).outputs;
-                if (outputs != null && outputs is List && outputs.isNotEmpty) {
-                  final outText =
-                      outputs[0]?['content']?['text'] ?? outputs[0].toString();
-                  if (outText is String) aiText = outText;
-                }
-              } catch (_) {}
-            }
-
-            // fallback
-            if (aiText.isEmpty) {
-              aiText = response.toString();
-            }
-          }
+          aiText = "Maaf, saya tidak bisa memproses itu sekarang.";
         }
       } catch (e) {
-        aiText = "Terjadi kesalahan parsing respons: $e";
+        aiText = "Terjadi kesalahan parsing respons.";
       }
-
-      if (aiText.trim().isEmpty) aiText = "Maaf, saya tidak mengerti.";
 
       if (mounted) {
         setState(() {
@@ -120,13 +113,13 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         _scrollToBottom();
       }
     } catch (e) {
-      print("ERROR GEMINI: $e");
+      print("ERROR AI: $e");
 
       if (mounted) {
         setState(() {
           _isTyping = false;
           _messages.add(ChatMessage(
-            text: "Error terhubung ke AI:\n${e.toString()}",
+            text: "Maaf, koneksi ke server Sapa PNJ sedang gangguan. Coba lagi nanti ya!",
             isUser: false,
             timestamp: DateTime.now(),
           ));
@@ -178,7 +171,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
                       onSubmitted:
                           _isTyping ? null : _handleSubmitted,
                       decoration: InputDecoration(
-                        hintText: 'Ask anything...',
+                        hintText: 'Tanya seputar PNJ...',
                         filled: true,
                         fillColor: theme.brightness == Brightness.dark
                             ? TwitterTheme.darkGrey.withOpacity(0.2)
@@ -224,15 +217,15 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.auto_awesome, size: 48,
+            Icon(Icons.school, size: 48, // Ganti ikon jadi lebih relevan
                 color: TwitterTheme.blue.withOpacity(0.5)),
             SizedBox(height: 16),
             Text(
-              "Hello! I am your AI Assistant.\nAsk me about anything.",
+              "Halo! Saya Asisten Sapa PNJ.\nAda yang bisa saya bantu tentang kampus?",
               textAlign: TextAlign.center,
               style: theme.textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
-                fontSize: 20,
+                fontSize: 18,
               ),
             ),
           ],
@@ -339,25 +332,8 @@ class _ChatBubble extends StatelessWidget {
               color: textColor,
               fontWeight: FontWeight.bold,
             ),
-            h1: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 24),
-            h2: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 22),
-            h3: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 20),
-            h4: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 18),
-            h5: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 16),
-            h6: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
-            listBullet: TextStyle(
-              color: textColor,
-              fontSize: 16,
-            ),
-            code: TextStyle(
-              color: isUser ? Colors.white70 : Colors.black87,
-              backgroundColor: isUser ? Colors.white24 : Colors.grey.shade200,
-              fontFamily: 'monospace',
-            ),
-            codeblockDecoration: BoxDecoration(
-              color: isUser ? Colors.white24 : Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(8),
-            ),
+            // Styling untuk list dan header agar konsisten dengan tema
+            listBullet: TextStyle(color: textColor),
           ),
         ),
       ),

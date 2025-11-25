@@ -1,9 +1,12 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:async'; // Timer
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../widgets/blog_post_card.dart'; 
 import '../widgets/comment_tile.dart'; 
+import '../services/prediction_service.dart'; // Import Service
+import '../main.dart'; // TwitterTheme
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -24,7 +27,49 @@ class PostDetailScreen extends StatefulWidget {
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
   final TextEditingController _commentController = TextEditingController();
+  final PredictionService _predictionService = PredictionService();
   final User? _currentUser = _auth.currentUser;
+
+  // Predictive Text State
+  String? _predictedText;
+  Timer? _debounce;
+
+  // Listener untuk Predictive Text
+  void _onCommentChanged(String text) {
+    setState(() {
+      _predictedText = null;
+    });
+
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    _debounce = Timer(const Duration(milliseconds: 800), () async {
+      if (text.trim().isEmpty) return;
+      
+      final suggestion = await _predictionService.getCompletion(text, 'comment');
+      if (mounted && suggestion != null && suggestion.isNotEmpty) {
+        setState(() {
+          _predictedText = suggestion;
+        });
+      }
+    });
+  }
+
+  void _acceptPrediction() {
+    if (_predictedText != null) {
+      final currentText = _commentController.text;
+      final separator = currentText.endsWith(' ') ? '' : ' ';
+      final newText = "$currentText$separator$_predictedText ";
+      
+      _commentController.text = newText;
+      _commentController.selection = TextSelection.fromPosition(
+        TextPosition(offset: newText.length),
+      );
+      
+      setState(() {
+        _predictedText = null;
+      });
+    }
+  }
 
   // Helper for Slide Left Animation
   Route _createSlideLeftRoute(Widget page) {
@@ -110,6 +155,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       }
 
       _commentController.clear();
+      setState(() { _predictedText = null; }); // Reset prediksi
       FocusScope.of(context).unfocus();
     } catch (e) {
       if (mounted) {
@@ -123,6 +169,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   void dispose() {
     _commentController.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
@@ -235,29 +282,63 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         color: Theme.of(context).scaffoldBackgroundColor,
         border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _commentController,
-              decoration: InputDecoration(
-                hintText: "Write your reply...",
-                hintStyle: TextStyle(color: Theme.of(context).hintColor),
-                border: InputBorder.none,
+          // === AI PREDICTION WIDGET FOR COMMENT ===
+          if (_predictedText != null)
+            GestureDetector(
+              onTap: _acceptPrediction,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_awesome, size: 12, color: TwitterTheme.blue),
+                    SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        "Suggestion: ...$_predictedText",
+                        style: TextStyle(
+                          color: TwitterTheme.blue,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.bold
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              maxLines: null, 
             ),
-          ),
-          ElevatedButton(
-            onPressed: _postComment,
-            child: Text('Reply'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).primaryColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _commentController,
+                  onChanged: _onCommentChanged, // Listener
+                  decoration: InputDecoration(
+                    hintText: "Write your reply...",
+                    hintStyle: TextStyle(color: Theme.of(context).hintColor),
+                    border: InputBorder.none,
+                  ),
+                  maxLines: null, 
+                ),
               ),
-            ),
+              ElevatedButton(
+                onPressed: _postComment,
+                child: Text('Reply'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).primaryColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

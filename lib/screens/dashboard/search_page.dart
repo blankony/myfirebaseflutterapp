@@ -1,11 +1,12 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:math';
+import 'dart:async'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../widgets/blog_post_card.dart';
-import '../../main.dart'; // For TwitterTheme
-import '../dashboard/profile_page.dart'; // To navigate to profile
+import '../../main.dart'; 
+import 'profile_page.dart'; // FIXED: Import path dikoreksi (karena satu folder)
+import '../../services/prediction_service.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -27,9 +28,13 @@ class SearchPage extends StatefulWidget {
 class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  final PredictionService _predictionService = PredictionService(); 
+  
   late TabController _tabController;
   
   String _searchText = '';
+  String? _searchSuggestion; 
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -42,6 +47,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     _searchController.dispose();
     _searchFocusNode.dispose();
     _tabController.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
@@ -52,20 +58,45 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   void _onSearchChanged(String value) {
     setState(() {
       _searchText = value.toLowerCase().trim();
+      _searchSuggestion = null; 
     });
+
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    // Debounce 600ms
+    _debounce = Timer(const Duration(milliseconds: 600), () async {
+      if (value.trim().isEmpty) return;
+      
+      // Service sekarang otomatis handle fallback jika Gemini error/lambat
+      final suggestion = await _predictionService.getCompletion(value, 'search');
+      
+      if (mounted && suggestion != null && suggestion.toLowerCase() != _searchText) {
+        setState(() {
+          _searchSuggestion = suggestion;
+        });
+      }
+    });
+  }
+
+  void _applySuggestion() {
+    if (_searchSuggestion != null) {
+      _searchController.text = _searchSuggestion!;
+      _onSearchChanged(_searchSuggestion!); 
+      FocusScope.of(context).unfocus();
+    }
   }
 
   void _clearSearch() {
     setState(() {
       _searchController.clear();
       _searchText = '';
+      _searchSuggestion = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final double topOffset = MediaQuery.of(context).padding.top + kToolbarHeight + 16.0;
     final double searchBarHeight = 70.0;
     final theme = Theme.of(context);
 
@@ -81,36 +112,68 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeInOutQuart,
             width: widget.isSearching ? screenWidth : 0,
-            height: widget.isSearching ? searchBarHeight : 0,
+            height: widget.isSearching ? (searchBarHeight + (_searchSuggestion != null ? 30 : 0)) : 0,
             child: ClipRRect(
               borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
               child: SingleChildScrollView(
                 physics: const NeverScrollableScrollPhysics(),
-                scrollDirection: Axis.horizontal,
-                child: Container(
-                  width: screenWidth,
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  child: Center(
-                    child: TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      autofocus: false, 
-                      decoration: InputDecoration(
-                        hintText: 'Search posts or users...',
-                        prefixIcon: Icon(Icons.search),
-                        suffixIcon: _searchController.text.isNotEmpty 
-                          ? IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch) 
-                          : null,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(30),
-                          borderSide: BorderSide.none,
+                child: Column(
+                  children: [
+                    Container(
+                      width: screenWidth,
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      child: Center(
+                        child: TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          autofocus: false, 
+                          decoration: InputDecoration(
+                            hintText: 'Search posts or users...',
+                            prefixIcon: Icon(Icons.search),
+                            suffixIcon: _searchController.text.isNotEmpty 
+                              ? IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch) 
+                              : null,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(30),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+                          ),
+                          onChanged: _onSearchChanged,
                         ),
-                        filled: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
                       ),
-                      onChanged: _onSearchChanged,
                     ),
-                  ),
+                    
+                    // === AI/LOCAL SEARCH SUGGESTION ===
+                    if (_searchSuggestion != null && widget.isSearching)
+                      InkWell(
+                        onTap: _applySuggestion,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0, left: 24.0, right: 24.0),
+                          child: Row(
+                            children: [
+                              Icon(Icons.lightbulb_outline, size: 14, color: TwitterTheme.blue),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: RichText(
+                                  text: TextSpan(
+                                    style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
+                                    children: [
+                                      TextSpan(text: "Suggestion: "),
+                                      TextSpan(
+                                        text: _searchSuggestion, 
+                                        style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -194,7 +257,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
 
   Widget _buildPostResults() {
     return StreamBuilder<QuerySnapshot>(
-      // Fetch all posts (or limit to recent 100 for performance)
       stream: _firestore
           .collection('posts')
           .orderBy('timestamp', descending: true)
@@ -204,7 +266,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
         
-        // Filter in Dart
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final text = (data['text'] ?? '').toString().toLowerCase();
@@ -241,7 +302,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
         
-        // Filter in Dart
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final name = (data['name'] ?? '').toString().toLowerCase();
@@ -261,7 +321,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             final data = docs[index].data() as Map<String, dynamic>;
             final userId = docs[index].id;
             
-            // Don't show self in search results (optional, but cleaner)
             if (userId == myUid) return SizedBox.shrink();
 
             return _UserSearchTile(
@@ -325,16 +384,13 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     final batch = _firestore.batch();
 
     if (_isFollowing) {
-      // Unfollow
       batch.update(myDocRef, {'following': FieldValue.arrayRemove([widget.userId])});
       batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([widget.currentUserId])});
       setState(() => _isFollowing = false);
     } else {
-      // Follow
       batch.update(myDocRef, {'following': FieldValue.arrayUnion([widget.userId])});
       batch.update(targetDocRef, {'followers': FieldValue.arrayUnion([widget.currentUserId])});
       
-      // Notification
       _firestore.collection('users').doc(widget.userId).collection('notifications').add({
         'type': 'follow',
         'senderId': widget.currentUserId,
@@ -348,7 +404,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     try {
       await batch.commit();
     } catch (e) {
-      // Revert if failed
       _checkFollowStatus();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e')));
     }
@@ -363,7 +418,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     final bio = widget.userData['bio'] ?? '';
     final followersCount = (widget.userData['followers'] as List?)?.length ?? 0;
     
-    // Check if they follow me
     final List<dynamic> followingList = widget.userData['following'] ?? [];
     final bool followsMe = widget.currentUserId != null && followingList.contains(widget.currentUserId);
 
@@ -378,20 +432,16 @@ class _UserSearchTileState extends State<_UserSearchTile> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Avatar
             CircleAvatar(
               radius: 24,
               backgroundColor: theme.cardColor,
-              child: Icon(Icons.person, color: theme.primaryColor), // Replace with image logic if available
+              child: Icon(Icons.person, color: theme.primaryColor),
             ),
             SizedBox(width: 12),
-            
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Name & Badge
                   Row(
                     children: [
                       Flexible(
@@ -417,9 +467,7 @@ class _UserSearchTileState extends State<_UserSearchTile> {
                       ]
                     ],
                   ),
-                  // Handle
                   Text(handle, style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor)),
-                  // Bio
                   if (bio.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4.0),
@@ -430,7 +478,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  // Followers
                   SizedBox(height: 4),
                   Text(
                     "$followersCount followers",
@@ -439,8 +486,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
                 ],
               ),
             ),
-            
-            // Follow Button
             SizedBox(width: 8),
             _isFollowing
                 ? OutlinedButton(
