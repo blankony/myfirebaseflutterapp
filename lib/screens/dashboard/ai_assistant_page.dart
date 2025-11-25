@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../../main.dart';
 
 class AiAssistantPage extends StatefulWidget {
@@ -17,7 +18,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
 
-  static const String _apiKey = 'AIzaSyDJskrMI0YRYQ6se0Lq0k-4K_evktY8XPI';
+  final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
   late GenerativeModel _model;
   late ChatSession _chatSession;

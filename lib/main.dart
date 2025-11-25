@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // 1. Import Dotenv
 import 'firebase_options.dart'; 
 import 'screens/splash_screen.dart'; 
 
@@ -15,6 +16,7 @@ class TwitterTheme {
   static const Color extraLightGrey = Color(0xFFE1E8ED);
   static const Color white = Color(0xFFFFFFFF);
 
+  // --- TEMA GELAP ---
   static ThemeData darkTheme = ThemeData(
     colorScheme: ColorScheme(
       brightness: Brightness.dark,
@@ -86,6 +88,7 @@ class TwitterTheme {
     ),
   );
 
+  // --- TEMA TERANG ---
   static ThemeData lightTheme = ThemeData(
     colorScheme: ColorScheme(
       brightness: Brightness.light,
@@ -203,6 +206,16 @@ class AvatarHelper {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // 2. Load Environment Variables (PENTING: Harus sebelum runApp)
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    // Jika .env tidak ketemu (misal belum bikin file), print error tapi lanjut
+    // agar aplikasi tidak crash total (hanya fitur AI yg akan gagal)
+    print("WARNING: Failed to load .env file: $e");
+  }
+
+  // 3. Init Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
