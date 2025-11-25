@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart'; 
-import 'profile_page.dart'; // FIXED: Import path dikoreksi (karena satu folder)
+import 'profile_page.dart'; 
 import '../../services/prediction_service.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -14,11 +14,14 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 class SearchPage extends StatefulWidget {
   final bool isSearching;
   final VoidCallback onSearchPressed;
+  // Callback baru untuk navigasi ke tab Recommended
+  final VoidCallback? onNavigateToRecommended; 
 
   const SearchPage({
     Key? key,
     required this.isSearching,
     required this.onSearchPressed,
+    this.onNavigateToRecommended,
   }) : super(key: key);
 
   @override
@@ -35,6 +38,9 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   String _searchText = '';
   String? _searchSuggestion; 
   Timer? _debounce;
+  
+  // State untuk fitur Trending
+  bool _showAllTrending = false;
 
   @override
   void initState() {
@@ -63,11 +69,9 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
 
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    // Debounce 600ms
     _debounce = Timer(const Duration(milliseconds: 600), () async {
       if (value.trim().isEmpty) return;
       
-      // Service sekarang otomatis handle fallback jika Gemini error/lambat
       final suggestion = await _predictionService.getCompletion(value, 'search');
       
       if (mounted && suggestion != null && suggestion.toLowerCase() != _searchText) {
@@ -92,6 +96,65 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       _searchText = '';
       _searchSuggestion = null;
     });
+  }
+
+  // --- ALGORITMA TRENDING ---
+  List<QueryDocumentSnapshot> _getTrendingPosts(List<QueryDocumentSnapshot> allPosts) {
+    if (allPosts.isEmpty) return [];
+
+    // 1. Analisis Frekuensi Kata (Sederhana) untuk mendeteksi topik hangat
+    final Map<String, int> wordFrequency = {};
+    final List<String> stopWords = [
+      'the', 'and', 'is', 'to', 'in', 'of', // English
+      'di', 'dan', 'yang', 'ini', 'itu', 'aku', 'kamu', 'ke', 'dari', 'ada', 'dengan', 'untuk' // Indo
+    ];
+
+    for (var doc in allPosts) {
+      final data = doc.data() as Map<String, dynamic>;
+      final text = (data['text'] ?? '').toString().toLowerCase();
+      // Hapus tanda baca dan split spasi
+      final words = text.replaceAll(RegExp(r'[^\w\s]'), '').split(RegExp(r'\s+'));
+      
+      for (var word in words) {
+        if (word.length > 3 && !stopWords.contains(word)) {
+          wordFrequency[word] = (wordFrequency[word] ?? 0) + 1;
+        }
+      }
+    }
+
+    // Ambil Top 5 Keyword
+    final sortedKeywords = wordFrequency.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topKeywords = sortedKeywords.take(5).map((e) => e.key).toList();
+
+    // 2. Scoring & Sorting
+    List<Map<String, dynamic>> scoredPosts = allPosts.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      double score = 0;
+      
+      final int likes = (data['likes'] as Map?)?.length ?? 0;
+      final int reposts = (data['repostedBy'] as List?)?.length ?? 0;
+      final int comments = data['commentCount'] ?? 0;
+      final String text = (data['text'] ?? '').toString().toLowerCase();
+
+      // Poin Interaksi (Bobot: Repost > Reply > Like)
+      score += (likes * 1.0) + (reposts * 3.0) + (comments * 2.0);
+
+      // Poin Keyword Trending
+      for (var keyword in topKeywords) {
+        if (text.contains(keyword)) {
+          score += 5.0; // Bonus poin jika mengandung topik hangat
+        }
+      }
+
+      return {'doc': doc, 'score': score};
+    }).toList();
+
+    // Sort dari score tertinggi
+    scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+    // Ambil 10 teratas
+    return scoredPosts.take(10).map((e) => e['doc'] as QueryDocumentSnapshot).toList();
   }
 
   @override
@@ -145,7 +208,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                       ),
                     ),
                     
-                    // === AI/LOCAL SEARCH SUGGESTION ===
                     if (_searchSuggestion != null && widget.isSearching)
                       InkWell(
                         onTap: _applySuggestion,
@@ -197,28 +259,188 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     );
   }
 
+  // --- MODIFIKASI BAGIAN INI ---
   Widget _buildRecommendations(ThemeData theme) {
     return RefreshIndicator(
       onRefresh: () async {
+        setState(() {}); // Rebuild untuk fetch ulang trending
         await Future.delayed(Duration(seconds: 1));
       },
       child: SingleChildScrollView(
         physics: AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.6, 
-          alignment: Alignment.center,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.search, size: 64, color: Colors.grey.withOpacity(0.5)),
-              SizedBox(height: 16),
-              Text(
-                'Search for posts or users', 
-                style: theme.textTheme.titleMedium?.copyWith(color: Colors.grey)
+        padding: EdgeInsets.only(bottom: 100),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                children: [
+                  Icon(Icons.trending_up, color: TwitterTheme.blue),
+                  SizedBox(width: 8),
+                  Text(
+                    "Trending Right Now",
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            
+            // Trending Content
+            StreamBuilder<QuerySnapshot>(
+              // Ambil 50 post terbaru untuk analisis trending
+              stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return SizedBox(
+                    height: 100,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
+                final allPosts = snapshot.data!.docs;
+                final trendingPosts = _getTrendingPosts(allPosts);
+
+                if (trendingPosts.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text("No trending topics yet.", style: TextStyle(color: Colors.grey)),
+                  );
+                }
+
+                // Tentukan berapa banyak yang ditampilkan (3 atau 10)
+                final displayCount = _showAllTrending ? trendingPosts.length : (trendingPosts.length > 3 ? 3 : trendingPosts.length);
+                final displayedPosts = trendingPosts.take(displayCount).toList();
+
+                return Column(
+                  children: [
+                    // List Trending Posts
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: NeverScrollableScrollPhysics(),
+                      itemCount: displayedPosts.length,
+                      separatorBuilder: (context, index) => Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final doc = displayedPosts[index];
+                        final data = doc.data() as Map<String, dynamic>;
+                        
+                        // Tampilan sedikit berbeda untuk trending list (misal: ada nomor urut)
+                        return Stack(
+                          children: [
+                            BlogPostCard(
+                              postId: doc.id,
+                              postData: data,
+                              isOwner: data['userId'] == _auth.currentUser?.uid,
+                            ),
+                            // Badge Nomor Trending
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Container(
+                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: TwitterTheme.blue.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  "#${index + 1}",
+                                  style: TextStyle(
+                                    color: TwitterTheme.blue,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+
+                    // Tombol Show More / Less
+                    if (trendingPosts.length > 3)
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _showAllTrending = !_showAllTrending;
+                          });
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(_showAllTrending ? "Show Less" : "Show More Trending"),
+                            Icon(_showAllTrending ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+
+            SizedBox(height: 24),
+            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.3)),
+            SizedBox(height: 24),
+
+            // Tombol Recommended For You
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [TwitterTheme.blue.withOpacity(0.1), theme.cardColor],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.auto_awesome, size: 40, color: TwitterTheme.blue),
+                    SizedBox(height: 12),
+                    Text(
+                      "Curated Just For You",
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      "Discover content based on your interests and activity.",
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                    ),
+                    SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (widget.onNavigateToRecommended != null) {
+                            widget.onNavigateToRecommended!();
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text("Please go to Home > Recommended tab"))
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: TwitterTheme.blue,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        ),
+                        child: Text("See Recommended Feed"),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            SizedBox(height: 40),
+          ],
         ),
       ),
     );
