@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import '../main.dart';
 import 'login_page.dart'; 
+import 'setup/setup_profile_screen.dart'; // IMPORTED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -27,6 +28,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   bool _isPasswordObscured = true;
   bool _isConfirmPasswordObscured = true;
+  bool _isLoading = false; // Added loading state
 
   // Helper for custom transition
   Route _createSlideUpRoute(Widget page) {
@@ -43,9 +45,10 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _signUp() async {
-     setState(() { _errorMessage = ''; });
+     setState(() { _errorMessage = ''; _isLoading = true; });
 
     if (!_formKey.currentState!.validate()) {
+      setState(() { _isLoading = false; });
       return;
     }
 
@@ -61,25 +64,30 @@ class _RegisterPageState extends State<RegisterPage> {
           'email': _emailController.text.trim(),
           'name': _namaController.text.trim(), 
           'nim': _nimController.text.trim(), 
-          'bio': 'About me...', 
+          'bio': 'Student at PNJ', 
           'createdAt': FieldValue.serverTimestamp(),
           'following': [],
           'followers': [],
+          // New fields for setup tracking could be added here, e.g., 'isSetupComplete': false
         });
         
-        await userCredential.user!.sendEmailVerification();
+        // Optional: sendEmailVerification here, or let Setup screen do it. 
+        // Let's let the Setup screen handle the explicit "Verify" action to give context.
         
         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Registration successful. Please check your email for verification.')),
-          );
-          Navigator.of(context).pop();
+           // Navigate to Setup Flow
+           Navigator.of(context).pushAndRemoveUntil(
+             MaterialPageRoute(builder: (context) => const SetupProfileScreen()),
+             (route) => false,
+           );
         }
       }
     } on FirebaseAuthException catch (e) {
       setState(() { _errorMessage = e.message ?? 'An error occurred'; });
     } catch (e) {
        setState(() { _errorMessage = 'Unknown error occurred: $e'; });
+    } finally {
+      if (mounted) setState(() { _isLoading = false; });
     }
   }
 
@@ -97,7 +105,6 @@ class _RegisterPageState extends State<RegisterPage> {
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) return 'Email cannot be empty.';
     
-    // Original regex for basic email format validation
     String pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
     RegExp regex = RegExp(pattern);
     
@@ -105,7 +112,6 @@ class _RegisterPageState extends State<RegisterPage> {
         return 'Enter a valid email address.';
     }
 
-    // STEP 1 MODIFICATION: Check for @stu.pnj.ac.id domain
     if (!value.endsWith('@stu.pnj.ac.id')) {
         return 'Registration is restricted to @stu.pnj.ac.id emails only.';
     }
@@ -306,8 +312,10 @@ class _RegisterPageState extends State<RegisterPage> {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: _signUp, 
-                          child: const Text('Sign up'),
+                          onPressed: _isLoading ? null : _signUp, 
+                          child: _isLoading 
+                            ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Text('Sign up'),
                            style: ElevatedButton.styleFrom(
                             backgroundColor: TwitterTheme.blue,
                             foregroundColor: Colors.white,

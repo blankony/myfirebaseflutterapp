@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:myfirebaseflutterapp/widgets/side_panel.dart';
 import 'home_page.dart';
 import 'ai_assistant_page.dart';
@@ -15,7 +16,6 @@ import 'profile_tab_page.dart';
 import '../../main.dart'; 
 import '../../widgets/notification_sheet.dart';
 
-// NEW IMPORTS
 import 'dart:async'; 
 import '../../services/overlay_service.dart';
 import '../../services/notification_prefs_service.dart';
@@ -33,19 +33,23 @@ class HomeDashboard extends StatefulWidget {
 
 class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   int _selectedIndex = 0;
+  int _subTabIndex = 0; 
+  
   late TabController _tabController;
   late final PageController _pageController;
   late final PageController _homePageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  
   final ScrollController _scrollController = ScrollController();
   final ScrollController _recommendedScrollController = ScrollController();
+  
   bool _isSearching = false;
+  bool _hasRestoredState = false; 
 
   late AnimationController _entranceController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   
-  // Listener Subscription
   StreamSubscription<QuerySnapshot>? _notificationSubscription;
 
   @override
@@ -54,9 +58,10 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+    
     _tabController = TabController(length: 2, vsync: this);
-    _pageController = PageController();
-    _homePageController = PageController();
+    _pageController = PageController(initialPage: _selectedIndex);
+    _homePageController = PageController(initialPage: _subTabIndex);
 
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) {
@@ -65,35 +70,99 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
         );
-        setState(() {});
+        if (mounted) setState(() {
+          _subTabIndex = _tabController.index;
+        });
       }
+    });
+
+    _scrollController.addListener(() {
+      if (mounted) PageStorage.of(context).writeState(context, _scrollController.offset, identifier: 'scroll_pos_0');
+    });
+    _recommendedScrollController.addListener(() {
+      if (mounted) PageStorage.of(context).writeState(context, _recommendedScrollController.offset, identifier: 'scroll_pos_1');
     });
 
     _entranceController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 800), 
     );
     
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _entranceController, curve: Curves.easeOut),
     );
 
-    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+    // Initial entrance animation for the Dashboard itself (Slide Up)
+    _slideAnimation = Tween<Offset>(begin: const Offset(0.0, 0.1), end: Offset.zero).animate(
       CurvedAnimation(parent: _entranceController, curve: Curves.easeOutQuart),
     );
-
-    _entranceController.forward();
     
-    // Initialize Notification Listener
     _setupNotificationListener();
+    
+    // Restore state after the first frame to ensure controllers are ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreState();
+    });
   }
 
-  // --- NEW: NOTIFICATION LISTENER ---
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+  }
+
+  void _restoreState() {
+    if (_hasRestoredState) return; 
+
+    bool restoredAnyState = false;
+
+    final int? savedIndex = PageStorage.of(context).readState(context, identifier: 'home_tab_index') as int?;
+    if (savedIndex != null) {
+      _selectedIndex = savedIndex;
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_selectedIndex);
+      }
+      restoredAnyState = true;
+    }
+
+    final int? savedSubIndex = PageStorage.of(context).readState(context, identifier: 'home_sub_tab_index') as int?;
+    if (savedSubIndex != null) {
+      _subTabIndex = savedSubIndex;
+      _tabController.index = _subTabIndex; 
+      if (_homePageController.hasClients) {
+         _homePageController.jumpToPage(_subTabIndex);
+      }
+      restoredAnyState = true;
+    }
+
+    final double? scroll0 = PageStorage.of(context).readState(context, identifier: 'scroll_pos_0') as double?;
+    final double? scroll1 = PageStorage.of(context).readState(context, identifier: 'scroll_pos_1') as double?;
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (scroll0 != null && _scrollController.hasClients) {
+        _scrollController.jumpTo(scroll0);
+      }
+      if (scroll1 != null && _recommendedScrollController.hasClients) {
+        _recommendedScrollController.jumpTo(scroll1);
+      }
+    });
+    
+    if (scroll0 != null || scroll1 != null) restoredAnyState = true;
+
+    // Fix for blinking: If state restored, snap to end. 
+    if (restoredAnyState) {
+      _entranceController.value = 1.0; 
+    } else {
+      _entranceController.forward();
+    }
+    
+    _hasRestoredState = true;
+    if (mounted) setState(() {});
+  }
+
   void _setupNotificationListener() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Listen only to the newest notification
     _notificationSubscription = FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
@@ -103,7 +172,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         .snapshots()
         .listen((snapshot) {
       
-      // Check global settings
       if (!notificationPrefs.allNotificationsEnabled.value || 
           !notificationPrefs.headsUpEnabled.value) {
         return;
@@ -113,7 +181,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         final doc = snapshot.docs.first;
         final data = doc.data();
 
-        // Only show if unread
         if (data['isRead'] == false) {
           final String type = data['type'] ?? 'info';
           String message = 'New Notification';
@@ -139,19 +206,12 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             message, 
             icon,
             () {
-              // Mark as read
               doc.reference.update({'isRead': true});
-              
-              // Navigate
               if (postId != null) {
-                 Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => PostDetailScreen(postId: postId),
-                  ),
-                );
+                 // Use _AnimatedRoute for smoother transitions
+                 Navigator.push(context, _AnimatedRoute(page: PostDetailScreen(postId: postId)));
               } else if (type == 'follow') {
-                _onItemTapped(3); // Go to Profile
+                _onItemTapped(3); 
               }
             }
           );
@@ -197,19 +257,14 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   List<Widget> _appBarActions(BuildContext context) {
     switch (_selectedIndex) {
       case 0:
-        return [
-          _NotificationButton(onPressed: _showNotificationSheet),
-        ];
+        return [ _NotificationButton(onPressed: _showNotificationSheet) ];
       case 1:
         return [
           PopupMenuButton<String>(
             onSelected: (value) {},
             itemBuilder: (BuildContext context) {
               return {'New Chat', 'Chat History'}.map((String choice) {
-                return PopupMenuItem<String>(
-                  value: choice,
-                  child: Text(choice),
-                );
+                return PopupMenuItem<String>(value: choice, child: Text(choice));
               }).toList();
             },
           ),
@@ -218,11 +273,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         return [
           IconButton(
             icon: _isSearching ? Icon(Icons.close) : Icon(Icons.search),
-            onPressed: () {
-              setState(() {
-                _isSearching = !_isSearching;
-              });
-            },
+            onPressed: () { setState(() { _isSearching = !_isSearching; }); },
           ),
         ];
       case 3:
@@ -245,12 +296,13 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     
     setState(() {
       _selectedIndex = index;
+      PageStorage.of(context).writeState(context, _selectedIndex, identifier: 'home_tab_index');
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
+    super.build(context); 
 
     final _widgetOptions = <Widget>[
       KeepAlivePage(
@@ -261,7 +313,10 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                 controller: _homePageController,
                 onPageChanged: (index) {
                   _tabController.animateTo(index);
-                  setState(() {});
+                  setState(() {
+                    _subTabIndex = index;
+                    PageStorage.of(context).writeState(context, _subTabIndex, identifier: 'home_sub_tab_index');
+                  });
                 },
                 children: [
                   KeepAlivePage(
@@ -286,11 +341,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
       KeepAlivePage(
         child: SearchPage(
           isSearching: _isSearching,
-          onSearchPressed: () {
-            setState(() {
-              _isSearching = !_isSearching;
-            });
-          },
+          onSearchPressed: () { setState(() { _isSearching = !_isSearching; }); },
         ),
       ),
       KeepAlivePage(child: ProfileTabPage()),
@@ -298,17 +349,27 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
 
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
+    // FIX: Improved Navbar Colors for Visibility
+    // Dark Mode: Deep Blue (0xFF15202B) with opacity for blur
+    // Light Mode: White with opacity
+    final navBarBgColor = isDarkMode 
+        ? Color(0xFF15202B).withOpacity(0.85) 
+        : Colors.white.withOpacity(0.85);      
+
+    // Unselected icons: Bright White in Dark Mode, Dark Grey in Light Mode
+    final inactiveIconColor = isDarkMode ? Colors.white : Colors.black54;
+    final activeIconColor = TwitterTheme.blue;
+
     return Scaffold(
       key: _scaffoldKey,
+      extendBody: true,
       extendBodyBehindAppBar: true,
       appBar: _selectedIndex == 3
           ? null
           : AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
-              systemOverlayStyle: isDarkMode 
-                  ? SystemUiOverlayStyle.light 
-                  : SystemUiOverlayStyle.dark,
+              systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
               leading: GestureDetector(
                 onTap: () {
                   if (hapticNotifier.value) HapticFeedback.lightImpact();
@@ -319,10 +380,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                   child: _AppBarAvatar(),
                 ),
               ),
-              title: Image.asset(
-                'images/app_icon.png',
-                height: 30,
-              ),
+              title: Image.asset('images/app_icon.png', height: 30),
               centerTitle: true,
               actions: _appBarActions(context),
               bottom: _selectedIndex == 0
@@ -334,13 +392,14 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                       ],
                     )
                   : null,
-              flexibleSpace: _selectedIndex == 0 
-                ? _ScrollAwareAppBarBackground(
-                    scrollController: _tabController.index == 0 
-                        ? _scrollController 
-                        : _recommendedScrollController
-                  )
-                : null,
+              flexibleSpace: ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
+                  child: Container(
+                    color: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.7),
+                  ),
+                ),
+              ),
             ),
       drawer: SidePanel(
         onProfileSelected: () {
@@ -361,11 +420,13 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
               return false;
             },
             child: PageView(
+              key: PageStorageKey('home_dashboard_pageview'),
               controller: _pageController,
               physics: NeverScrollableScrollPhysics(), 
               onPageChanged: (index) {
                 setState(() {
                   _selectedIndex = index;
+                  PageStorage.of(context).writeState(context, _selectedIndex, identifier: 'home_tab_index');
                 });
               },
               children: _widgetOptions,
@@ -373,103 +434,67 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           ),
         ),
       ),
-      bottomNavigationBar: CustomAnimatedBottomBar(
-        selectedIndex: _selectedIndex,
-        onItemSelected: _onItemTapped,
-        items: <BottomNavyBarItem>[
-          BottomNavyBarItem(
-            icon: Icon(Icons.home),
-            title: Text('Home'),
-            activeColor: Colors.blue,
-            inactiveColor: Colors.grey,
+      // FIX: Improved visibility for Bottom Navigation Bar with Acrylic Blur
+      bottomNavigationBar: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: navBarBgColor,
+              border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.1), width: 0.5)),
+            ),
+            child: CustomAnimatedBottomBar(
+              selectedIndex: _selectedIndex,
+              onItemSelected: _onItemTapped,
+              backgroundColor: Colors.transparent, // Handled by Container above
+              items: <BottomNavyBarItem>[
+                BottomNavyBarItem(
+                  icon: Icon(Icons.home),
+                  title: Text('Home'),
+                  activeColor: activeIconColor,
+                  inactiveColor: inactiveIconColor,
+                ),
+                BottomNavyBarItem(
+                  icon: Icon(Icons.assistant),
+                  title: Text('AI Assistant'),
+                  activeColor: activeIconColor,
+                  inactiveColor: inactiveIconColor,
+                ),
+                BottomNavyBarItem(
+                  icon: Icon(Icons.search),
+                  title: Text('Search'),
+                  activeColor: activeIconColor,
+                  inactiveColor: inactiveIconColor,
+                ),
+                BottomNavyBarItem(
+                  icon: Icon(Icons.person),
+                  title: Text('Profile'),
+                  activeColor: activeIconColor,
+                  inactiveColor: inactiveIconColor,
+                ),
+              ],
+            ),
           ),
-          BottomNavyBarItem(
-            icon: Icon(Icons.assistant),
-            title: Text('AI Assistant'),
-            activeColor: Colors.blue,
-            inactiveColor: Colors.grey,
-          ),
-          BottomNavyBarItem(
-            icon: Icon(Icons.search),
-            title: Text('Search'),
-            activeColor: Colors.blue,
-            inactiveColor: Colors.grey,
-          ),
-          BottomNavyBarItem(
-            icon: Icon(Icons.person),
-            title: Text('Profile'),
-            activeColor: Colors.blue,
-            inactiveColor: Colors.grey,
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _ScrollAwareAppBarBackground extends StatefulWidget {
-  final ScrollController scrollController;
-  
-  const _ScrollAwareAppBarBackground({required this.scrollController});
-
-  @override
-  State<_ScrollAwareAppBarBackground> createState() => _ScrollAwareAppBarBackgroundState();
-}
-
-class _ScrollAwareAppBarBackgroundState extends State<_ScrollAwareAppBarBackground> {
-  bool _isScrolled = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.scrollController.addListener(_onScroll);
-    _onScroll(); 
-  }
-
-  @override
-  void didUpdateWidget(covariant _ScrollAwareAppBarBackground oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.scrollController != widget.scrollController) {
-      oldWidget.scrollController.removeListener(_onScroll);
-      widget.scrollController.addListener(_onScroll);
-      _onScroll(); 
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.scrollController.removeListener(_onScroll);
-    super.dispose();
-  }
-
-  void _onScroll() {
-    if (!widget.scrollController.hasClients) return;
-    
-    final bool isScrolledNow = widget.scrollController.offset > 10;
-    if (isScrolledNow != _isScrolled) {
-      setState(() {
-        _isScrolled = isScrolledNow;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(
-          sigmaX: _isScrolled ? 5.0 : 0.0,
-          sigmaY: _isScrolled ? 5.0 : 0.0,
-        ),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          color: Theme.of(context)
-              .scaffoldBackgroundColor
-              .withOpacity(_isScrolled ? 0.7 : 0.0),
-        ),
-      ),
-    );
-  }
+// Helper class for automatic Fly-In animation from Right to Left
+class _AnimatedRoute extends PageRouteBuilder {
+  final Widget page;
+  _AnimatedRoute({required this.page})
+      : super(
+          pageBuilder: (context, animation, secondaryAnimation) => page,
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            const begin = Offset(1.0, 0.0); // Start from Right
+            const end = Offset.zero;        // End at Center
+            const curve = Curves.easeOutQuart;
+            var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+            return SlideTransition(position: animation.drive(tween), child: child);
+          },
+        );
 }
 
 class _AppBarAvatar extends StatefulWidget {
@@ -504,7 +529,7 @@ class _AppBarAvatarState extends State<_AppBarAvatar> {
         return CircleAvatar(
           radius: 18,
           backgroundColor: profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(colorHex),
-          backgroundImage: profileImageUrl != null ? NetworkImage(profileImageUrl) : null,
+          backgroundImage: profileImageUrl != null ? CachedNetworkImageProvider(profileImageUrl) : null,
           child: profileImageUrl == null ?
             Icon(
               AvatarHelper.getIcon(iconId),
@@ -620,11 +645,9 @@ class CustomAnimatedBottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = Theme.of(context).bottomAppBarTheme.color;
-
     return Container(
       decoration: BoxDecoration(
-        color: bgColor,
+        color: backgroundColor, 
         boxShadow: [
           if (showElevation)
             const BoxShadow(
@@ -648,7 +671,7 @@ class CustomAnimatedBottomBar extends StatelessWidget {
                   item: item,
                   iconSize: iconSize,
                   isSelected: index == selectedIndex,
-                  backgroundColor: bgColor,
+                  backgroundColor: Colors.transparent,
                   itemCornerRadius: itemCornerRadius,
                   animationDuration: animationDuration,
                   curve: curve,
@@ -693,8 +716,10 @@ class _ItemWidget extends StatelessWidget {
         duration: animationDuration,
         curve: curve,
         decoration: BoxDecoration(
-          color:
-              isSelected ? item.activeColor.withOpacity(0.2) : (backgroundColor ?? Colors.transparent),
+          // Highlight logic: Use lighter version of active color for background
+          color: isSelected 
+              ? item.activeColor.withOpacity(0.15) 
+              : (backgroundColor ?? Colors.transparent),
           borderRadius: BorderRadius.circular(itemCornerRadius),
         ),
         child: SingleChildScrollView(

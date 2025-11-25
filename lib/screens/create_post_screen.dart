@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_editor_plus/image_editor_plus.dart'; 
 import 'package:video_player/video_player.dart'; 
 import 'package:path_provider/path_provider.dart'; 
-import 'package:cached_network_image/cached_network_image.dart'; // Added Import
+import 'package:cached_network_image/cached_network_image.dart'; 
 import '../main.dart'; 
 import '../services/prediction_service.dart'; 
 import '../services/cloudinary_service.dart'; 
@@ -19,7 +19,14 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 final CloudinaryService _cloudinaryService = CloudinaryService(); 
 
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key});
+  final String? postId; // If provided, we are in EDIT mode
+  final Map<String, dynamic>? initialData; // Existing data for edit mode
+
+  const CreatePostScreen({
+    super.key,
+    this.postId,
+    this.initialData,
+  });
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
@@ -43,13 +50,25 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String? _predictedText;
   Timer? _debounce;
   
-  File? _selectedMediaFile;
+  // Media State
+  File? _selectedMediaFile; // For NEW media
+  String? _existingMediaUrl; // For EXISTING media (Edit mode)
   String? _mediaType; 
   
+  bool get _isEditing => widget.postId != null;
+
   @override
   void initState() {
     super.initState();
-    _loadUserData(); 
+    _loadUserData();
+    
+    // Initialize for Edit Mode
+    if (_isEditing && widget.initialData != null) {
+      _postController.text = widget.initialData!['text'] ?? '';
+      _existingMediaUrl = widget.initialData!['mediaUrl'];
+      _mediaType = widget.initialData!['mediaType'];
+      _canPost = true; // Enable button initially for edit
+    }
   }
   
   Future<File?> _editAndCompressPostImage(XFile pickedFile) async {
@@ -76,7 +95,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   void _onTextChanged(String text) {
     setState(() {
-      _canPost = text.trim().isNotEmpty || _selectedMediaFile != null;
+      _canPost = text.trim().isNotEmpty || _selectedMediaFile != null || _existingMediaUrl != null;
       _predictedText = null; 
     });
 
@@ -106,7 +125,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       
       setState(() {
         _predictedText = null; 
-        _canPost = newText.trim().isNotEmpty || _selectedMediaFile != null;
+        _canPost = newText.trim().isNotEmpty || _selectedMediaFile != null || _existingMediaUrl != null;
       });
     }
   }
@@ -151,6 +170,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
              setState(() {
                 _mediaType = 'video';
                 _selectedMediaFile = result['file'];
+                _existingMediaUrl = null; // Clear existing if new one picked
                 _canPost = true;
              });
              return;
@@ -164,6 +184,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             setState(() {
                _mediaType = 'image';
                _selectedMediaFile = processedFile;
+               _existingMediaUrl = null; // Clear existing if new one picked
                _canPost = true;
             });
             return;
@@ -178,6 +199,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _clearMedia() {
     setState(() {
       _selectedMediaFile = null;
+      _existingMediaUrl = null;
       _mediaType = null;
       _canPost = _postController.text.trim().isNotEmpty;
     });
@@ -188,55 +210,100 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
+    setState(() { _isLoading = true; }); // Show loading state on button if needed, but we pop immediately usually
+
     // 1. Close screen immediately - Background process starts
     if (mounted) {
       FocusScope.of(context).unfocus();
       Navigator.of(context).pop(); 
     }
     
-    // 2. Create Pending Post
-    final Map<String, dynamic> pendingPostData = {
-      'text': _postController.text,
-      'timestamp': FieldValue.serverTimestamp(),
-      'userId': user.uid,
-      'userName': _userName,
-      'userEmail': _userEmail,
-      'avatarIconId': _avatarIconId,
-      'avatarHex': _avatarHex,
-      'profileImageUrl': _profileImageUrl,
-      'likes': {},
-      'commentCount': 0,
-      'repostedBy': [],
-      'isUploading': _selectedMediaFile != null,
-      'uploadProgress': 0.0,
-    };
-    
     try {
-      final newPostRef = await _firestore.collection('posts').add(pendingPostData);
+      String? mediaUrl = _existingMediaUrl; // Default to existing
       
+      // Upload NEW media if selected
       if (_selectedMediaFile != null) {
-        // 3. Upload to Cloudinary
-        final mediaUrl = await _cloudinaryService.uploadMedia(_selectedMediaFile!);
+        mediaUrl = await _cloudinaryService.uploadMedia(_selectedMediaFile!);
+      }
+
+      if (_isEditing) {
+        // === UPDATE EXISTING POST ===
+        await _firestore.collection('posts').doc(widget.postId).update({
+          'text': _postController.text,
+          'mediaUrl': mediaUrl,
+          'mediaType': _mediaType,
+          'isUploading': false, // Reset upload status
+          // We don't update timestamp on edit usually to keep feed order, or update 'editedAt'
+          'editedAt': FieldValue.serverTimestamp(), 
+        });
         
-        if (mediaUrl != null) {
-          await newPostRef.update({
-            'mediaUrl': mediaUrl,
-            'mediaType': _mediaType,
-            'isUploading': false,
-            'uploadProgress': 1.0,
-          });
-        } else {
-          await newPostRef.update({
-            'isUploading': false,
-            'uploadFailed': true,
-            'text': '⚠️ Upload Failed: ' + _postController.text,
-          });
-        }
-        
-        if (_selectedMediaFile!.existsSync()) {
+        if (_selectedMediaFile != null && _selectedMediaFile!.existsSync()) {
           _selectedMediaFile!.deleteSync();
         }
+
+      } else {
+        // === CREATE NEW POST ===
+        final Map<String, dynamic> pendingPostData = {
+          'text': _postController.text,
+          'timestamp': FieldValue.serverTimestamp(),
+          'userId': user.uid,
+          'userName': _userName,
+          'userEmail': _userEmail,
+          'avatarIconId': _avatarIconId,
+          'avatarHex': _avatarHex,
+          'profileImageUrl': _profileImageUrl,
+          'likes': {},
+          'commentCount': 0,
+          'repostedBy': [],
+          // If we have a new file, we are uploading. If we have existing URL (repost/quote case?), we aren't. 
+          // But for standard create, we only have selectedFile.
+          'isUploading': _selectedMediaFile != null, 
+          'uploadProgress': 0.0,
+        };
+
+        final newPostRef = await _firestore.collection('posts').add(pendingPostData);
+        
+        if (_selectedMediaFile != null) {
+          // If we didn't get the URL yet (failed above or logic separation), 
+          // But here we already tried uploading above if strictly sequential?
+          // The original code separated the upload. Let's stick to the original async pattern for New Posts
+          // to keep the UI responsive (pop first, then upload).
+          
+          // BUT, I moved upload above. Let's revert to background upload for NEW posts only
+          // to match original "pop immediately" speed.
+          
+          // Re-upload logic for background:
+          if (mediaUrl == null && _selectedMediaFile != null) {
+             // This block handles the background upload after pop
+             final url = await _cloudinaryService.uploadMedia(_selectedMediaFile!);
+             if (url != null) {
+                await newPostRef.update({
+                  'mediaUrl': url,
+                  'mediaType': _mediaType,
+                  'isUploading': false,
+                  'uploadProgress': 1.0,
+                });
+             } else {
+                await newPostRef.update({
+                  'isUploading': false,
+                  'uploadFailed': true,
+                  'text': '⚠️ Upload Failed: ' + _postController.text,
+                });
+             }
+             if (_selectedMediaFile!.existsSync()) {
+                _selectedMediaFile!.deleteSync();
+             }
+          } else if (mediaUrl != null) {
+             // If we somehow have URL already
+             await newPostRef.update({
+                'mediaUrl': mediaUrl,
+                'mediaType': _mediaType,
+                'isUploading': false,
+             });
+          }
+        }
       }
+
     } catch (e) {
        print("Critical upload error: $e");
     }
@@ -253,21 +320,25 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    // Calculate bottom padding required (Keyboard height + Bottom Bar height + Safe area)
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    
     return Scaffold(
-      // PENTING: ResizeToAvoidBottomInset true agar keyboard mendorong layout
-      resizeToAvoidBottomInset: true, 
+      // Disable automatic resizing to prevent Overflow. We handle layout with Stack.
+      resizeToAvoidBottomInset: false, 
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(Icons.close, color: theme.primaryColor),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        title: _isEditing ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) : null,
+        centerTitle: false,
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: ElevatedButton(
               onPressed: _canPost ? _submitPost : null, 
-              child: Text('Post'),
+              child: Text(_isEditing ? 'Save' : 'Post'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: TwitterTheme.blue,
                 foregroundColor: Colors.white,
@@ -277,12 +348,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ),
         ],
       ),
-      // LAYOUT FIX: Column + Expanded pushes content properly
-      body: Column(
+      // Stack layout to overlay Bottom Bar on top of content, sticking to keyboard
+      body: Stack(
         children: [
-          Expanded(
+          // 1. Content Layer (Scrollable)
+          Positioned.fill(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
+              // Add bottom padding equal to keyboard + bottom bar height to ensure content isn't hidden
+              padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: bottomInset + 80),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -303,7 +376,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           controller: _postController,
                           focusNode: _postFocusNode, 
                           onChanged: _onTextChanged, 
-                          autofocus: false, // JANGAN Autofocus
+                          autofocus: !_isEditing, 
                           maxLines: null, 
                           style: TextStyle(fontSize: 18),
                           decoration: InputDecoration(
@@ -312,9 +385,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           ),
                         ),
                         
+                        // Show either New File or Existing URL
                         if (_selectedMediaFile != null)
                           _MediaPreviewWidget(
-                            file: _selectedMediaFile!, 
+                            fileOrUrl: _selectedMediaFile, 
+                            type: _mediaType ?? 'image',
+                            onRemove: _clearMedia,
+                          )
+                        else if (_existingMediaUrl != null)
+                           _MediaPreviewWidget(
+                            fileOrUrl: _existingMediaUrl, 
                             type: _mediaType ?? 'image',
                             onRemove: _clearMedia,
                           ),
@@ -339,28 +419,35 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
             ),
           ),
-          // Bottom Actions - Always visible above keyboard
-          Container(
-            decoration: BoxDecoration(border: Border(top: BorderSide(color: theme.dividerColor))),
-            padding: EdgeInsets.only(
-              left: 16, 
-              right: 16, 
-              top: 8, 
-              bottom: MediaQuery.of(context).viewInsets.bottom + 16 // Menghindari Keyboard
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.image, color: TwitterTheme.blue),
-                  onPressed: () => _pickMedia(ImageSource.gallery),
+
+          // 2. Bottom Actions Layer (Sticky)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: bottomInset, // Stick to top of keyboard
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.scaffoldBackgroundColor, // Ensure background is opaque
+                border: Border(top: BorderSide(color: theme.dividerColor)),
+              ),
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: SafeArea(
+                top: false,
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.image, color: TwitterTheme.blue),
+                      onPressed: () => _pickMedia(ImageSource.gallery),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.videocam, color: TwitterTheme.blue),
+                      onPressed: () => _pickMedia(ImageSource.gallery, isVideo: true),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: Icon(Icons.videocam, color: TwitterTheme.blue),
-                  onPressed: () => _pickMedia(ImageSource.gallery, isVideo: true),
-                ),
-              ],
+              ),
             ),
-          )
+          ),
         ],
       ),
     );
@@ -368,14 +455,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 }
 
 class _MediaPreviewWidget extends StatelessWidget {
-  final File file;
+  final dynamic fileOrUrl; // Can be File or String (URL)
   final String type;
   final VoidCallback onRemove;
 
-  const _MediaPreviewWidget({required this.file, required this.type, required this.onRemove});
+  const _MediaPreviewWidget({required this.fileOrUrl, required this.type, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
+    ImageProvider imageProvider;
+    if (fileOrUrl is File) {
+      imageProvider = FileImage(fileOrUrl);
+    } else {
+      imageProvider = CachedNetworkImageProvider(fileOrUrl as String);
+    }
+
     return Stack(
       children: [
         Container(
@@ -387,7 +481,7 @@ class _MediaPreviewWidget extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
           ),
           child: type == 'image' 
-            ? Image.file(file, fit: BoxFit.contain)
+            ? Image(image: imageProvider, fit: BoxFit.contain)
             : Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50)),
         ),
         Positioned(

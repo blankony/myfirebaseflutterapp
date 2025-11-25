@@ -5,11 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart'; 
 import 'package:image_cropper/image_cropper.dart'; 
-import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
 import '../main.dart'; 
 import 'change_password_screen.dart'; 
 import '../services/cloudinary_service.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../data/pnj_data.dart'; // Ensure this file exists from previous steps
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -36,6 +36,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _bannerImageUrl;
   File? _selectedBannerFile; 
 
+  // Department & Prodi State
+  String? _selectedDepartment;
+  Map<String, String>? _selectedProdi;
+
   @override
   void initState() {
     super.initState();
@@ -49,26 +53,92 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final userDoc = await _firestore.collection('users').doc(_user!.uid).get();
     if (userDoc.exists) {
       final data = userDoc.data() as Map<String, dynamic>;
-      setState(() {
-        _nameController.text = data['name'] ?? '';
-        _bioController.text = data['bio'] ?? '';
-        _profileImageUrl = data['profileImageUrl']; 
-        _bannerImageUrl = data['bannerImageUrl']; 
-        _selectedIconId = data['avatarIconId'] ?? 0;
-        _selectedColor = AvatarHelper.getColor(data['avatarHex']);
-        if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
-          _selectedIconId = -1; 
+      if (mounted) {
+        setState(() {
+          _nameController.text = data['name'] ?? '';
+          _bioController.text = data['bio'] ?? '';
+          _profileImageUrl = data['profileImageUrl']; 
+          _bannerImageUrl = data['bannerImageUrl']; 
+          _selectedIconId = data['avatarIconId'] ?? 0;
+          _selectedColor = AvatarHelper.getColor(data['avatarHex']);
+          if (_profileImageUrl != null && _profileImageUrl!.isNotEmpty) {
+            _selectedIconId = -1; 
+          }
+
+          // Load Department Info
+          _selectedDepartment = data['department'];
+          final savedProdiName = data['studyProgram'];
+          
+          // Restore Prodi selection if department matches
+          if (_selectedDepartment != null && savedProdiName != null) {
+            final prodis = PnjData.departments[_selectedDepartment];
+            if (prodis != null) {
+              _selectedProdi = prodis.firstWhere(
+                (p) => p['name'] == savedProdiName, 
+                orElse: () => prodis.first
+              );
+            }
+          }
+
+          // Auto-detect if not set
+          if (_selectedDepartment == null) {
+            _tryAutoDetectDepartment();
+          }
+        });
+      }
+    }
+  }
+
+  void _tryAutoDetectDepartment() {
+    final email = _user?.email;
+    if (email == null) return;
+    
+    // Regex to find .codeYear in email (e.g., name.te23@stu.pnj.ac.id)
+    final RegExp regex = RegExp(r'\.([a-z]+)\d+@');
+    final match = regex.firstMatch(email);
+    
+    if (match != null) {
+      final code = match.group(1);
+      if (code != null) {
+        final detectedDept = _mapEmailCodeToDepartment(code);
+        if (detectedDept != null && PnjData.departments.containsKey(detectedDept)) {
+          setState(() {
+            _selectedDepartment = detectedDept;
+            _selectedProdi = null; // Reset prodi as we can't strictly determine it
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Auto-detected department: $detectedDept"))
+            );
+          }
         }
-      });
+      }
+    }
+  }
+
+  String? _mapEmailCodeToDepartment(String code) {
+    switch (code.toLowerCase()) {
+      case 'te': return 'Teknik Elektro';
+      case 'tm': return 'Teknik Mesin';
+      case 'ts': return 'Teknik Sipil';
+      case 'ti': 
+      case 'tik': return 'Teknik Informatika & Komputer';
+      case 'ak': return 'Akuntansi';
+      case 'an': return 'Administrasi Niaga';
+      case 'tg':
+      case 'tgp': return 'Teknik Grafika & Penerbitan';
+      default: return null;
     }
   }
   
-  // NEW: Dedicated Cropper Function (Dynamic return type to handle version mismatches)
+  // Dedicated Cropper Function with Aggressive Memory Optimization
   Future<File?> _cropImage({required XFile imageFile, required bool isAvatar}) async {
     try {
-      // Using dynamic to bypass potential type lookup issues if dependency version varies
       final dynamic cropped = await ImageCropper().cropImage(
         sourcePath: imageFile.path,
+        compressQuality: 60, // Low quality to prevent OOM crashes
+        maxWidth: 800,       // Limit resolution
+        maxHeight: 800,
         // Force 1:1 for Avatar, 3:1 for Banner
         aspectRatio: isAvatar 
             ? CropAspectRatio(ratioX: 1, ratioY: 1) 
@@ -79,47 +149,42 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             toolbarColor: TwitterTheme.blue,
             toolbarWidgetColor: Colors.white,
             initAspectRatio: isAvatar ? CropAspectRatioPreset.square : CropAspectRatioPreset.ratio3x2,
-            lockAspectRatio: true, // Force the ratio
+            lockAspectRatio: true,
             hideBottomControls: false,
           ),
           IOSUiSettings(
             title: isAvatar ? 'Crop Avatar' : 'Crop Banner',
-            aspectRatioLockEnabled: true, // Force the ratio
+            aspectRatioLockEnabled: true,
           ),
         ],
       );
       
       if (cropped != null) {
-        // Handle both older (File) and newer (CroppedFile) return types
-        if (cropped is File) {
-          return cropped;
-        } else if (cropped is CroppedFile) {
-          return File(cropped.path);
-        } else if (cropped.toString().contains('path')) {
-           // Fallback via reflection-like access if type check fails
-           // mostly for web or edge cases
-           return File(cropped.path);
-        }
+        // Handle different version return types
+        if (cropped is File) return cropped;
+        try { return File((cropped as dynamic).path); } catch (_) {}
       }
     } catch (e) {
       debugPrint("Cropping failed: $e");
-      // Fallback: return original if crop fails to avoid blocking user
       return File(imageFile.path);
     }
     return null;
   }
 
   Future<void> _pickImage({required bool isAvatar}) async {
-    // Dismiss keyboard before opening picker to prevent layout jumps
     FocusScope.of(context).unfocus();
-    
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    
+    // Aggressive memory optimization for Picker
+    final pickedFile = await picker.pickImage(
+      source: ImageSource.gallery, 
+      imageQuality: 70,
+      maxWidth: 1000, 
+      maxHeight: 1000
+    );
 
     if (pickedFile != null) {
-      // Step 1: Crop the image with fixed ratio
       final processedFile = await _cropImage(imageFile: pickedFile, isAvatar: isAvatar);
-      
       if (processedFile != null) {
         setState(() {
           if (isAvatar) {
@@ -138,7 +203,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _saveChanges() async {
-    // Dismiss keyboard before saving
     FocusScope.of(context).unfocus();
 
     if (_user == null || _nameController.text.isEmpty) {
@@ -173,17 +237,29 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final int finalIconId = finalImageUrl != null ? -1 : _selectedIconId;
 
     try {
-      // 1. Update Main User Doc
-      await _firestore.collection('users').doc(_user!.uid).update({
+      // Prepare Data
+      final Map<String, dynamic> userUpdateData = {
         'name': _nameController.text.trim(),
         'bio': _bioController.text.trim(),
         'avatarIconId': finalIconId, 
         'avatarHex': finalIconId != -1 ? '0x${_selectedColor.value.toRadixString(16).toUpperCase()}' : null, 
         'profileImageUrl': finalImageUrl, 
         'bannerImageUrl': finalBannerUrl, 
-      });
+      };
 
-      // 2. Update Denormalized Data (in batches)
+      // Add Department info if selected
+      if (_selectedDepartment != null) {
+        userUpdateData['department'] = _selectedDepartment;
+      }
+      if (_selectedProdi != null) {
+        userUpdateData['studyProgram'] = _selectedProdi!['name'];
+        userUpdateData['departmentCode'] = _selectedProdi!['code']; // Important for the Badge
+      }
+
+      // 1. Update Main User Doc
+      await _firestore.collection('users').doc(_user!.uid).update(userUpdateData);
+
+      // 2. Update Denormalized Data (in chunks)
       await _updateDenormalizedData(
         _user!.uid, 
         _nameController.text.trim(), 
@@ -194,8 +270,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Profile updated successfully!')));
-        // FIX: Ensure we pop correctly back to the previous screen (Profile Page)
-        // Passing 'true' allows the previous screen to listen for result and refresh if needed
+        // Pass true to signal success to previous screen
         Navigator.of(context).pop(true); 
       }
     } catch (e) {
@@ -209,7 +284,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  // FIX: Implemented Batching to prevent Firestore 500 write limit error
   Future<void> _updateDenormalizedData(
     String userId, 
     String newName, 
@@ -224,7 +298,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'profileImageUrl': imageUrl, 
     };
     
-    // Fetch all docs first
     final postsQuery = _firestore.collection('posts').where('userId', isEqualTo: userId);
     final postsSnapshot = await postsQuery.get();
     
@@ -235,7 +308,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     
     if (allDocs.isEmpty) return;
 
-    // Process in chunks of 500 (Firestore Batch Limit)
     const int batchSize = 500;
     for (var i = 0; i < allDocs.length; i += batchSize) {
       final batch = _firestore.batch();
@@ -244,7 +316,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       for (var j = i; j < end; j++) {
         batch.update(allDocs[j].reference, updateData);
       }
-      
       await batch.commit();
     }
   }
@@ -285,7 +356,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final bool isCustomBannerSet = _selectedBannerFile != null || (_bannerImageUrl != null && _bannerImageUrl!.isNotEmpty);
 
     return GestureDetector(
-      // FIX: Dismiss keyboard when tapping outside of text fields
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       child: Scaffold(
         appBar: AppBar(
@@ -320,7 +390,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   clipBehavior: Clip.none,
                   alignment: Alignment.topCenter,
                   children: [
-                    // 1. Banner Area with CachedNetworkImage for better performance
+                    // Banner
                     GestureDetector(
                       onTap: () => _pickImage(isAvatar: false),
                       child: Container(
@@ -330,7 +400,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            // Image Layer
                             if (_selectedBannerFile != null)
                               Image.file(_selectedBannerFile!, fit: BoxFit.cover)
                             else if (_bannerImageUrl != null && _bannerImageUrl!.isNotEmpty)
@@ -340,8 +409,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 placeholder: (context, url) => Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
                                 errorWidget: (context, url, error) => Icon(Icons.error_outline, color: Colors.grey),
                               ),
-                            
-                            // Overlay Dim & Icon
                             Container(
                               color: Colors.black26, 
                               child: Center(
@@ -353,11 +420,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ),
                     ),
                     
-                    // Banner Remove Button
                     if (isCustomBannerSet)
                       Positioned(
-                        top: 10,
-                        right: 10,
+                        top: 10, right: 10,
                         child: GestureDetector(
                           onTap: () => setState(() { _selectedBannerFile = null; _bannerImageUrl = null; }),
                           child: Container(
@@ -368,10 +433,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                       ),
 
-                    // 2. Avatar Area
+                    // Avatar
                     Positioned(
-                      bottom: 0,
-                      left: 20,
+                      bottom: 0, left: 20,
                       child: GestureDetector(
                         onTap: () => _pickImage(isAvatar: true),
                         child: Stack(
@@ -384,10 +448,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               ),
                               child: _buildProfileAvatar(),
                             ),
-                            // Camera Badge
                             Positioned(
-                              bottom: 0,
-                              right: 0,
+                              bottom: 0, right: 0,
                               child: Container(
                                 padding: EdgeInsets.all(6),
                                 decoration: BoxDecoration(
@@ -411,7 +473,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Remove Avatar Option
                     if (isCustomImageSet)
                       Padding(
                         padding: const EdgeInsets.only(left: 8.0, bottom: 16.0),
@@ -423,10 +484,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
                     SizedBox(height: 10),
 
-                    // --- TEXT FIELDS ---
                     TextField(
                       controller: _nameController,
-                      autofocus: false, // Explicitly disable autofocus
+                      autofocus: false,
                       decoration: InputDecoration(
                         labelText: 'Display Name',
                         hintText: 'Enter your name',
@@ -437,8 +497,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     SizedBox(height: 20),
                     TextField(
                       controller: _bioController,
-                      autofocus: false, // Explicitly disable autofocus
-                      maxLength: 200, // Added Max Length
+                      autofocus: false,
+                      maxLength: 200,
                       decoration: InputDecoration(
                         labelText: 'Bio',
                         hintText: 'Tell the world about yourself',
@@ -451,8 +511,61 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                     
                     SizedBox(height: 30),
+
+                    // --- ACADEMIC INFO SECTION (Added back) ---
+                    Text("Academic Info", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    SizedBox(height: 16),
                     
-                    // --- AVATAR PRESETS (Only visible if no custom image) ---
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: "Department (Jurusan)",
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        filled: true,
+                        fillColor: theme.cardColor,
+                      ),
+                      value: _selectedDepartment,
+                      isExpanded: true,
+                      items: PnjData.departments.keys.map((String dept) {
+                        return DropdownMenuItem(value: dept, child: Text(dept, overflow: TextOverflow.ellipsis));
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedDepartment = val;
+                          _selectedProdi = null; 
+                        });
+                      },
+                    ),
+                    SizedBox(height: 16),
+                    
+                    DropdownButtonFormField<Map<String, String>>(
+                      decoration: InputDecoration(
+                        labelText: "Study Program (Prodi)",
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        filled: true,
+                        fillColor: theme.cardColor,
+                      ),
+                      value: _selectedProdi,
+                      isExpanded: true,
+                      items: _selectedDepartment == null 
+                        ? [] 
+                        : PnjData.departments[_selectedDepartment]!.map((Map<String, String> prodi) {
+                            return DropdownMenuItem<Map<String, String>>(
+                              value: prodi,
+                              child: Text(prodi['name']!, overflow: TextOverflow.ellipsis),
+                            );
+                          }).toList(),
+                      onChanged: _selectedDepartment == null ? null : (val) {
+                        setState(() {
+                          _selectedProdi = val;
+                        });
+                      },
+                    ),
+
+                    SizedBox(height: 30),
+                    
+                    // --- AVATAR PRESETS ---
                     if (!isCustomImageSet) ...[
                       Divider(),
                       Padding(
@@ -469,7 +582,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             final isSelected = _selectedIconId == index;
                             return GestureDetector(
                               onTap: () {
-                                // Dismiss keyboard when selecting presets
                                 FocusScope.of(context).unfocus();
                                 setState(() => _selectedIconId = index);
                               },

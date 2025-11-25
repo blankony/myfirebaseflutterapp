@@ -10,6 +10,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
+import 'settings_page.dart'; // Import SettingsPage for navigation
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -36,8 +37,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   late final String _userId;
   
   bool _isScrolled = false;
-  
-  // NEW: State for Bio Expansion
   bool _isBioExpanded = false;
 
   @override
@@ -45,7 +44,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     super.initState();
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
-    _tabController = TabController(length: 3, vsync: this);
+    // Explicitly starting at index 0
+    _tabController = TabController(length: 3, vsync: this, initialIndex: 0);
     
     _scrollController.addListener(_scrollListener);
   }
@@ -62,7 +62,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Future<void> _handleRefresh() async {
-    // Simulate refresh wait
     await Future.delayed(Duration(seconds: 1));
     if (mounted) {
       setState(() {});
@@ -106,35 +105,80 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  void _showMoreOptions(BuildContext context, String name, bool isMyProfile) {
-    showModalBottomSheet(
+  // UPDATED: Logout Function for the menu
+  Future<void> _signOut(BuildContext context) async {
+    final didConfirm = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Wrap(
-            children: [
-              ListTile(
-                leading: Icon(Icons.share_outlined),
-                title: Text('Share Account'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _shareProfile(name);
-                },
-              ),
-              if (!isMyProfile)
+      builder: (context) => AlertDialog(
+        title: Text('Sign Out'),
+        content: Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text('Sign Out', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    ) ?? false;
+
+    if (didConfirm) {
+      await _auth.signOut();
+      if (context.mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
+  // MODIFIED: Updated Options Menu
+  void _showMoreOptions(BuildContext context, String name, bool isMyProfile) {
+    // If my profile -> PopupMenu with Share, Settings, Logout
+    if (isMyProfile) {
+      final theme = Theme.of(context);
+      showModalBottomSheet(
+        context: context,
+        builder: (context) {
+          return SafeArea(
+            child: Wrap(
+              children: [
                 ListTile(
-                  leading: Icon(Icons.block_outlined, color: Colors.red),
-                  title: Text('Block @$name', style: TextStyle(color: Colors.red)),
+                  leading: Icon(Icons.share_outlined),
+                  title: Text('Share Profile'),
                   onTap: () {
                     Navigator.pop(context);
-                    _blockUser(name);
+                    _shareProfile(name);
                   },
                 ),
-            ],
-          ),
-        );
-      },
-    );
+                ListTile(
+                  leading: Icon(Icons.settings_outlined),
+                  title: Text('Settings'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.logout, color: Colors.red),
+                  title: Text('Logout', style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _signOut(context);
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } else {
+      // If other profile -> Dropdown (Popup) Menu
+      final RenderBox button = context.findRenderObject() as RenderBox;
+      final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+      final RelativeRect position = RelativeRect.fromRect(
+        Rect.fromPoints(
+          button.localToGlobal(Offset.zero, ancestor: overlay),
+          button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
+        ),
+        Offset.zero & overlay.size,
+      );
+    }
   }
 
   @override
@@ -166,94 +210,128 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       notificationPredicate: (notification) {
         return notification.depth == 0; 
       },
-      child: DefaultTabController(
-        length: 3,
-        child: NestedScrollView(
-          controller: _scrollController,
-          headerSliverBuilder: (context, innerBoxIsScrolled) {
-            return [
-              StreamBuilder<DocumentSnapshot>(
+      // REMOVED: DefaultTabController. It is redundant and can cause state conflicts
+      // since we are using a manual _tabController.
+      child: NestedScrollView(
+        controller: _scrollController,
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            StreamBuilder<DocumentSnapshot>(
+              stream: _firestore.collection('users').doc(_userId).snapshots(),
+              builder: (context, snapshot) {
+                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+                final String name = data['name'] ?? '';
+                final bool isMyProfile = _user?.uid == _userId;
+                
+                final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
+                final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
+                final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
+
+                return SliverAppBar(
+                  pinned: true,
+                  elevation: 0,
+                  backgroundColor: _isScrolled ? appBarBgColor : appBarBgColor, 
+                  systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+                  automaticallyImplyLeading: widget.includeScaffold,
+                  iconTheme: IconThemeData(
+                    color: iconColor, 
+                  ),
+                  title: AnimatedOpacity(
+                    opacity: _isScrolled ? 1.0 : 0.0,
+                    duration: Duration(milliseconds: 200),
+                    child: Text(
+                      name, 
+                      style: TextStyle(
+                        color: titleColor,
+                        fontWeight: FontWeight.bold
+                      )
+                    ),
+                  ),
+                  centerTitle: false,
+                  actions: [
+                    // MODIFIED: Using PopupMenuButton for both cases to satisfy "drop down menu" request
+                    PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: iconColor),
+                      onSelected: (value) {
+                        if (value == 'share') _shareProfile(name);
+                        if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
+                        if (value == 'logout') _signOut(context);
+                        if (value == 'block') _blockUser(name);
+                      },
+                      itemBuilder: (BuildContext context) {
+                        if (isMyProfile) {
+                          return [
+                            PopupMenuItem(
+                              value: 'share',
+                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'settings',
+                              child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'logout',
+                              child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
+                            ),
+                          ];
+                        } else {
+                          return [
+                            PopupMenuItem(
+                              value: 'share',
+                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'block',
+                              child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
+                            ),
+                          ];
+                        }
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+
+            SliverToBoxAdapter(
+              child: StreamBuilder<DocumentSnapshot>(
                 stream: _firestore.collection('users').doc(_userId).snapshots(),
                 builder: (context, snapshot) {
-                  final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-                  final String name = data['name'] ?? '';
+                  if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+                  
+                  final data = snapshot.data!.data() as Map<String, dynamic>;
                   final bool isMyProfile = _user?.uid == _userId;
                   
-                  final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
-                  final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
-                  final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
-  
-                  return SliverAppBar(
-                    pinned: true,
-                    elevation: 0,
-                    backgroundColor: _isScrolled ? appBarBgColor : appBarBgColor, 
-                    systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-                    automaticallyImplyLeading: widget.includeScaffold,
-                    iconTheme: IconThemeData(
-                      color: iconColor, 
-                    ),
-                    title: AnimatedOpacity(
-                      opacity: _isScrolled ? 1.0 : 0.0,
-                      duration: Duration(milliseconds: 200),
-                      child: Text(
-                        name, 
-                        style: TextStyle(
-                          color: titleColor,
-                          fontWeight: FontWeight.bold
-                        )
-                      ),
-                    ),
-                    centerTitle: false,
-                    actions: [
-                      IconButton(
-                        icon: Icon(Icons.more_vert, color: iconColor),
-                        onPressed: () => _showMoreOptions(context, name, isMyProfile),
-                      ),
-                    ],
-                  );
+                  return _buildUnifiedProfileHeader(context, data, isMyProfile);
                 },
               ),
-  
-              SliverToBoxAdapter(
-                child: StreamBuilder<DocumentSnapshot>(
-                  stream: _firestore.collection('users').doc(_userId).snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-                    
-                    final data = snapshot.data!.data() as Map<String, dynamic>;
-                    final bool isMyProfile = _user?.uid == _userId;
-                    
-                    return _buildUnifiedProfileHeader(context, data, isMyProfile);
-                  },
+            ),
+
+            SliverPersistentHeader(
+              delegate: _SliverAppBarDelegate(
+                TabBar(
+                  controller: _tabController,
+                  tabs: [
+                    Tab(text: 'Posts'),
+                    Tab(text: 'Reposts'),
+                    Tab(text: 'Replies'),
+                  ],
+                  labelColor: theme.primaryColor,
+                  unselectedLabelColor: theme.hintColor,
+                  indicatorColor: theme.primaryColor,
                 ),
               ),
-  
-              SliverPersistentHeader(
-                delegate: _SliverAppBarDelegate(
-                  TabBar(
-                    controller: _tabController,
-                    tabs: [
-                      Tab(text: 'Posts'),
-                      Tab(text: 'Reposts'),
-                      Tab(text: 'Replies'),
-                    ],
-                    labelColor: theme.primaryColor,
-                    unselectedLabelColor: theme.hintColor,
-                    indicatorColor: theme.primaryColor,
-                  ),
-                ),
-                pinned: true,
-              ),
-            ];
-          },
-          body: TabBarView(
-            controller: _tabController,
-            children: [
-              _buildMyPosts(_userId),
-              _buildMyReposts(_userId),
-              _buildMyReplies(_userId),
-            ],
-          ),
+              pinned: true,
+            ),
+          ];
+        },
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildMyPosts(_userId),
+            _buildMyReposts(_userId),
+            _buildMyReplies(_userId),
+          ],
         ),
       ),
     );
@@ -273,6 +351,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String email = data['email'] ?? '';
     final String nim = data['nim'] ?? '';
     final String bio = data['bio'] ?? '';
+    final String? departmentCode = data['departmentCode']; // e.g., "TE-BM"
+    // Pass full names for the popup info
+    final String? departmentName = data['department'];
+    final String? studyProgramName = data['studyProgram'];
+    
     final List<dynamic> following = data['following'] ?? [];
     final List<dynamic> followers = data['followers'] ?? [];
     final String? bannerImageUrl = data['bannerImageUrl']; 
@@ -281,7 +364,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     const double avatarRadius = 45.0;
     const double headerStackHeight = bannerHeight + 60.0;
 
-    // Bio Logic
     final bool isLongBio = bio.length > 100;
     final String displayBio = _isBioExpanded ? bio : (isLongBio ? bio.substring(0, 100) + '...' : bio);
 
@@ -319,26 +401,36 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 ),
               ),
 
+              // MODIFIED: Badge is now here, next to the action button
               Positioned(
                 top: bannerHeight + 16,
                 right: 16,
-                child: isMyProfile
-                    ? OutlinedButton(
-                        onPressed: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(builder: (context) => EditProfileScreen()),
-                          );
-                          if (mounted) setState(() {});
-                        },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: theme.textTheme.bodyLarge?.color,
-                          side: BorderSide(color: theme.dividerColor),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        child: Text("Edit Profile"),
-                      )
-                    : _buildFollowButton(followers),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (departmentCode != null) ...[
+                      _buildDepartmentBadge(departmentCode, departmentName, studyProgramName),
+                      SizedBox(width: 12), // Spacing between badge and button
+                    ],
+                    isMyProfile
+                        ? OutlinedButton(
+                            onPressed: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(builder: (context) => EditProfileScreen()),
+                              );
+                              if (mounted) setState(() {});
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: theme.textTheme.bodyLarge?.color,
+                              side: BorderSide(color: theme.dividerColor),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: Text("Edit Profile"),
+                          )
+                        : _buildFollowButton(followers),
+                  ],
+                ),
               ),
             ],
           ),
@@ -349,13 +441,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // MODIFIED: Removed badge from here, kept only name
               Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22)),
+              
               Text("@${email.split('@')[0]}", style: theme.textTheme.titleSmall),
               SizedBox(height: 4),
               Text(nim, style: theme.textTheme.titleSmall),
               SizedBox(height: 8),
               
-              // UPDATED BIO DISPLAY
               Text(
                 displayBio.isEmpty ? "No bio set." : displayBio,
                 style: theme.textTheme.bodyLarge?.copyWith(fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal),
@@ -397,6 +490,92 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           ),
         ),
       ],
+    );
+  }
+
+  void _showBadgeInfo(BuildContext context, String dept, String prodi) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Academic Info"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(dept, style: TextStyle(fontSize: 16)),
+            SizedBox(height: 16),
+            Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(prodi, style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("Close", style: TextStyle(color: TwitterTheme.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Two-part Badge Builder for Department Codes with Interaction
+  Widget _buildDepartmentBadge(String code, String? fullDeptName, String? fullProdiName) {
+    final parts = code.split('-');
+    if (parts.length < 2) return SizedBox.shrink();
+
+    final dept = parts[0]; // e.g., "TE"
+    final prodi = parts[1]; // e.g., "BM"
+    
+    Color deptColor;
+    if (dept.toUpperCase() == 'TE') {
+       deptColor = Color(0xFF00008B); // Dark Blue for TE
+    } else if (dept.toUpperCase() == 'TS') {
+       deptColor = Color(0xFF5D4037); // Dark Creamy Brown for TS
+    } else {
+       // Placeholder random color based on hash to keep it consistent
+       deptColor = Colors.primaries[dept.hashCode.abs() % Colors.primaries.length];
+    }
+    
+    // NEW: Specific color logic for Prodi
+    Color prodiColor;
+    if (prodi.toUpperCase() == 'BM') {
+      prodiColor = Colors.orange; // Fixed orange for BM
+    } else {
+      // Random consistent color for other Prodis based on hash
+      prodiColor = Colors.primaries[prodi.hashCode.abs() % Colors.primaries.length];
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (fullDeptName != null && fullProdiName != null) {
+          _showBadgeInfo(context, fullDeptName, fullProdiName);
+        }
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Department Badge
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: deptColor, 
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(dept, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+          SizedBox(width: 4), // Small gap between badges
+          // Study Program Badge
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: prodiColor,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(prodi, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -509,12 +688,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // MODIFIED: Uses CustomScrollView to fetch BOTH reposted posts AND reposted comments
   Widget _buildMyReposts(String userId) {
     return CustomScrollView(
       key: PageStorageKey('reposts_tab'),
       slivers: [
-        // 1. Reposted Posts
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
@@ -537,8 +714,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             );
           },
         ),
-
-        // 2. Reposted Comments (Replies)
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collectionGroup('comments').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
@@ -565,8 +740,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             );
           },
         ),
-
-        // 3. Fallback Empty State (if both are empty, tricky to show one "Empty" msg centered in sliver, so we append padding)
         SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
     );

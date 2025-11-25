@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../change_password_screen.dart';
-import '../welcome_screen.dart'; // FIX: Imported WelcomeScreen
+import '../welcome_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -32,7 +32,6 @@ class AccountCenterPage extends StatelessWidget {
       },
     );
   }
-
 
   // --- Step 1: Prompt Password ---
   Future<void> _promptPasswordForDeletion(BuildContext context) async {
@@ -88,26 +87,30 @@ class AccountCenterPage extends StatelessWidget {
                         // Attempt re-auth
                         await user.reauthenticateWithCredential(credential);
                         
-                        // If successful, close this dialog and show the final one
+                        // FIX: Check mounted before using context after await
                         if (context.mounted) {
                           Navigator.of(context).pop(); // Close password dialog
-                          _showFinalDeleteConfirmation(context); // Show final dialog
+                          _showFinalDeleteConfirmation(ctx); // Use parent ctx or ensure validity
                         }
                       }
                     } on FirebaseAuthException catch (e) {
-                      setState(() {
-                        isLoading = false;
-                        if (e.code == 'invalid-credential' || e.code == 'wrong-password') {
-                           errorMessage = 'Incorrect password.';
-                        } else {
-                           errorMessage = 'Error: ${e.message}';
-                        }
-                      });
+                      if (context.mounted) {
+                        setState(() {
+                          isLoading = false;
+                          if (e.code == 'invalid-credential' || e.code == 'wrong-password') {
+                             errorMessage = 'Incorrect password.';
+                          } else {
+                             errorMessage = 'Error: ${e.message}';
+                          }
+                        });
+                      }
                     } catch (e) {
-                       setState(() {
-                        isLoading = false;
-                        errorMessage = 'An error occurred.';
-                      });
+                       if (context.mounted) {
+                         setState(() {
+                          isLoading = false;
+                          errorMessage = 'An error occurred.';
+                        });
+                       }
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -150,7 +153,7 @@ class AccountCenterPage extends StatelessWidget {
       ),
     ) ?? false;
 
-    if (didConfirm) {
+    if (didConfirm && context.mounted) {
       _performAccountDeletion(context);
     }
   }
@@ -173,14 +176,18 @@ class AccountCenterPage extends StatelessWidget {
         // 2. Delete Auth Account
         await user.delete();
         
+        // FIX: Crucial check before using context
         if (context.mounted) {
-          Navigator.of(context).pop(); // Dismiss loading
+          // Dismiss loading dialog if possible
+          if (Navigator.canPop(context)) {
+            Navigator.of(context).pop(); 
+          }
           
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Account deleted successfully.'))
           );
           
-          // FIX: Navigate to Welcome Screen instead of Login
+          // Navigate to Welcome Screen and remove all previous routes
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const WelcomeScreen()),
             (route) => false,
@@ -188,8 +195,13 @@ class AccountCenterPage extends StatelessWidget {
         }
       }
     } catch (e) {
+      // FIX: Check mounted before showing error
       if (context.mounted) {
-        Navigator.of(context).pop(); // Dismiss loading
+        // Try to pop loading dialog
+        if (Navigator.canPop(context)) {
+           Navigator.of(context).pop();
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to delete account: $e'))
         );
@@ -220,7 +232,6 @@ class AccountCenterPage extends StatelessWidget {
             subtitle: Text('Change Name, Bio, and Avatar'),
             trailing: Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
-              // Apply Slide Right Animation
               Navigator.of(context).push(_createSlideRightRoute(EditProfileScreen()));
             },
           ),
@@ -229,7 +240,6 @@ class AccountCenterPage extends StatelessWidget {
             title: Text('Change Password'),
             trailing: Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
-              // Apply Slide Right Animation
               Navigator.of(context).push(_createSlideRightRoute(ChangePasswordScreen()));
             },
           ),
