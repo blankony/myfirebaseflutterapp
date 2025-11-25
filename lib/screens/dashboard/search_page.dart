@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cached_network_image/cached_network_image.dart'; // Added Import
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart'; 
 import 'profile_page.dart'; 
@@ -643,6 +644,11 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     final List<dynamic> followingList = widget.userData['following'] ?? [];
     final bool followsMe = widget.currentUserId != null && followingList.contains(widget.currentUserId);
 
+    // Avatar Data
+    final int iconId = widget.userData['avatarIconId'] ?? 0;
+    final String? colorHex = widget.userData['avatarHex'];
+    final String? profileImageUrl = widget.userData['profileImageUrl'];
+
     return InkWell(
       onTap: () {
         Navigator.of(context).push(
@@ -656,8 +662,9 @@ class _UserSearchTileState extends State<_UserSearchTile> {
           children: [
             CircleAvatar(
               radius: 24,
-              backgroundColor: theme.cardColor,
-              child: Icon(Icons.person, color: theme.primaryColor),
+              backgroundColor: profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(colorHex),
+              backgroundImage: profileImageUrl != null ? CachedNetworkImageProvider(profileImageUrl) : null,
+              child: profileImageUrl == null ? Icon(AvatarHelper.getIcon(iconId), size: 24, color: Colors.white) : null,
             ),
             SizedBox(width: 12),
             Expanded(

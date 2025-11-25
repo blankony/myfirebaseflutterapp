@@ -15,6 +15,12 @@ import 'profile_tab_page.dart';
 import '../../main.dart'; 
 import '../../widgets/notification_sheet.dart';
 
+// NEW IMPORTS
+import 'dart:async'; 
+import '../../services/overlay_service.dart';
+import '../../services/notification_prefs_service.dart';
+import 'package:myfirebaseflutterapp/screens/post_detail_screen.dart';
+
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -35,12 +41,13 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   final ScrollController _recommendedScrollController = ScrollController();
   bool _isSearching = false;
 
-  // ### NEW: Entrance Animation Controllers ###
   late AnimationController _entranceController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+  
+  // Listener Subscription
+  StreamSubscription<QuerySnapshot>? _notificationSubscription;
 
-  // Crucial for KeepAliveClientMixin
   @override
   bool get wantKeepAlive => true; 
 
@@ -48,8 +55,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    // Set viewportFraction to 1.0, and keep pages in memory with physics: NeverScrollableScrollPhysics (handled by PageView itself)
-    // No explicit viewportFraction needed here, but we will ensure the PageView keeps pages alive.
     _pageController = PageController();
     _homePageController = PageController();
 
@@ -64,7 +69,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
       }
     });
 
-    // ### START ENTRANCE ANIMATION ###
     _entranceController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -79,11 +83,87 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     );
 
     _entranceController.forward();
+    
+    // Initialize Notification Listener
+    _setupNotificationListener();
+  }
+
+  // --- NEW: NOTIFICATION LISTENER ---
+  void _setupNotificationListener() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Listen only to the newest notification
+    _notificationSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('notifications')
+        .orderBy('timestamp', descending: true)
+        .limit(1) 
+        .snapshots()
+        .listen((snapshot) {
+      
+      // Check global settings
+      if (!notificationPrefs.allNotificationsEnabled.value || 
+          !notificationPrefs.headsUpEnabled.value) {
+        return;
+      }
+
+      if (snapshot.docs.isNotEmpty) {
+        final doc = snapshot.docs.first;
+        final data = doc.data();
+
+        // Only show if unread
+        if (data['isRead'] == false) {
+          final String type = data['type'] ?? 'info';
+          String message = 'New Notification';
+          IconData icon = Icons.notifications;
+          String? postId = data['postId'];
+
+          if (type == 'like') {
+             message = "Someone liked your post. Tap to view.";
+             icon = Icons.favorite;
+          } else if (type == 'comment') {
+             message = "Someone commented on your post.";
+             icon = Icons.comment;
+          } else if (type == 'follow') {
+             message = "You have a new follower!";
+             icon = Icons.person_add;
+          } else if (type == 'upload_complete') {
+             message = "Media uploaded successfully.";
+             icon = Icons.check_circle;
+          }
+
+          OverlayService().showTopNotification(
+            context, 
+            message, 
+            icon,
+            () {
+              // Mark as read
+              doc.reference.update({'isRead': true});
+              
+              // Navigate
+              if (postId != null) {
+                 Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PostDetailScreen(postId: postId),
+                  ),
+                );
+              } else if (type == 'follow') {
+                _onItemTapped(3); // Go to Profile
+              }
+            }
+          );
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
-    _entranceController.dispose(); // Dispose animation
+    _notificationSubscription?.cancel();
+    _entranceController.dispose(); 
     _scrollController.dispose();
     _recommendedScrollController.dispose();
     _tabController.dispose();
@@ -170,11 +250,9 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    // Required call for AutomaticKeepAliveClientMixin
     super.build(context);
 
     final _widgetOptions = <Widget>[
-      // Home Page (Page 0)
       KeepAlivePage(
         child: Column(
           children: [
@@ -186,7 +264,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                   setState(() {});
                 },
                 children: [
-                  // This internal PageView should also keep its pages alive
                   KeepAlivePage(
                     child: HomePage(
                       scrollController: _scrollController,
@@ -205,9 +282,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           ],
         ),
       ),
-      // AI Assistant Page (Page 1)
       KeepAlivePage(child: AiAssistantPage()),
-      // Search Page (Page 2)
       KeepAlivePage(
         child: SearchPage(
           isSearching: _isSearching,
@@ -218,7 +293,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           },
         ),
       ),
-      // Profile Tab Page (Page 3)
       KeepAlivePage(child: ProfileTabPage()),
     ];
 
@@ -273,7 +347,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           _onItemTapped(3);
         },
       ),
-      // ### APPLY ENTRANCE ANIMATION ###
       body: FadeTransition(
         opacity: _fadeAnimation,
         child: SlideTransition(
@@ -289,8 +362,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             },
             child: PageView(
               controller: _pageController,
-              // Keep all pages alive to prevent full rebuilds on screen switch
-              physics: NeverScrollableScrollPhysics(), // Prevent manual swiping
+              physics: NeverScrollableScrollPhysics(), 
               onPageChanged: (index) {
                 setState(() {
                   _selectedIndex = index;
@@ -335,7 +407,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 }
 
-// ... (Rest of HomeDashboard helper classes remain the same) ...
 class _ScrollAwareAppBarBackground extends StatefulWidget {
   final ScrollController scrollController;
   
@@ -400,6 +471,7 @@ class _ScrollAwareAppBarBackgroundState extends State<_ScrollAwareAppBarBackgrou
     );
   }
 }
+
 class _AppBarAvatar extends StatefulWidget {
   const _AppBarAvatar();
 
@@ -418,25 +490,27 @@ class _AppBarAvatarState extends State<_AppBarAvatar> {
           : null,
       builder: (context, snapshot) {
         
-        // Defaults
         int iconId = 0;
         String? colorHex;
+        String? profileImageUrl; 
 
         if (snapshot.hasData && snapshot.data!.exists) {
           final data = snapshot.data!.data() as Map<String, dynamic>;
           iconId = data['avatarIconId'] ?? 0;
           colorHex = data['avatarHex'];
+          profileImageUrl = data['profileImageUrl']; 
         }
 
-        // Use Universal System
         return CircleAvatar(
           radius: 18,
-          backgroundColor: AvatarHelper.getColor(colorHex),
-          child: Icon(
-            AvatarHelper.getIcon(iconId),
-            size: 20,
-            color: Colors.white,
-          ),
+          backgroundColor: profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(colorHex),
+          backgroundImage: profileImageUrl != null ? NetworkImage(profileImageUrl) : null,
+          child: profileImageUrl == null ?
+            Icon(
+              AvatarHelper.getIcon(iconId),
+              size: 20,
+              color: Colors.white,
+            ) : null,
         );
       },
     );
@@ -496,7 +570,6 @@ class _NotificationButton extends StatelessWidget {
   }
 }
 
-// ### NEW KeepAlive Wrapper ###
 class KeepAlivePage extends StatefulWidget {
   const KeepAlivePage({super.key, required this.child});
   final Widget child;
@@ -515,7 +588,6 @@ class _KeepAlivePageState extends State<KeepAlivePage> with AutomaticKeepAliveCl
   @override
   bool get wantKeepAlive => true;
 }
-
 
 class CustomAnimatedBottomBar extends StatelessWidget {
   const CustomAnimatedBottomBar({

@@ -3,29 +3,171 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:share_plus/share_plus.dart'; 
+import 'package:url_launcher/url_launcher.dart'; 
 import '../screens/post_detail_screen.dart'; 
 import '../screens/dashboard/profile_page.dart'; 
+import '../screens/image_viewer_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
 import '../main.dart';
 import 'package:flutter/services.dart'; 
+import 'package:cached_network_image/cached_network_image.dart'; 
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+class _VideoPlayerWidget extends StatefulWidget {
+  final String videoUrl;
+  const _VideoPlayerWidget({required this.videoUrl});
+
+  @override
+  State<_VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
+}
+
+class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      height: 200,
+      width: double.infinity,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+            SizedBox(height: 8),
+            Text("Tap to play video", style: TextStyle(color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PostMediaPreview extends StatelessWidget {
+  final String mediaUrl;
+  final String? mediaType;
+  final String text;
+  final Map<String, dynamic> postData; // NEW
+  final String postId; // NEW
+
+  const _PostMediaPreview({
+    required this.mediaUrl,
+    this.mediaType,
+    required this.text,
+    required this.postData, // NEW
+    required this.postId, // NEW
+  });
+
+  String? _getVideoId(String url) {
+    if (url.contains('youtube.com') || url.contains('youtu.be')) {
+      final regExp = RegExp(r"youtu(?:.*\/v\/|.*v\=|\.be\/)([A-Za-z0-9_\-]+)");
+      return regExp.firstMatch(url)?.group(1);
+    }
+    return null;
+  }
+  
+  String? _extractLinkInText() {
+    final linkRegExp = RegExp(r'(https?:\/\/[^\s]+)');
+    final match = linkRegExp.firstMatch(text);
+    return match?.group(0);
+  }
+
+  void _navigateToViewer(BuildContext context, {String? url, String? type}) {
+     Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ImageViewerScreen(
+        imageUrl: url ?? mediaUrl, 
+        mediaType: type ?? mediaType,
+        postData: postData, // PASS DATA
+        postId: postId, // PASS ID
+      )),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    if (mediaUrl.isNotEmpty) {
+      return AspectRatio( 
+        aspectRatio: 4 / 3,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: GestureDetector(
+            onTap: () => _navigateToViewer(context, type: mediaType),
+            child: mediaType == 'video' 
+                ? _VideoPlayerWidget(videoUrl: mediaUrl)
+                : CachedNetworkImage( 
+                    imageUrl: mediaUrl,
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) => Container(
+                        color: theme.dividerColor.withOpacity(0.5),
+                        child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
+                      ),
+                    errorWidget: (context, url, error) => Container(
+                        color: Colors.red.withOpacity(0.1),
+                        child: Center(child: Text('Failed to load media.', style: TextStyle(color: Colors.red))),
+                      ),
+                  ),
+          ),
+        ),
+      );
+    } 
+    
+    final externalLink = _extractLinkInText();
+    final youtubeId = externalLink != null ? _getVideoId(externalLink) : null;
+    
+    if (youtubeId != null) {
+      return AspectRatio( 
+        aspectRatio: 4 / 3,
+        child: GestureDetector(
+          onTap: () async {
+            final url = Uri.parse(externalLink!);
+            if (await canLaunchUrl(url)) {
+              await launchUrl(url, mode: LaunchMode.externalApplication);
+            }
+          },
+          child: Container(
+            margin: const EdgeInsets.only(top: 12),
+            decoration: BoxDecoration(
+              color: Colors.red.shade900, 
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.ondemand_video, color: Colors.white, size: 50),
+                  SizedBox(height: 8),
+                  Text('Tap to watch on YouTube', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
+    return const SizedBox.shrink();
+  }
+}
 
 class BlogPostCard extends StatefulWidget {
   final String postId;
   final Map<String, dynamic> postData;
   final bool isOwner;
-  final bool isClickable;
-  final bool isDetailView; 
+  final bool isClickable; 
+  final bool isDetailView;
 
   const BlogPostCard({
-    super.key, 
+    super.key,
     required this.postId,
     required this.postData,
     required this.isOwner,
-    this.isClickable = true, 
-    this.isDetailView = false, 
+    this.isClickable = true,
+    this.isDetailView = false,
   });
 
   @override
@@ -34,314 +176,165 @@ class BlogPostCard extends StatefulWidget {
 
 class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMixin {
   final TextEditingController _editController = TextEditingController();
-  late bool _isLiked;
-  late int _likeCount;
-
-  late bool _isReposted;
-  late int _repostCount;
-
-  // Animation Controllers
   late AnimationController _likeController;
   late Animation<double> _likeAnimation;
-
+  late AnimationController _shareController;
+  late Animation<double> _shareAnimation;
   late AnimationController _repostController;
   late Animation<double> _repostAnimation;
 
-  late AnimationController _shareController;
-  late Animation<double> _shareAnimation;
+  bool _isLiked = false;
+  bool _isReposted = false;
   bool _isSharing = false;
+  int _likeCount = 0;
+  int _repostCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _syncLikeState();
-    _syncRepostState(); 
+    _syncState();
+    
+    _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
+    _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
 
-    _likeController = AnimationController(
-      duration: const Duration(milliseconds: 100), 
-      vsync: this,
-    );
-    _likeAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
-      CurvedAnimation(parent: _likeController, curve: Curves.easeInOut),
-    );
+    _shareController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
+    _shareAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _shareController, curve: Curves.easeInOut));
 
-    _repostController = AnimationController(
-      duration: const Duration(milliseconds: 100),
-      vsync: this,
-    );
-    _repostAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
-      CurvedAnimation(parent: _repostController, curve: Curves.easeInOut),
-    );
-
-    _shareController = AnimationController(
-      duration: const Duration(milliseconds: 100),
-      vsync: this,
-    );
-    _shareAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
-      CurvedAnimation(parent: _shareController, curve: Curves.easeInOut),
-    );
+    _repostController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
+    _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
   }
 
   @override
   void didUpdateWidget(covariant BlogPostCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.postData != oldWidget.postData) {
-      _syncLikeState();
-      _syncRepostState(); 
+    if (oldWidget.postData != widget.postData) {
+      _syncState();
     }
   }
 
-  void _syncLikeState() {
-    final currentUserUid = _auth.currentUser?.uid;
-    final Map<String, dynamic> likes = Map<String, dynamic>.from(widget.postData['likes'] ?? {});
-    _likeCount = likes.length;
-    _isLiked = currentUserUid != null ? likes.containsKey(currentUserUid) : false;
-  }
-  
-  void _syncRepostState() {
-    final currentUserUid = _auth.currentUser?.uid;
-    final List<dynamic> repostedBy = widget.postData['repostedBy'] ?? []; 
-    _repostCount = repostedBy.length;
-    _isReposted = currentUserUid != null ? repostedBy.contains(currentUserUid) : false;
+  void _syncState() {
+    final currentUser = _auth.currentUser;
+    final likes = widget.postData['likes'] as Map<String, dynamic>? ?? {};
+    final reposts = widget.postData['repostedBy'] as List? ?? [];
+    
+    if (mounted) {
+      setState(() {
+        _isLiked = currentUser != null && likes.containsKey(currentUser.uid);
+        _likeCount = likes.length;
+        _isReposted = currentUser != null && reposts.contains(currentUser.uid);
+        _repostCount = reposts.length;
+      });
+    }
   }
 
-  Future<void> _toggleLike() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
+  @override
+  void dispose() {
+    _likeController.dispose();
+    _shareController.dispose();
+    _repostController.dispose();
+    _editController.dispose();
+    super.dispose();
+  }
+
+  void _toggleLike() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
     
     _likeController.forward().then((_) => _likeController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-
-    final bool originalIsLiked = _isLiked;
-    final int originalLikeCount = _likeCount;
-    setState(() {
-      _isLiked = !_isLiked;
-      if (_isLiked) {
-        _likeCount++;
-      } else {
-        _likeCount--;
-      }
-    });
+    
+    final docRef = _firestore.collection('posts').doc(widget.postId);
+    
+    setState(() { 
+      _isLiked = !_isLiked; 
+      if (_isLiked) _likeCount++; else _likeCount--;
+    }); 
 
     try {
-      final postDocRef = _firestore.collection('posts').doc(widget.postId);
-      final postDoc = await postDocRef.get();
-      Map<String, dynamic> likes = Map<String, dynamic>.from(postDoc.data()?['likes'] ?? {});
-      
-      final postOwnerId = widget.postData['userId'];
-      final bool isLiking = !likes.containsKey(user.uid);
-
-      if (isLiking) {
-        likes[user.uid] = true; 
-        
-        if (user.uid != postOwnerId) {
-          _sendNotification(
-            ownerId: postOwnerId,
-            senderId: user.uid,
-            type: 'like',
-            postId: widget.postId,
-          );
+      if (_isLiked) {
+        await docRef.update({'likes.${currentUser.uid}': true});
+        if (widget.postData['userId'] != currentUser.uid) {
+          _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').add({
+            'type': 'like',
+            'senderId': currentUser.uid,
+            'postId': widget.postId,
+            'postTextSnippet': widget.postData['text'],
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
         }
-
       } else {
-        likes.remove(user.uid); 
+        await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
       }
-      
-      await postDocRef.update({'likes': likes});
-
     } catch (e) {
-      setState(() {
-        _isLiked = originalIsLiked;
-        _likeCount = originalLikeCount;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update like: ${e.toString()}')),
-        );
-      }
+      _syncState(); // Revert on error
     }
   }
 
-  Future<void> _toggleRepost() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-    
+  void _toggleRepost() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+
     _repostController.forward().then((_) => _repostController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
 
-    final bool originalIsReposted = _isReposted;
-    final int originalRepostCount = _repostCount;
+    final docRef = _firestore.collection('posts').doc(widget.postId);
+
     setState(() {
       _isReposted = !_isReposted;
+      if (_isReposted) _repostCount++; else _repostCount--;
+    });
+
+    try {
       if (_isReposted) {
-        _repostCount++;
-      } else {
-        _repostCount--;
-      }
-    });
-
-    try {
-      final postDocRef = _firestore.collection('posts').doc(widget.postId);
-      final postDoc = await postDocRef.get();
-      List<dynamic> repostedBy = List<dynamic>.from(postDoc.data()?['repostedBy'] ?? []);
-      
-      final postOwnerId = widget.postData['userId'];
-      final bool isReposting = !repostedBy.contains(user.uid);
-
-      if (isReposting) {
-        repostedBy.add(user.uid);
-        
-        if (user.uid != postOwnerId) {
-          _sendNotification(
-            ownerId: postOwnerId,
-            senderId: user.uid,
-            type: 'repost',
-            postId: widget.postId,
-          );
+        await docRef.update({'repostedBy': FieldValue.arrayUnion([currentUser.uid])});
+        if (widget.postData['userId'] != currentUser.uid) {
+          _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').add({
+            'type': 'repost',
+            'senderId': currentUser.uid,
+            'postId': widget.postId,
+            'postTextSnippet': widget.postData['text'],
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
         }
-      
       } else {
-        repostedBy.remove(user.uid);
+        await docRef.update({'repostedBy': FieldValue.arrayRemove([currentUser.uid])});
       }
-      
-      await postDocRef.update({'repostedBy': repostedBy});
-
     } catch (e) {
-      setState(() {
-        _isReposted = originalIsReposted;
-        _repostCount = originalRepostCount;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to repost: ${e.toString()}')),
-        );
-      }
+      _syncState();
     }
   }
 
-  Future<void> _sharePost() async {
-    setState(() {
-      _isSharing = true;
-    });
+  void _sharePost() {
     _shareController.forward().then((_) => _shareController.reverse());
-    if (hapticNotifier.value) HapticFeedback.lightImpact();
-
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        setState(() {
-          _isSharing = false;
-        });
-      }
-    });
-
-    final String text = widget.postData['text'] ?? 'Check out this post!';
-    final String userName = widget.postData['userName'] ?? 'A user';
+    setState(() { _isSharing = true; });
     
-    final String shareContent = '"$text"\n- $userName';
-
-    try {
-      await Share.share(
-        shareContent,
-        subject: 'Post by $userName', 
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to share: $e')),
-        );
-      }
-    }
-  }
-
-  void _sendNotification({
-    required String ownerId,
-    required String senderId,
-    required String type,
-    required String postId,
-  }) {
-    String postTextSnippet = (widget.postData['text'] as String);
-    if (postTextSnippet.length > 50) {
-      postTextSnippet = postTextSnippet.substring(0, 50) + '...';
-    }
-
-    _firestore
-        .collection('users')
-        .doc(ownerId)
-        .collection('notifications')
-        .add({
-      'type': type,
-      'senderId': senderId,
-      'postId': postId,
-      'postTextSnippet': postTextSnippet,
-      'timestamp': FieldValue.serverTimestamp(),
-      'isRead': false,
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) setState(() { _isSharing = false; });
+      Share.share('Check out this post by ${widget.postData['userName']}: "${widget.postData['text']}"');
     });
   }
 
   Future<void> _deletePost() async {
-    final didConfirm = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Delete Post"),
-        content: Text("Are you sure you want to delete this post?"),
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete Post'),
+        content: Text('Are you sure you want to delete this post?'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text("Cancel")),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text("Delete", style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Delete', style: TextStyle(color: Colors.red))),
         ],
       ),
     ) ?? false;
-    if (didConfirm) {
+
+    if (confirm) {
       try {
         await _firestore.collection('posts').doc(widget.postId).delete();
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post deleted")));
       } catch (e) {
-        if(mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete post: $e'))
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _showEditDialog() async {
-    _editController.text = widget.postData['text'] ?? '';
-    await showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('Edit Post'),
-          content: TextField(
-            controller: _editController,
-            maxLines: 5,
-            decoration: InputDecoration(hintText: "Edit your post..."),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: _submitEdit,
-              child: Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _submitEdit() async {
-    try {
-      await _firestore.collection('posts').doc(widget.postId).update({
-        'text': _editController.text,
-      });
-      if(mounted) Navigator.of(context).pop(); 
-    } catch (e) {
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update post: $e'))
-        );
-        Navigator.of(context).pop(); 
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to delete: $e")));
       }
     }
   }
@@ -359,8 +352,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       },
     );
   }
-  
-  // New: Navigation to Post Detail with slide animation
+
   void _navigateToDetail() {
     if (!widget.isClickable) return; 
     Navigator.of(context).push(
@@ -385,7 +377,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         return;
       }
     }
-
+    
     Navigator.of(context).push(
       _createSlideLeftRoute(
         ProfilePage(userId: postUserId, includeScaffold: true), 
@@ -393,96 +385,149 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
+  Future<void> _showEditDialog() async {
+    _editController.text = widget.postData['text'] ?? '';
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Edit Post'),
+          content: TextField(
+            controller: _editController,
+            maxLines: 5,
+            decoration: InputDecoration(hintText: "Edit your post..."),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: Text('Cancel')),
+            ElevatedButton(onPressed: _submitEdit, child: Text('Save')),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _submitEdit() async {
+    try {
+      await _firestore.collection('posts').doc(widget.postId).update({'text': _editController.text});
+      if(mounted) Navigator.of(context).pop(); 
+    } catch (e) {
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        Navigator.of(context).pop(); 
+      }
+    }
+  }
+
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return "just now";
+    if (widget.postData['isUploading'] == true) return "Uploading...";
+    if (widget.postData['uploadFailed'] == true) return "Failed";
     return timeago.format(timestamp.toDate(), locale: 'en_short');
   }
 
-  @override
-  void dispose() {
-    _editController.dispose();
-    _likeController.dispose();
-    _repostController.dispose();
-    _shareController.dispose(); 
-    super.dispose();
+  // UPDATED: Indeterminate progress bar (stripes animation)
+  Widget _buildUploadStatus(double progress) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Uploading media...",
+            style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 4),
+          // Setting value to null enables the indeterminate (moving stripes) animation
+          LinearProgressIndicator(
+            value: null, 
+            backgroundColor: Theme.of(context).dividerColor,
+            valueColor: AlwaysStoppedAnimation<Color>(TwitterTheme.blue),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Processing...',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final String userName = widget.postData['userName'] ?? 'Anonymous User';
-    final String text = widget.postData['text'] ?? '';
-    final Timestamp? timestamp = widget.postData['timestamp'] as Timestamp?;
-    
-    // UPDATED: Avatar Retrieval
-    final int iconId = widget.postData['avatarIconId'] ?? 0;
-    final String? colorHex = widget.postData['avatarHex'];
-    final Color avatarBg = AvatarHelper.getColor(colorHex);
-
-    final int commentCount = widget.postData['commentCount'] ?? 0;
     final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
+    final text = widget.postData['text'] ?? '';
+    final mediaUrl = widget.postData['mediaUrl'];
+    final mediaType = widget.postData['mediaType'];
+    final isUploading = widget.postData['isUploading'] == true;
+    final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
+    final uploadFailed = widget.postData['uploadFailed'] == true;
+    final int commentCount = widget.postData['commentCount'] ?? 0;
 
-    return InkWell( 
-      onTap: _navigateToDetail, 
+    if (uploadFailed) {
+      return Container(
+        padding: const EdgeInsets.all(12.0),
+        color: Colors.red.withOpacity(0.1),
+        child: Text("Post upload failed: ${text}", style: TextStyle(color: Colors.red)),
+      );
+    }
+
+    return GestureDetector(
+      onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
       child: Container(
-        color: theme.cardColor, 
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
+          color: theme.cardColor,
+        ),
         padding: const EdgeInsets.all(12.0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            GestureDetector(
-              onTap: _navigateToUserProfile,
-              child: CircleAvatar(
-                radius: 24,
-                backgroundColor: avatarBg,
-                child: Icon(
-                  AvatarHelper.getIcon(iconId),
-                  size: 26,
-                  color: Colors.white,
-                ),
-              ),
-            ),
+            // --- AVATAR ---
+            _buildAvatar(context),
             SizedBox(width: 12),
+            
+            // --- CONTENT ---
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: _navigateToUserProfile,
-                          child: Text(
-                            userName,
-                            style: theme.textTheme.titleMedium,
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        _formatTimestamp(timestamp),
-                        style: theme.textTheme.titleSmall,
-                      ),
-                      if (widget.isOwner)
-                        _buildOptionsButton(),
-                    ],
-                  ),
+                  // --- HEADER (NAME & HANDLE) ---
+                  _buildPostHeader(context),
                   
-                  SizedBox(height: 4),
-                  Text(
-                    text,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontSize: widget.isDetailView ? 18 : 15, 
+                  // --- TEXT ---
+                  if (text.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(
+                        text,
+                        style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
+                        maxLines: widget.isDetailView ? null : 10,
+                        overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+                      ),
                     ),
-                    maxLines: widget.isDetailView ? null : 10,
-                    overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
-                  ),
                   
-                  if (widget.isDetailView)
-                    _buildDetailActionRow(_likeCount, _repostCount, _isLiked, _isReposted)
-                  else
-                    _buildFeedActionRow(commentCount, _repostCount, _isReposted, _likeCount, _isLiked),
+                  // --- MEDIA ---
+                  if (isUploading)
+                    _buildUploadStatus(uploadProgress)
+                  else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12.0),
+                      child: _PostMediaPreview(
+                        mediaUrl: mediaUrl ?? '',
+                        mediaType: mediaType,
+                        text: text,
+                        postData: widget.postData, // PASSED DATA
+                        postId: widget.postId, // PASSED ID
+                      ),
+                    ),
+                  
+                  // --- ACTIONS ---
+                  if (widget.isDetailView && !isUploading)
+                    _buildDetailActionRow()
+                  else if (!isUploading)
+                    _buildFeedActionRow(commentCount),
                 ],
               ),
             ),
@@ -492,128 +537,190 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
-  Widget _buildOptionsButton() {
-    return InkWell(
-      onTap: () {
-        showModalBottomSheet(
-          context: context,
-          builder: (context) {
-            return Container(
-              child: Wrap(
-                children: [
-                  ListTile(
-                    leading: Icon(Icons.edit_outlined),
-                    title: Text('Edit Post'),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      _showEditDialog();
-                    },
-                  ),
-                  ListTile(
-                    leading: Icon(Icons.delete_outline, color: Colors.red),
-                    title: Text('Delete Post', style: TextStyle(color: Colors.red)),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      _deletePost();
-                    },
-                  ),
-                ],
-              ),
-            );
-          },
+  Widget _buildAvatar(BuildContext context) {
+    final String authorId = widget.postData['userId'];
+    
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(authorId).snapshots(),
+      builder: (context, snapshot) {
+        int iconId = 0;
+        String? colorHex;
+        String? profileImageUrl;
+        
+        if (snapshot.hasData && snapshot.data != null && snapshot.data!.exists) {
+          final userData = snapshot.data!.data() as Map<String, dynamic>;
+          iconId = userData['avatarIconId'] ?? 0;
+          colorHex = userData['avatarHex'];
+          profileImageUrl = userData['profileImageUrl'];
+        } else {
+           iconId = widget.postData['avatarIconId'] ?? 0;
+           colorHex = widget.postData['avatarHex'];
+           profileImageUrl = widget.postData['profileImageUrl'];
+        }
+
+        final Color avatarBgColor = AvatarHelper.getColor(colorHex);
+
+        return GestureDetector(
+           onTap: _navigateToUserProfile,
+          child: CircleAvatar(
+            radius: 24,
+            backgroundColor: profileImageUrl != null ? Colors.transparent : avatarBgColor,
+            backgroundImage: profileImageUrl != null
+                ? CachedNetworkImageProvider(profileImageUrl)
+                : null,
+            child: profileImageUrl == null
+                ? Icon(AvatarHelper.getIcon(iconId), size: 26, color: Colors.white)
+                : null,
+          ),
         );
       },
-      child: Icon(Icons.more_horiz, color: Theme.of(context).textTheme.titleSmall?.color, size: 20),
     );
   }
 
-  Widget _buildDetailActionRow(int likeCount, int repostCount, bool isLiked, bool isReposted) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _buildActionButton(context, 
-            icon: isLiked ? Icons.favorite : Icons.favorite_border, 
-            text: '$likeCount Likes', 
-            color: isLiked ? Colors.pink : null, 
-            onTap: _toggleLike, 
-            animation: _likeAnimation
-          ),
-          _buildActionButton(context, 
-            icon: Icons.repeat, 
-            text: '$repostCount Reposts', 
-            color: isReposted ? Colors.green : null, 
-            onTap: _toggleRepost, 
-            animation: _repostAnimation
-          ),
-          _buildActionButton(context, 
-            icon: Icons.share_outlined, 
-            text: 'Share', 
-            color: _isSharing ? TwitterTheme.blue : null,
-            onTap: _sharePost,
-            animation: _shareAnimation
-          ),
-        ],
-      ),
+  Widget _buildPostHeader(BuildContext context) {
+    final timeAgo = _formatTimestamp(widget.postData['timestamp'] as Timestamp?);
+    final String userName = widget.postData['userName'] ?? 'User';
+    final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Row 1: Name + Time + Option
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Flexible(
+              child: Text(
+                userName,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Row(
+              children: [
+                SizedBox(width: 4),
+                Text("· $timeAgo", style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12)),
+                if (widget.isOwner)
+                  _buildOptionsButton(),
+              ],
+            ),
+          ],
+        ),
+        // Row 2: Handle
+        Text(
+          handle,
+          style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
     );
   }
 
-  Widget _buildFeedActionRow(int commentCount, int repostCount, bool isReposted, int likeCount, bool isLiked) {
+  // MODIFIED: Changed to PopupMenuButton for better UX
+  Widget _buildOptionsButton() {
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor, size: 18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 4,
+      color: Theme.of(context).cardColor,
+      onSelected: (value) {
+        if (value == 'edit') {
+          _showEditDialog();
+        } else if (value == 'delete') {
+          _deletePost();
+        } else if (value == 'pin') {
+           // Placeholder for the "New Button" feature functionality
+           if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post pinned to profile (Demo)")));
+           }
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color),
+              SizedBox(width: 12),
+              Text("Edit Post"),
+            ],
+          ),
+        ),
+        // THE NEW BUTTON: Pin to Profile
+        PopupMenuItem(
+          value: 'pin',
+          child: Row(
+            children: [
+              Icon(Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color),
+              SizedBox(width: 12),
+              Text("Pin to Profile"),
+            ],
+          ),
+        ),
+        PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 20, color: Colors.red),
+              SizedBox(width: 12),
+              Text("Delete Post", style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFeedActionRow(int commentCount) {
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(
-            child: _buildActionButton(context, icon: Icons.chat_bubble_outline, text: commentCount.toString(), onTap: _navigateToDetail),
-          ),
-          Expanded(
-            child: _buildActionButton(context, icon: Icons.repeat, text: repostCount.toString(), color: isReposted ? Colors.green : null, onTap: _toggleRepost, animation: _repostAnimation),
-          ),
-          Expanded(
-            child: _buildActionButton(context, icon: isLiked ? Icons.favorite : Icons.favorite_border, text: likeCount.toString(), color: isLiked ? Colors.pink : null, onTap: _toggleLike, animation: _likeAnimation),
-          ),
-          Expanded(
-            child: _buildActionButton(context, icon: Icons.share_outlined, text: null, color: _isSharing ? TwitterTheme.blue : null, onTap: _sharePost, animation: _shareAnimation),
-          ),
+          _buildActionButton(Icons.chat_bubble_outline, commentCount.toString(), null, _navigateToDetail),
+          _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
+          _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
+          _buildActionButton(Icons.share_outlined, null, _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
     );
   }
 
-  Widget _buildActionButton(BuildContext context, {
-    required IconData icon, 
-    String? text, 
-    required VoidCallback onTap, 
-    Color? color,
-    Animation<double>? animation, 
-  }) {
+  Widget _buildDetailActionRow() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16.0, bottom: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
+          _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
+          _buildActionButton(Icons.share_outlined, 'Share', _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton(IconData icon, String? text, Color? color, VoidCallback onTap, [Animation<double>? animation]) {
     final theme = Theme.of(context);
-    final iconColor = color ?? theme.textTheme.titleSmall?.color;
+    final iconColor = color ?? theme.textTheme.bodySmall?.color ?? Colors.grey;
     
-    Widget iconWidget = Icon(icon, color: iconColor, size: 22);
+    Widget iconWidget = Icon(icon, size: 20, color: iconColor);
     if (animation != null) {
-      iconWidget = ScaleTransition(
-        scale: animation,
-        child: iconWidget,
-      );
+      iconWidget = ScaleTransition(scale: animation, child: iconWidget);
     }
 
     return InkWell(
       onTap: onTap,
-      child: Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             iconWidget, 
-            if (text != null && text != "0")
+            if (text != null && text != "0" && text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(left: 6.0),
-                child: Text(
-                  text,
-                  style: theme.textTheme.titleSmall?.copyWith(color: iconColor, fontSize: 13),
-                ),
+                child: Text(text, style: TextStyle(color: iconColor, fontSize: 13)),
               ),
           ],
         ),

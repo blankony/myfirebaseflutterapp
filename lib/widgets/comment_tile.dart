@@ -2,10 +2,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:share_plus/share_plus.dart'; // NEW
+import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // NEW
 import '../screens/post_detail_screen.dart'; 
-import '../screens/user_profile_screen.dart'; 
+import '../screens/dashboard/profile_page.dart'; 
+import '../screens/image_viewer_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
 import '../main.dart';
+import 'package:cached_network_image/cached_network_image.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -30,8 +34,124 @@ class CommentTile extends StatefulWidget {
   State<CommentTile> createState() => _CommentTileState();
 }
 
-class _CommentTileState extends State<CommentTile> {
+class _CommentTileState extends State<CommentTile> with SingleTickerProviderStateMixin {
   final TextEditingController _editController = TextEditingController();
+  
+  // Stats State
+  late bool _isLiked;
+  late int _likeCount;
+  late bool _isReposted; // NEW
+  late int _repostCount; // NEW
+  
+  late AnimationController _likeController;
+  late Animation<double> _likeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncStatsState();
+    _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
+    _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
+  }
+
+  @override
+  void didUpdateWidget(covariant CommentTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.commentData != oldWidget.commentData) {
+      _syncStatsState();
+    }
+  }
+
+  void _syncStatsState() {
+    final currentUser = _auth.currentUser;
+    final likes = widget.commentData['likes'] as Map<String, dynamic>? ?? {};
+    final reposts = widget.commentData['repostedBy'] as List? ?? []; // NEW
+    
+    if (mounted) {
+      setState(() {
+        _isLiked = currentUser != null && likes.containsKey(currentUser.uid);
+        _likeCount = likes.length;
+        _isReposted = currentUser != null && reposts.contains(currentUser.uid); // NEW
+        _repostCount = reposts.length; // NEW
+      });
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    _likeController.forward().then((_) => _likeController.reverse());
+
+    setState(() {
+      _isLiked = !_isLiked;
+      if (_isLiked) _likeCount++; else _likeCount--;
+    });
+
+    try {
+      final commentRef = _firestore
+          .collection('posts')
+          .doc(widget.postId)
+          .collection('comments')
+          .doc(widget.commentId);
+
+      if (_isLiked) {
+        await commentRef.update({'likes.${user.uid}': true});
+      } else {
+        await commentRef.update({'likes.${user.uid}': FieldValue.delete()});
+      }
+    } catch (e) {
+      _syncStatsState(); // Revert on error
+    }
+  }
+
+  // NEW: Repost Logic for Comments
+  Future<void> _toggleRepost() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    setState(() {
+      _isReposted = !_isReposted;
+      if (_isReposted) _repostCount++; else _repostCount--;
+    });
+
+    try {
+      final commentRef = _firestore
+          .collection('posts')
+          .doc(widget.postId)
+          .collection('comments')
+          .doc(widget.commentId);
+
+      if (_isReposted) {
+        await commentRef.update({'repostedBy': FieldValue.arrayUnion([user.uid])});
+      } else {
+        await commentRef.update({'repostedBy': FieldValue.arrayRemove([user.uid])});
+      }
+    } catch (e) {
+      print("Repost Error: $e"); // Debugging
+      _syncStatsState();
+    }
+  }
+
+  // NEW: Share Logic for Comments
+  Future<void> _shareComment() async {
+    final String text = widget.commentData['text'] ?? '';
+    final String? mediaUrl = widget.commentData['mediaUrl'];
+    final String userName = widget.commentData['userName'] ?? 'User';
+    
+    final String shareText = 'Replying to post: "$text" - by $userName';
+
+    try {
+      if (mediaUrl != null && mediaUrl.isNotEmpty) {
+        final file = await DefaultCacheManager().getSingleFile(mediaUrl);
+        await Share.shareXFiles([XFile(file.path)], text: shareText);
+      } else {
+        await Share.share(shareText);
+      }
+    } catch (e) {
+      debugPrint('Error sharing: $e');
+    }
+  }
 
   Future<void> _deleteComment() async {
     final didConfirm = await showDialog<bool>(
@@ -139,7 +259,18 @@ class _CommentTileState extends State<CommentTile> {
     if (commentUserId == _auth.currentUser?.uid) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => UserProfileScreen(userId: commentUserId),
+        builder: (context) => ProfilePage(userId: commentUserId, includeScaffold: true), 
+      ),
+    );
+  }
+
+  void _openMediaViewer(String url, String? type) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ImageViewerScreen(
+          imageUrl: url,
+          mediaType: type,
+        ),
       ),
     );
   }
@@ -152,18 +283,21 @@ class _CommentTileState extends State<CommentTile> {
   @override
   void dispose() {
     _editController.dispose();
+    _likeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final String? profileImageUrl = widget.commentData['profileImageUrl'];
+    
     if (widget.showPostContext) {
       return FutureBuilder<DocumentSnapshot>(
         future: _firestore.collection('posts').doc(widget.postId).get(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return SizedBox.shrink(); 
           if (!snapshot.data!.exists) {
-             return _buildReplyTile(context, isThreaded: false); 
+             return _buildReplyTile(context, isThreaded: false, profileImageUrl: profileImageUrl); 
           }
           final parentData = snapshot.data!.data() as Map<String, dynamic>;
           
@@ -171,13 +305,13 @@ class _CommentTileState extends State<CommentTile> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildParentPostSnippet(context, parentData),
-              _buildReplyTile(context, isThreaded: true),
+              _buildReplyTile(context, isThreaded: true, profileImageUrl: profileImageUrl),
             ],
           );
         },
       );
     }
-    return _buildReplyTile(context, isThreaded: true);
+    return _buildReplyTile(context, isThreaded: true, profileImageUrl: profileImageUrl);
   }
 
   Widget _buildParentPostSnippet(BuildContext context, Map<String, dynamic> parentData) {
@@ -188,6 +322,22 @@ class _CommentTileState extends State<CommentTile> {
     final int parentIconId = parentData['avatarIconId'] ?? 0;
     final String? parentColorHex = parentData['avatarHex'];
     final Color parentAvatarBg = AvatarHelper.getColor(parentColorHex);
+    final String? parentProfileImageUrl = parentData['profileImageUrl'];
+
+    Widget parentAvatarWidget;
+    if (parentProfileImageUrl != null && parentProfileImageUrl.isNotEmpty) {
+      parentAvatarWidget = CircleAvatar(
+        radius: 16, 
+        backgroundColor: Colors.transparent,
+        backgroundImage: CachedNetworkImageProvider(parentProfileImageUrl),
+      );
+    } else {
+      parentAvatarWidget = CircleAvatar(
+        radius: 16, 
+        backgroundColor: parentAvatarBg,
+        child: Icon(AvatarHelper.getIcon(parentIconId), size: 16, color: Colors.white),
+      );
+    }
 
     return InkWell(
       onTap: _navigateToOriginalPost,
@@ -202,11 +352,7 @@ class _CommentTileState extends State<CommentTile> {
                 width: 40,
                 child: Column(
                   children: [
-                    CircleAvatar(
-                      radius: 16, 
-                      backgroundColor: parentAvatarBg,
-                      child: Icon(AvatarHelper.getIcon(parentIconId), size: 16, color: Colors.white),
-                    ),
+                    parentAvatarWidget,
                     Expanded(
                       child: Container(
                         width: 2,
@@ -240,16 +386,35 @@ class _CommentTileState extends State<CommentTile> {
     );
   }
 
-  Widget _buildReplyTile(BuildContext context, {required bool isThreaded}) {
+  Widget _buildReplyTile(BuildContext context, {required bool isThreaded, String? profileImageUrl}) {
     final data = widget.commentData;
     final theme = Theme.of(context);
     final String userName = data['userName'] ?? 'Anonymous';
     final String text = data['text'] ?? '';
     final Timestamp? timestamp = data['timestamp'] as Timestamp?;
+    
+    // Media Data
+    final String? mediaUrl = data['mediaUrl'];
+    final String? mediaType = data['mediaType'];
 
     final int iconId = data['avatarIconId'] ?? 0;
     final String? colorHex = data['avatarHex'];
     final Color avatarBg = AvatarHelper.getColor(colorHex);
+
+    Widget avatarWidget;
+    if (profileImageUrl != null && profileImageUrl.isNotEmpty) {
+      avatarWidget = CircleAvatar(
+        radius: 18, 
+        backgroundColor: Colors.transparent,
+        backgroundImage: CachedNetworkImageProvider(profileImageUrl), 
+      );
+    } else {
+      avatarWidget = CircleAvatar(
+        radius: 18, 
+        backgroundColor: avatarBg,
+        child: Icon(AvatarHelper.getIcon(iconId), size: 20, color: Colors.white),
+      );
+    }
 
     return InkWell(
       onTap: _navigateToOriginalPost,
@@ -257,7 +422,7 @@ class _CommentTileState extends State<CommentTile> {
         color: theme.cardColor,
         child: IntrinsicHeight(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start, // Changed from stretch to start to fix alignment
             children: [
               // Tree Structure
               Container(
@@ -287,16 +452,12 @@ class _CommentTileState extends State<CommentTile> {
                 ),
               ),
 
-              // Avatar
+              // Avatar - RESTORED TOP PADDING TO FIX OVERLAP
               Padding(
-                padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                padding: const EdgeInsets.symmetric(vertical: 8.0), // Added top padding back
                 child: GestureDetector(
                   onTap: _navigateToUserProfile,
-                  child: CircleAvatar(
-                    radius: 18, 
-                    backgroundColor: avatarBg,
-                    child: Icon(AvatarHelper.getIcon(iconId), size: 20, color: Colors.white),
-                  ),
+                  child: avatarWidget, 
                 ),
               ),
 
@@ -305,7 +466,7 @@ class _CommentTileState extends State<CommentTile> {
               // Content
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                  padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0), // Kept vertical padding here for text
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -332,7 +493,72 @@ class _CommentTileState extends State<CommentTile> {
                         ],
                       ),
                       SizedBox(height: 2),
-                      Text(text, style: theme.textTheme.bodyLarge),
+                      if (text.isNotEmpty)
+                        Text(text, style: theme.textTheme.bodyLarge),
+                        
+                      // --- MEDIA DISPLAY IN REPLY ---
+                      if (mediaUrl != null && mediaUrl.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                          child: GestureDetector(
+                            onTap: () => _openMediaViewer(mediaUrl, mediaType),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                height: 150, // Constrained height for replies
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+                                ),
+                                child: mediaType == 'video'
+                                    ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 40))
+                                    : CachedNetworkImage(
+                                        imageUrl: mediaUrl,
+                                        fit: BoxFit.cover,
+                                        placeholder: (context, url) => Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                                        errorWidget: (context, url, error) => Icon(Icons.error, color: Colors.grey),
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      
+                      // --- UPDATED ACTIONS ROW (Repost, Like, Share) ---
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.start, // Left aligned
+                          children: [
+                            // 1. Repost Button
+                            _buildActionButton(
+                              icon: Icons.repeat,
+                              text: _repostCount.toString(),
+                              color: _isReposted ? Colors.green : null,
+                              onTap: _toggleRepost
+                            ),
+                            SizedBox(width: 24), // Spacing
+                            
+                            // 2. Like Button
+                            _buildActionButton(
+                              icon: _isLiked ? Icons.favorite : Icons.favorite_border,
+                              text: _likeCount.toString(),
+                              color: _isLiked ? Colors.pink : null,
+                              onTap: _toggleLike,
+                              animation: _likeAnimation
+                            ),
+                            SizedBox(width: 24),
+                            
+                            // 3. Share Button
+                            _buildActionButton(
+                              icon: Icons.share_outlined,
+                              text: null,
+                              color: null,
+                              onTap: _shareComment
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -340,6 +566,40 @@ class _CommentTileState extends State<CommentTile> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Helper for consistent buttons in comment tile
+  Widget _buildActionButton({
+    required IconData icon,
+    required String? text,
+    required Color? color,
+    required VoidCallback onTap,
+    Animation<double>? animation
+  }) {
+    final theme = Theme.of(context);
+    final iconColor = color ?? theme.hintColor;
+    
+    Widget iconWidget = Icon(icon, size: 18, color: iconColor);
+    if (animation != null) {
+      iconWidget = ScaleTransition(scale: animation, child: iconWidget);
+    }
+
+    return InkWell(
+      onTap: onTap,
+      child: Row(
+        children: [
+          iconWidget,
+          if (text != null && text != "0")
+            Padding(
+              padding: const EdgeInsets.only(left: 4.0),
+              child: Text(
+                text,
+                style: TextStyle(color: iconColor, fontSize: 12),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import 'package:cached_network_image/cached_network_image.dart'; // IMPORTED
 import '../screens/post_detail_screen.dart';
-import '../screens/user_profile_screen.dart';
+import '../screens/dashboard/profile_page.dart'; 
 import '../main.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -129,7 +130,7 @@ class _NotificationTile extends StatelessWidget {
 
     if (type == 'follow') {
       Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => UserProfileScreen(userId: notificationData['senderId']),
+        builder: (_) => ProfilePage(userId: notificationData['senderId'], includeScaffold: true), 
       ));
     } else if (type == 'like' || type == 'repost' || type == 'comment') {
       Navigator.of(context).push(MaterialPageRoute(
@@ -179,9 +180,13 @@ class _NotificationTile extends StatelessWidget {
       builder: (context, userSnapshot) {
         String senderName = 'Someone';
         String senderInitial = 'S';
+        String? senderImageUrl; 
+        
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           final data = userSnapshot.data!.data() as Map<String, dynamic>;
           senderName = data['name'] ?? 'Anonymous';
+          senderImageUrl = data['profileImageUrl']; 
+          
           if (senderName.isNotEmpty) {
             senderInitial = senderName[0].toUpperCase();
           }
@@ -202,13 +207,25 @@ class _NotificationTile extends StatelessWidget {
           title = '$senderName replied to your post';
           subtitle = notificationData['postTextSnippet'] ?? '';
         }
+        
+        // CACHED AVATAR LOGIC
+        Widget senderAvatar;
+        if (senderImageUrl != null && senderImageUrl.isNotEmpty) {
+           senderAvatar = CircleAvatar(
+            // Changed from NetworkImage to CachedNetworkImageProvider
+            backgroundImage: CachedNetworkImageProvider(senderImageUrl),
+            backgroundColor: Colors.grey, 
+          );
+        } else {
+           senderAvatar = CircleAvatar(
+            child: Text(senderInitial),
+          );
+        }
 
         return ListTile(
           leading: Stack(
             children: [
-              CircleAvatar(
-                child: Text(senderInitial),
-              ),
+              senderAvatar, 
               Positioned(
                 bottom: 0,
                 right: 0,

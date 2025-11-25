@@ -83,7 +83,6 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  // ... (Validators remain unchanged: _validateName, _validateNIM, etc.)
   String? _validateName(String? value) {
     if (value == null || value.trim().isEmpty) return 'Name cannot be empty.';
     return null;
@@ -97,9 +96,20 @@ class _RegisterPageState extends State<RegisterPage> {
 
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) return 'Email cannot be empty.';
+    
+    // Original regex for basic email format validation
     String pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
     RegExp regex = RegExp(pattern);
-    if (!regex.hasMatch(value)) return 'Enter a valid email address.';
+    
+    if (!regex.hasMatch(value)) {
+        return 'Enter a valid email address.';
+    }
+
+    // STEP 1 MODIFICATION: Check for @stu.pnj.ac.id domain
+    if (!value.endsWith('@stu.pnj.ac.id')) {
+        return 'Registration is restricted to @stu.pnj.ac.id emails only.';
+    }
+
     return null;
   }
 
@@ -232,7 +242,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       
                       TextFormField( 
                         controller: _emailController,
-                        decoration: const InputDecoration(labelText: 'Enter email'),
+                        decoration: const InputDecoration(labelText: 'Enter email (must be @stu.pnj.ac.id)'),
                         keyboardType: TextInputType.emailAddress,
                         validator: _validateEmail,
                         autovalidateMode: AutovalidateMode.onUserInteraction,

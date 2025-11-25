@@ -96,7 +96,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       score += (likeCount * 0.5); 
 
       // 3. Keyword Extraction (+10 Points)
-      // Logic: Extract tags/keywords (e.g., "tech", "flutter").
+      // Logic: Extract tags/keywords (e.g., "tech", "flutter", "pnj").
       for (var keyword in _trendingKeywords) {
         if (text.contains(keyword)) {
           score += 10;
@@ -236,16 +236,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
               },
             ),
 
-            if (!widget.isRecommended)
-              Positioned(
-                bottom: 16,
-                right: 16,
-                child: FloatingActionButton(
-                  onPressed: _navigateToCreatePost,
-                  tooltip: 'New Post',
-                  child: const Icon(Icons.edit_outlined),
-                ),
+            // FIX: Always show FAB for posting, regardless of the tab (Requested Fix)
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: FloatingActionButton(
+                onPressed: _navigateToCreatePost,
+                tooltip: 'New Post',
+                child: const Icon(Icons.edit_outlined),
               ),
+            ),
           ],
         );
       },

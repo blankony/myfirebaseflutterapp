@@ -1,10 +1,12 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../main.dart'; 
 import 'about_page.dart'; 
 import '../edit_profile_screen.dart';
 import 'account_center_page.dart'; 
+import '../../services/notification_prefs_service.dart'; // IMPORTED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -84,7 +86,7 @@ class SettingsPage extends StatelessWidget {
             onTap: () => _goToAboutPage(context),
           ),
           
-          // FIX: Use the Optimized Switch Logic here too
+          // Theme Switch
           _OptimizedThemeTile(),
 
           ValueListenableBuilder<bool>(
@@ -101,7 +103,95 @@ class SettingsPage extends StatelessWidget {
             },
           ),
           
+          // --- NEW NOTIFICATION SETTINGS START ---
           Divider(),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              "Notifications",
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: TwitterTheme.blue, fontWeight: FontWeight.bold
+              ),
+            ),
+          ),
+          
+          // Master Switch for All Notifications
+          ValueListenableBuilder<bool>(
+            valueListenable: notificationPrefs.allNotificationsEnabled,
+            builder: (context, isEnabled, child) {
+              return SwitchListTile(
+                secondary: Icon(Icons.notifications_active_outlined, color: Theme.of(context).primaryColor),
+                title: Text('Allow Notifications'),
+                subtitle: Text('Master switch for all app notifications'),
+                value: isEnabled,
+                onChanged: (value) {
+                  notificationPrefs.setAllNotifications(value);
+                },
+              );
+            },
+          ),
+
+          // Heads-up (Overlay) Switch
+          ValueListenableBuilder<bool>(
+            valueListenable: notificationPrefs.allNotificationsEnabled,
+            builder: (context, allEnabled, child) {
+              return ValueListenableBuilder<bool>(
+                valueListenable: notificationPrefs.headsUpEnabled,
+                builder: (context, headsUpEnabled, child) {
+                  return SwitchListTile(
+                    // Disable this switch if the master switch is off
+                    onChanged: allEnabled ? (value) {
+                       notificationPrefs.setHeadsUp(value);
+                    } : null,
+                    secondary: Icon(Icons.view_day_outlined, color: allEnabled ? Theme.of(context).primaryColor : Theme.of(context).disabledColor),
+                    title: Text('Heads-up Popups'),
+                    subtitle: Text('Show hovering overlay at the top of screen'),
+                    value: allEnabled && headsUpEnabled,
+                  );
+                },
+              );
+            },
+          ),
+
+          // Clear History Button
+          ListTile(
+            leading: Icon(Icons.cleaning_services_outlined, color: Colors.red),
+            title: Text('Clear Notification History', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text('Clear History?'),
+                  content: Text('This will delete all past notifications permanently.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("Cancel")),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text("Clear", style: TextStyle(color: Colors.red))),
+                  ],
+                ),
+              ) ?? false;
+
+              if (confirm) {
+                final user = FirebaseAuth.instance.currentUser;
+                if (user != null) {
+                  final batch = FirebaseFirestore.instance.batch();
+                  final snapshot = await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(user.uid)
+                      .collection('notifications')
+                      .get();
+                  for (var doc in snapshot.docs) {
+                    batch.delete(doc.reference);
+                  }
+                  await batch.commit();
+                  if (context.mounted) {
+                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("History cleared.")));
+                  }
+                }
+              }
+            },
+          ),
+          Divider(),
+          // --- NEW NOTIFICATION SETTINGS END ---
 
           _buildSettingsTile(
             context: context,

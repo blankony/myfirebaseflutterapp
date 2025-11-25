@@ -20,6 +20,12 @@ class PredictionService {
     'what': ['is this', 'happened', 'are you doing'],
     'terima': ['kasih', 'kasih banyak', 'kasih sebelumnya'],
     'mohon': ['bantuan', 'info', 'maaf', 'perhatian'],
+    // PENAMBAHAN: Frasa spesifik kampus PNJ
+    'kampus': ['merdeka', 'biru', 'kita', 'pnj'],
+    'jurusan': ['teknik', 'akuntansi', 'administrasi', 'bisnis'],
+    'ukm': ['terbaru', 'latihan', 'pendaftaran'],
+    'dosen': ['pengampu', 'pembimbing', 'wali'],
+    'praktikum': ['lab', 'laporan', 'dikerjakan'],
   };
 
   final Map<String, List<String>> _searchPhrases = {
@@ -32,8 +38,12 @@ class PredictionService {
   };
 
   PredictionService() {
+    if (_apiKey.isEmpty) {
+      // NOTE: This throws an exception if the key is missing, which is good practice.
+      // However, the Narrow AI fallback allows the app to run without the key for basic functionality.
+    }
     // Menggunakan flash model untuk kecepatan
-    _model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: _apiKey);
+    _model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: _apiKey);
   }
 
   // Fungsi utama: Coba AI dulu, kalau gagal/lama -> Local
@@ -43,14 +53,15 @@ class PredictionService {
 
     try {
       // 1. COBA GEMINI (dengan Timeout 2 detik)
-      // Jika lebih dari 2 detik, kita anggap 'gagal' agar UI tetap responsif
-      final response = await _model.generateContent([
-        Content.text(_buildPrompt(currentText, contextType))
-      ]).timeout(const Duration(seconds: 2));
+      if (_apiKey.isNotEmpty) {
+        final response = await _model.generateContent([
+          Content.text(_buildPrompt(currentText, contextType))
+        ]).timeout(const Duration(seconds: 2));
 
-      final aiResult = response.text?.trim();
-      if (aiResult != null && aiResult.isNotEmpty) {
-        return aiResult.replaceAll('"', '').replaceAll("'", "");
+        final aiResult = response.text?.trim();
+        if (aiResult != null && aiResult.isNotEmpty) {
+          return aiResult.replaceAll('"', '').replaceAll("'", "");
+        }
       }
     } catch (e) {
       // 2. JIKA ERROR / TIMEOUT -> GUNAKAN LOCAL FALLBACK
@@ -63,7 +74,14 @@ class PredictionService {
 
   String _buildPrompt(String text, String type) {
     if (type == 'post') {
-      return "Complete this sentence naturally (max 5 words). Return ONLY text: '$text'";
+      // ENHANCED PROMPT: Instruksi yang lebih spesifik untuk konteks PNJ
+      return """
+        Sebagai asisten cerdas untuk mahasiswa Politeknik Negeri Jakarta (PNJ), berikan kelanjutan kalimat yang singkat dan relevan (maksimal 7 kata) untuk postingan media sosial di lingkungan kampus.
+        Topik harus bersemangat, informatif (akademik/organisasi), atau santai (kehidupan kampus).
+        Jangan gunakan markdown atau tanda kutip. Berikan HANYA teks.
+
+        Kalimat saat ini: '$text'
+      """;
     } else if (type == 'search') {
       return "Autocomplete search query (max 3 words). Return ONLY text: '$text'";
     }

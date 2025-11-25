@@ -1,15 +1,20 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:async'; // Timer
+import 'dart:async'; 
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart'; 
+import 'package:cached_network_image/cached_network_image.dart'; 
 import '../widgets/blog_post_card.dart'; 
 import '../widgets/comment_tile.dart'; 
-import '../services/prediction_service.dart'; // Import Service
-import '../main.dart'; // TwitterTheme
+import '../services/prediction_service.dart'; 
+import '../services/cloudinary_service.dart'; 
+import '../main.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+final CloudinaryService _cloudinaryService = CloudinaryService(); 
 
 class PostDetailScreen extends StatefulWidget {
   final String postId;
@@ -34,7 +39,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   String? _predictedText;
   Timer? _debounce;
 
-  // Listener untuk Predictive Text
+  // Sending State (FIX for spamming)
+  bool _isSending = false;
+
+  // Media State (NEW)
+  File? _selectedMediaFile;
+  String? _mediaType; // 'image' or 'video'
+
+  // Listener for Predictive Text
   void _onCommentChanged(String text) {
     setState(() {
       _predictedText = null;
@@ -71,29 +83,67 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
-  // Helper for Slide Left Animation
-  Route _createSlideLeftRoute(Widget page) {
-    return PageRouteBuilder(
-      pageBuilder: (context, animation, secondaryAnimation) => page,
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0); 
-        const end = Offset.zero;
-        const curve = Curves.easeInOutQuart;
-        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-        return SlideTransition(position: animation.drive(tween), child: child);
-      },
-    );
+  // NEW: Media Picker Logic
+  Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
+    final picker = ImagePicker();
+    XFile? pickedFile;
+    
+    try {
+      if (isVideo) {
+        pickedFile = await picker.pickVideo(source: source);
+        if (pickedFile != null) {
+          setState(() {
+            _selectedMediaFile = File(pickedFile!.path);
+            _mediaType = 'video';
+          });
+        }
+      } else {
+        pickedFile = await picker.pickImage(source: source, imageQuality: 70);
+        if (pickedFile != null) {
+          setState(() {
+            _selectedMediaFile = File(pickedFile!.path);
+            _mediaType = 'image';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error picking media: $e");
+    }
+  }
+
+  void _clearMedia() {
+    setState(() {
+      _selectedMediaFile = null;
+      _mediaType = null;
+    });
   }
 
   Future<void> _postComment() async {
-    if (_commentController.text.isEmpty || _currentUser == null) {
+    // FIX: Prevent empty sends and multiple taps
+    if ((_commentController.text.trim().isEmpty && _selectedMediaFile == null) || _currentUser == null || _isSending) {
       return;
+    }
+
+    setState(() { _isSending = true; }); // Lock button
+
+    // 1. Upload Media if exists
+    String? mediaUrl;
+    if (_selectedMediaFile != null) {
+      mediaUrl = await _cloudinaryService.uploadMedia(_selectedMediaFile!);
+      if (mediaUrl == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload media. Please try again.')));
+          setState(() { _isSending = false; });
+        }
+        return;
+      }
     }
 
     String userName = "Anonymous";
     String userEmail = "anonymous@mail.com";
     int iconId = 0;
     String hex = '';
+    String? profileImageUrl;
 
     try {
       final userDoc = await _firestore.collection('users').doc(_currentUser!.uid).get();
@@ -103,11 +153,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         userEmail = data?['email'] ?? userEmail;
         iconId = data?['avatarIconId'] ?? 0;
         hex = data?['avatarHex'] ?? '';
+        profileImageUrl = data?['profileImageUrl'];
       }
     } catch (e) {}
 
     final commentData = {
-      'text': _commentController.text,
+      'text': _commentController.text.trim(),
+      'mediaUrl': mediaUrl, // NEW
+      'mediaType': _mediaType, // NEW
       'timestamp': FieldValue.serverTimestamp(),
       'userId': _currentUser!.uid,
       'originalPostId': widget.postId,
@@ -115,6 +168,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       'userEmail': userEmail,
       'avatarIconId': iconId,
       'avatarHex': hex,
+      'profileImageUrl': profileImageUrl,
     };
 
     try {
@@ -132,10 +186,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
       await writeBatch.commit();
 
+      // Send Notification
       final String? postOwnerId = widget.initialPostData?['userId'];
-      
       if (postOwnerId != null && postOwnerId != _currentUser!.uid) {
         String commentSnippet = commentData['text'] as String;
+        if (commentSnippet.isEmpty) commentSnippet = "Sent a ${_mediaType ?? 'media'} attachment"; // Handle media-only comments
         if (commentSnippet.length > 50) {
           commentSnippet = commentSnippet.substring(0, 50) + '...';
         }
@@ -154,14 +209,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
       }
 
-      _commentController.clear();
-      setState(() { _predictedText = null; }); // Reset prediksi
-      FocusScope.of(context).unfocus();
+      // FIX: Clear inputs only AFTER success
+      if (mounted) {
+        _commentController.clear();
+        _clearMedia();
+        setState(() { 
+          _predictedText = null; 
+          _isSending = false; // Unlock button
+        }); 
+        FocusScope.of(context).unfocus();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to post comment: $e')),
         );
+        setState(() { _isSending = false; }); // Unlock on error
       }
     }
   }
@@ -245,8 +308,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Center(child: Text("No replies yet.")),
+            padding: const EdgeInsets.all(32.0),
+            child: Center(child: Text("No replies yet. Be the first!", style: TextStyle(color: Colors.grey))),
           );
         }
 
@@ -270,38 +333,53 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
+  // REDESIGNED: Modern Chat UI with Media Support
   Widget _buildCommentInput() {
+    final theme = Theme.of(context);
+    
     return Container(
       padding: EdgeInsets.only(
-        left: 16.0, 
-        right: 8.0, 
-        bottom: MediaQuery.of(context).padding.bottom + 8.0, 
-        top: 8.0,
+        left: 12.0, 
+        right: 12.0, 
+        bottom: MediaQuery.of(context).padding.bottom + 12.0, 
+        top: 12.0,
       ),
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+        color: theme.scaffoldBackgroundColor,
+        border: Border(top: BorderSide(color: theme.dividerColor)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: Offset(0, -2),
+          )
+        ]
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // === AI PREDICTION WIDGET FOR COMMENT ===
+          // === AI PREDICTION SUGGESTION ===
           if (_predictedText != null)
             GestureDetector(
               onTap: _acceptPrediction,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 8.0),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                margin: EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: TwitterTheme.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.auto_awesome, size: 12, color: TwitterTheme.blue),
-                    SizedBox(width: 4),
+                    Icon(Icons.auto_awesome, size: 14, color: TwitterTheme.blue),
+                    SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        "Suggestion: ...$_predictedText",
+                        "Suggested: ...$_predictedText",
                         style: TextStyle(
                           color: TwitterTheme.blue,
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
+                          fontSize: 13,
                           fontWeight: FontWeight.bold
                         ),
                         maxLines: 1,
@@ -313,31 +391,101 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ),
             ),
 
+          // === MEDIA PREVIEW (New Feature) ===
+          if (_selectedMediaFile != null)
+            Container(
+              margin: EdgeInsets.only(bottom: 10),
+              height: 100,
+              width: 100,
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _mediaType == 'video' 
+                        ? Container(color: Colors.black, child: Center(child: Icon(Icons.videocam, color: Colors.white)))
+                        : Image.file(_selectedMediaFile!, fit: BoxFit.cover, width: 100, height: 100),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: GestureDetector(
+                      onTap: _clearMedia,
+                      child: CircleAvatar(
+                        radius: 10,
+                        backgroundColor: Colors.black54,
+                        child: Icon(Icons.close, size: 14, color: Colors.white),
+                      ),
+                    ),
+                  )
+                ],
+              ),
+            ),
+
+          // === INPUT ROW ===
           Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              // Media Button
+              IconButton(
+                onPressed: () => _pickMedia(ImageSource.gallery),
+                icon: Icon(Icons.add_photo_alternate_outlined, color: TwitterTheme.blue),
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 40, minHeight: 40),
+              ),
+              
+              // Text Field Area
               Expanded(
-                child: TextField(
-                  controller: _commentController,
-                  onChanged: _onCommentChanged, // Listener
-                  decoration: InputDecoration(
-                    hintText: "Write your reply...",
-                    hintStyle: TextStyle(color: Theme.of(context).hintColor),
-                    border: InputBorder.none,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    // Explicitly set the color to avoid transparency issues
+                    color: theme.brightness == Brightness.dark 
+                        ? TwitterTheme.darkGrey.withOpacity(0.2) 
+                        : TwitterTheme.extraLightGrey,
+                    borderRadius: BorderRadius.circular(24),
                   ),
-                  maxLines: null, 
+                  child: TextField(
+                    controller: _commentController,
+                    onChanged: _onCommentChanged, 
+                    decoration: InputDecoration(
+                      hintText: "Post your reply",
+                      hintStyle: TextStyle(color: theme.hintColor),
+                      // Remove ALL default borders to prevent color inconsistency
+                      filled: false, // FIX: Disable default fill to avoid layering issues
+                      border: InputBorder.none,
+                      focusedBorder: InputBorder.none, 
+                      enabledBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 4),
+                    ),
+                    maxLines: 4,
+                    minLines: 1, 
+                  ),
                 ),
               ),
-              ElevatedButton(
-                onPressed: _postComment,
-                child: Text('Reply'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+              
+              SizedBox(width: 8),
+              
+              // Send Button (Distinct UI)
+              _isSending 
+                ? Padding(
+                    padding: const EdgeInsets.all(10.0),
+                    child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                : Container(
+                    decoration: BoxDecoration(
+                      color: TwitterTheme.blue,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      onPressed: _postComment,
+                      icon: Icon(Icons.send_rounded, size: 20, color: Colors.white),
+                      padding: EdgeInsets.all(10),
+                      constraints: BoxConstraints(),
+                    ),
                   ),
-                ),
-              ),
             ],
           ),
         ],
