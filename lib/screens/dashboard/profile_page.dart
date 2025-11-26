@@ -29,6 +29,8 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
+// CRITICAL FIX: Remove AutomaticKeepAliveClientMixin if it exists
+// and DO NOT implement RestorationMixin - this prevents state restoration
 class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
   late TabController _tabController;
   final ScrollController _scrollController = ScrollController();
@@ -38,7 +40,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   bool _isScrolled = false;
   bool _isBioExpanded = false;
-  int _targetTabIndex = 0;
 
   @override
   void initState() {
@@ -46,18 +47,31 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
     
+    // CRITICAL FIX: Create TabController and immediately lock it to index 0
     _tabController = TabController(
       length: 3, 
       vsync: this, 
       initialIndex: 0,
     );
     
-    // FIX: Remove the problematic listener that causes rebuilds
-    // The listener was causing setState() on every scroll, triggering refreshes
-    // We don't need it since we're handling tab changes in onTap
+    // CRITICAL FIX: Add listener to prevent ANY programmatic changes
+    _tabController.addListener(() {
+      // If somehow the index changes during init, force it back
+      if (!_tabController.indexIsChanging && _tabController.index != _targetTabIndex) {
+        // This will be our controlled index
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _tabController.index = _targetTabIndex;
+          }
+        });
+      }
+    });
     
     _scrollController.addListener(_scrollListener);
   }
+  
+  // CRITICAL FIX: Track what tab we WANT to be on
+  int _targetTabIndex = 0;
   
   void _scrollListener() {
     if (_scrollController.hasClients) {
@@ -71,13 +85,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Future<void> _handleRefresh() async {
+    // Scroll to top
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
 
+    // Simulate network delay
     await Future.delayed(Duration(seconds: 1));
     
     if (mounted) {
+      // Return to Posts tab on refresh
       _targetTabIndex = 0;
       if (_tabController.index != 0) {
         _tabController.animateTo(0);
@@ -168,138 +185,144 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
 
-    // FIX: Completely remove RefreshIndicator to prevent unwanted refreshes
-    Widget content = NestedScrollView(
-      controller: _scrollController,
-      key: ValueKey('profile_nested_scroll_${_userId}_${DateTime.now().millisecondsSinceEpoch}'),
-      physics: AlwaysScrollableScrollPhysics(),
-      headerSliverBuilder: (context, innerBoxIsScrolled) {
-        return [
-          StreamBuilder<DocumentSnapshot>(
-            stream: _firestore.collection('users').doc(_userId).snapshots(),
-            builder: (context, snapshot) {
-              final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-              final String name = data['name'] ?? '';
-              final bool isMyProfile = _user?.uid == _userId;
-              
-              final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
-              final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
-              final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
-
-              return SliverAppBar(
-                pinned: true,
-                elevation: 0,
-                backgroundColor: appBarBgColor, 
-                systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-                automaticallyImplyLeading: widget.includeScaffold,
-                iconTheme: IconThemeData(
-                  color: iconColor, 
-                ),
-                title: AnimatedOpacity(
-                  opacity: _isScrolled ? 1.0 : 0.0,
-                  duration: Duration(milliseconds: 200),
-                  child: Text(
-                    name, 
-                    style: TextStyle(
-                      color: titleColor,
-                      fontWeight: FontWeight.bold
-                    )
-                  ),
-                ),
-                centerTitle: false,
-                actions: [
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: iconColor),
-                    onSelected: (value) {
-                      if (value == 'share') _shareProfile(name);
-                      if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
-                      if (value == 'logout') _signOut(context);
-                      if (value == 'block') _blockUser(name);
-                    },
-                    itemBuilder: (BuildContext context) {
-                      if (isMyProfile) {
-                        return [
-                          PopupMenuItem(
-                            value: 'share',
-                            child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
-                          ),
-                          PopupMenuItem(
-                            value: 'settings',
-                            child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
-                          ),
-                          PopupMenuItem(
-                            value: 'logout',
-                            child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
-                          ),
-                        ];
-                      } else {
-                        return [
-                          PopupMenuItem(
-                            value: 'share',
-                            child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
-                          ),
-                          PopupMenuItem(
-                            value: 'block',
-                            child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
-                          ),
-                        ];
-                      }
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
-
-          SliverToBoxAdapter(
-            child: StreamBuilder<DocumentSnapshot>(
+    Widget content = RefreshIndicator(
+      onRefresh: _handleRefresh,
+      notificationPredicate: (notification) {
+        return notification.depth == 0; 
+      },
+      child: NestedScrollView(
+        controller: _scrollController,
+        // CRITICAL FIX: Disable automatic state restoration for NestedScrollView
+        key: ValueKey('profile_nested_scroll_${_userId}_${DateTime.now().millisecondsSinceEpoch}'),
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            StreamBuilder<DocumentSnapshot>(
               stream: _firestore.collection('users').doc(_userId).snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-                
-                final data = snapshot.data!.data() as Map<String, dynamic>;
+                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+                final String name = data['name'] ?? '';
                 final bool isMyProfile = _user?.uid == _userId;
                 
-                return _buildUnifiedProfileHeader(context, data, isMyProfile);
+                final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
+                final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
+                final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
+
+                return SliverAppBar(
+                  pinned: true,
+                  elevation: 0,
+                  backgroundColor: appBarBgColor, 
+                  systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+                  automaticallyImplyLeading: widget.includeScaffold,
+                  iconTheme: IconThemeData(
+                    color: iconColor, 
+                  ),
+                  title: AnimatedOpacity(
+                    opacity: _isScrolled ? 1.0 : 0.0,
+                    duration: Duration(milliseconds: 200),
+                    child: Text(
+                      name, 
+                      style: TextStyle(
+                        color: titleColor,
+                        fontWeight: FontWeight.bold
+                      )
+                    ),
+                  ),
+                  centerTitle: false,
+                  actions: [
+                    PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: iconColor),
+                      onSelected: (value) {
+                        if (value == 'share') _shareProfile(name);
+                        if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
+                        if (value == 'logout') _signOut(context);
+                        if (value == 'block') _blockUser(name);
+                      },
+                      itemBuilder: (BuildContext context) {
+                        if (isMyProfile) {
+                          return [
+                            PopupMenuItem(
+                              value: 'share',
+                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'settings',
+                              child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'logout',
+                              child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
+                            ),
+                          ];
+                        } else {
+                          return [
+                            PopupMenuItem(
+                              value: 'share',
+                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'block',
+                              child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
+                            ),
+                          ];
+                        }
+                      },
+                    ),
+                  ],
+                );
               },
             ),
-          ),
 
-          SliverPersistentHeader(
-            delegate: _SliverAppBarDelegate(
-              TabBar(
-                controller: _tabController,
-                onTap: (index) {
-                  _targetTabIndex = index;
+            SliverToBoxAdapter(
+              child: StreamBuilder<DocumentSnapshot>(
+                stream: _firestore.collection('users').doc(_userId).snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+                  
+                  final data = snapshot.data!.data() as Map<String, dynamic>;
+                  final bool isMyProfile = _user?.uid == _userId;
+                  
+                  return _buildUnifiedProfileHeader(context, data, isMyProfile);
                 },
-                tabs: [
-                  Tab(text: 'Posts'),
-                  Tab(text: 'Reposts'),
-                  Tab(text: 'Replies'),
-                ],
-                labelColor: theme.primaryColor,
-                unselectedLabelColor: theme.hintColor,
-                indicatorColor: theme.primaryColor,
               ),
             ),
-            pinned: true,
-          ),
-        ];
-      },
-      body: TabBarView(
-        controller: _tabController,
-        physics: NeverScrollableScrollPhysics(),
-        children: [
-          _buildMyPosts(_userId),
-          _buildMyReposts(_userId),
-          _buildMyReplies(_userId),
-        ],
+
+            SliverPersistentHeader(
+              delegate: _SliverAppBarDelegate(
+                TabBar(
+                  controller: _tabController,
+                  // CRITICAL FIX: Handle tab changes manually to maintain control
+                  onTap: (index) {
+                    _targetTabIndex = index;
+                  },
+                  tabs: [
+                    Tab(text: 'Posts'),
+                    Tab(text: 'Reposts'),
+                    Tab(text: 'Replies'),
+                  ],
+                  labelColor: theme.primaryColor,
+                  unselectedLabelColor: theme.hintColor,
+                  indicatorColor: theme.primaryColor,
+                ),
+              ),
+              pinned: true,
+            ),
+          ];
+        },
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildMyPosts(_userId),
+            _buildMyReposts(_userId),
+            _buildMyReplies(_userId),
+          ],
+        ),
       ),
     );
 
     if (widget.includeScaffold) {
       return Scaffold(
         extendBodyBehindAppBar: true,
+        // CRITICAL FIX: Disable state restoration at scaffold level too
         restorationId: null,
         body: content,
       );
@@ -381,6 +404,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                               
                               if (mounted) {
                                 if (result == true) {
+                                  // Return to Posts tab after editing
                                   _targetTabIndex = 0;
                                   _tabController.animateTo(0); 
                                 }
