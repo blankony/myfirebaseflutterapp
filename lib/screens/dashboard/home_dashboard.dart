@@ -359,7 +359,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         ? Color(0xFF15202B).withOpacity(0.85) 
         : Colors.white.withOpacity(0.85);      
 
-    final inactiveIconColor = isDarkMode ? Colors.white : Colors.black54;
+    final inactiveIconColor = isDarkMode ? Colors.white : const Color.fromARGB(170, 0, 0, 0);
     final activeIconColor = TwitterTheme.blue;
 
     return Scaffold(
@@ -460,7 +460,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             child: CustomAnimatedBottomBar(
               selectedIndex: _selectedIndex,
               onItemSelected: _onItemTapped,
-              backgroundColor: Colors.transparent, 
+              backgroundColor: const Color.fromARGB(0, 9, 9, 9), 
               items: <BottomNavyBarItem>[
                 BottomNavyBarItem(
                   icon: Icon(Icons.home),

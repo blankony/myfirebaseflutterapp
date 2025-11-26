@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cached_network_image/cached_network_image.dart'; // Added Import
+import 'package:cached_network_image/cached_network_image.dart'; 
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart'; 
 import 'profile_page.dart'; 
@@ -15,7 +15,6 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 class SearchPage extends StatefulWidget {
   final bool isSearching;
   final VoidCallback onSearchPressed;
-  // Callback baru untuk navigasi ke tab Recommended
   final VoidCallback? onNavigateToRecommended; 
 
   const SearchPage({
@@ -40,7 +39,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   String? _searchSuggestion; 
   Timer? _debounce;
   
-  // State untuk fitur Trending
+  // State for Trending
   bool _showAllTrending = false;
 
   @override
@@ -50,16 +49,31 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   }
 
   @override
+  void didUpdateWidget(SearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Fix: Reset tab to "Posts" (index 0) whenever search is opened
+    if (widget.isSearching && !oldWidget.isSearching) {
+      _tabController.index = 0;
+    }
+    
+    // FIX: Auto-open search bar when navigating to search page
+    if (!oldWidget.isSearching && !widget.isSearching) {
+      // This means we just navigated to search page, open search bar
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!widget.isSearching) {
+          widget.onSearchPressed();
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _tabController.dispose();
     _debounce?.cancel();
     super.dispose();
-  }
-
-  void startSearch() {
-    _searchFocusNode.requestFocus();
   }
 
   void _onSearchChanged(String value) {
@@ -97,174 +111,223 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       _searchText = '';
       _searchSuggestion = null;
     });
+    
+    // FIX: Close search bar when clearing search
+    if (widget.isSearching) {
+      widget.onSearchPressed();
+    }
   }
 
-  // --- ALGORITMA TRENDING ---
-  List<QueryDocumentSnapshot> _getTrendingPosts(List<QueryDocumentSnapshot> allPosts) {
-    if (allPosts.isEmpty) return [];
-
-    // 1. Analisis Frekuensi Kata (Sederhana) untuk mendeteksi topik hangat
-    final Map<String, int> wordFrequency = {};
-    final List<String> stopWords = [
-      'the', 'and', 'is', 'to', 'in', 'of', // English
-      'di', 'dan', 'yang', 'ini', 'itu', 'aku', 'kamu', 'ke', 'dari', 'ada', 'dengan', 'untuk' // Indo
-    ];
-
-    for (var doc in allPosts) {
-      final data = doc.data() as Map<String, dynamic>;
-      final text = (data['text'] ?? '').toString().toLowerCase();
-      // Hapus tanda baca dan split spasi
-      final words = text.replaceAll(RegExp(r'[^\w\s]'), '').split(RegExp(r'\s+'));
+  void _onTrendingTagClicked(String tag) {
+    final query = tag.startsWith('#') ? tag : tag;
+    
+    setState(() {
+      _searchController.text = query;
+      _searchText = query.toLowerCase();
       
-      for (var word in words) {
-        if (word.length > 3 && !stopWords.contains(word)) {
-          wordFrequency[word] = (wordFrequency[word] ?? 0) + 1;
+      if (!widget.isSearching) {
+        widget.onSearchPressed();
+      }
+    });
+    
+    FocusScope.of(context).unfocus();
+  }
+
+  // Get suggested users based on mutual connections or random
+  Future<List<DocumentSnapshot>> _getSuggestedUsers(String? currentUserId) async {
+    if (currentUserId == null) return [];
+
+    try {
+      // Get current user's data
+      final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
+      if (!currentUserDoc.exists) return [];
+
+      final currentUserData = currentUserDoc.data() as Map<String, dynamic>;
+      final List<dynamic> following = currentUserData['following'] ?? [];
+
+      Set<String> suggestedUserIds = {};
+      
+      // If user follows people, get friends of friends
+      if (following.isNotEmpty) {
+        for (String followedUserId in following) {
+          final followedUserDoc = await _firestore.collection('users').doc(followedUserId).get();
+          if (followedUserDoc.exists) {
+            final followedUserData = followedUserDoc.data() as Map<String, dynamic>;
+            final List<dynamic> theirFollowing = followedUserData['following'] ?? [];
+            
+            // Add their friends (excluding current user and already following)
+            for (String potentialFriend in theirFollowing) {
+              if (potentialFriend != currentUserId && !following.contains(potentialFriend)) {
+                suggestedUserIds.add(potentialFriend);
+              }
+            }
+          }
         }
       }
+
+      // If we have suggestions from mutual connections, fetch them
+      if (suggestedUserIds.isNotEmpty) {
+        List<DocumentSnapshot> suggestions = [];
+        for (String userId in suggestedUserIds.take(5)) {
+          final userDoc = await _firestore.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            suggestions.add(userDoc);
+          }
+        }
+        return suggestions;
+      }
+
+      // Otherwise, return random users
+      final allUsersSnapshot = await _firestore.collection('users').limit(20).get();
+      final randomUsers = allUsersSnapshot.docs
+          .where((doc) => doc.id != currentUserId && !following.contains(doc.id))
+          .toList();
+      
+      randomUsers.shuffle();
+      return randomUsers.take(5).toList();
+
+    } catch (e) {
+      print('Error getting suggested users: $e');
+      return [];
     }
-
-    // Ambil Top 5 Keyword
-    final sortedKeywords = wordFrequency.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final topKeywords = sortedKeywords.take(5).map((e) => e.key).toList();
-
-    // 2. Scoring & Sorting
-    List<Map<String, dynamic>> scoredPosts = allPosts.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      double score = 0;
-      
-      final int likes = (data['likes'] as Map?)?.length ?? 0;
-      final int reposts = (data['repostedBy'] as List?)?.length ?? 0;
-      final int comments = data['commentCount'] ?? 0;
-      final String text = (data['text'] ?? '').toString().toLowerCase();
-
-      // Poin Interaksi (Bobot: Repost > Reply > Like)
-      score += (likes * 1.0) + (reposts * 3.0) + (comments * 2.0);
-
-      // Poin Keyword Trending
-      for (var keyword in topKeywords) {
-        if (text.contains(keyword)) {
-          score += 5.0; // Bonus poin jika mengandung topik hangat
-        }
-      }
-
-      return {'doc': doc, 'score': score};
-    }).toList();
-
-    // Sort dari score tertinggi
-    scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
-
-    // Ambil 10 teratas
-    return scoredPosts.take(10).map((e) => e['doc'] as QueryDocumentSnapshot).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final double searchBarHeight = 70.0;
     final theme = Theme.of(context);
+    
+    // Layout Constants
+    final double searchBarBaseHeight = 70.0;
+    final double suggestionHeight = _searchSuggestion != null ? 30.0 : 0.0;
+    final double currentSearchBarHeight = widget.isSearching ? (searchBarBaseHeight + suggestionHeight) : 0.0;
+    
+    // FIX: Use a fixed value that matches your app bar
+    final double topAnchor = 90.0;
 
-    return Column(
-      children: [
-        // 1. SPACER
-        SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
+    // FIX: Content padding is consistent with small gap below
+    final double contentTopPadding = widget.isSearching 
+        ? (topAnchor + currentSearchBarHeight) 
+        : topAnchor;
 
-        // 2. ANIMATED SEARCH BAR
-        Align(
-          alignment: Alignment.topRight,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.easeInOutQuart,
-            width: widget.isSearching ? screenWidth : 0,
-            height: widget.isSearching ? (searchBarHeight + (_searchSuggestion != null ? 30 : 0)) : 0,
-            child: ClipRRect(
-              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
-              child: SingleChildScrollView(
-                physics: const NeverScrollableScrollPhysics(),
-                child: Column(
-                  children: [
-                    Container(
-                      width: screenWidth,
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      child: Center(
-                        child: TextField(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          autofocus: false, 
-                          decoration: InputDecoration(
-                            hintText: 'Search posts or users...',
-                            prefixIcon: Icon(Icons.search),
-                            suffixIcon: _searchController.text.isNotEmpty 
-                              ? IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch) 
-                              : null,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(30),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
-                          ),
-                          onChanged: _onSearchChanged,
-                        ),
-                      ),
-                    ),
-                    
-                    if (_searchSuggestion != null && widget.isSearching)
-                      InkWell(
-                        onTap: _applySuggestion,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0, left: 24.0, right: 24.0),
-                          child: Row(
-                            children: [
-                              Icon(Icons.lightbulb_outline, size: 14, color: TwitterTheme.blue),
-                              SizedBox(width: 8),
-                              Expanded(
-                                child: RichText(
-                                  text: TextSpan(
-                                    style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
-                                    children: [
-                                      TextSpan(text: "Suggestion: "),
-                                      TextSpan(
-                                        text: _searchSuggestion, 
-                                        style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)
-                                      ),
-                                    ],
+    // FIX: Handle back button to close search bar
+    return WillPopScope(
+      onWillPop: () async {
+        if (widget.isSearching) {
+          // Clear search and close search bar
+          setState(() {
+            _searchController.clear();
+            _searchText = '';
+            _searchSuggestion = null;
+          });
+          widget.onSearchPressed(); // Close search bar
+          return false; // Don't pop the route
+        }
+        return true; // Allow back navigation
+      },
+      child: Stack(
+        children: [
+          // --- 1. MAIN CONTENT LAYER ---
+          Positioned.fill(
+            child: Padding(
+              padding: EdgeInsets.only(top: contentTopPadding),
+              child: _searchText.isEmpty && !widget.isSearching
+                  ? _buildExplorePage(theme)
+                  : _buildSearchResults(theme),
+            ),
+          ),
+
+          // --- 2. SEARCH BAR LAYER (Overlay) ---
+          Positioned(
+            top: topAnchor,
+            left: 0,
+            right: 0,
+            child: Align(
+              alignment: Alignment.topRight,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeInOutQuart,
+                width: widget.isSearching ? screenWidth : 0,
+                height: currentSearchBarHeight,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+                  child: Container(
+                    color: theme.scaffoldBackgroundColor,
+                    child: SingleChildScrollView(
+                      physics: const NeverScrollableScrollPhysics(),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: screenWidth,
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            child: Center(
+                              child: TextField(
+                                controller: _searchController,
+                                focusNode: _searchFocusNode,
+                                autofocus: false, 
+                                decoration: InputDecoration(
+                                  hintText: 'Search for posts, or users...',
+                                  prefixIcon: Icon(Icons.search),
+                                  suffixIcon: _searchController.text.isNotEmpty 
+                                    ? IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch) 
+                                    : null,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                    borderSide: BorderSide.none,
                                   ),
+                                  filled: true,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+                                ),
+                                onChanged: _onSearchChanged,
+                              ),
+                            ),
+                          ),
+                          if (_searchSuggestion != null && widget.isSearching)
+                            InkWell(
+                              onTap: _applySuggestion,
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0, left: 24.0, right: 24.0),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.lightbulb_outline, size: 14, color: TwitterTheme.blue),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: RichText(
+                                        text: TextSpan(
+                                          style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
+                                          children: [
+                                            TextSpan(text: "Suggestion: "),
+                                            TextSpan(
+                                              text: _searchSuggestion, 
+                                              style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
+                            ),
+                        ],
                       ),
-                  ],
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-
-        // 3. SPACER
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeInOutQuart,
-          height: widget.isSearching ? 0 : 20.0, 
-        ),
-
-        // 4. CONTENT
-        Expanded(
-          child: _searchText.isEmpty && !widget.isSearching
-              ? _buildRecommendations(theme)
-              : _buildSearchResults(theme),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  // --- MODIFIKASI BAGIAN INI ---
-  Widget _buildRecommendations(ThemeData theme) {
+  Widget _buildExplorePage(ThemeData theme) {
+    final user = _auth.currentUser;
+
     return RefreshIndicator(
       onRefresh: () async {
-        setState(() {}); // Rebuild untuk fetch ulang trending
+        setState(() {}); 
         await Future.delayed(Duration(seconds: 1));
       },
       child: SingleChildScrollView(
@@ -273,106 +336,114 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
+            // --- TRENDING SECTION ---
+            // FIX: Reduced bottom padding for tighter spacing
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Row(
                 children: [
                   Icon(Icons.trending_up, color: TwitterTheme.blue),
                   SizedBox(width: 8),
                   Text(
-                    "Trending Right Now",
+                    "Trending at PNJ",
                     style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                   ),
                 ],
               ),
             ),
             
-            // Trending Content
             StreamBuilder<QuerySnapshot>(
-              // Ambil 50 post terbaru untuk analisis trending
-              stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
+              stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return SizedBox(
-                    height: 100,
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
+                if (!snapshot.hasData) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
 
                 final allPosts = snapshot.data!.docs;
-                final trendingPosts = _getTrendingPosts(allPosts);
+                final trends = _predictionService.analyzeTrendingTopics(allPosts);
 
-                if (trendingPosts.isEmpty) {
+                if (trends.isEmpty) {
                   return Padding(
-                    padding: const EdgeInsets.all(16.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: Text("No trending topics yet.", style: TextStyle(color: Colors.grey)),
                   );
                 }
 
-                // Tentukan berapa banyak yang ditampilkan (3 atau 10)
-                final displayCount = _showAllTrending ? trendingPosts.length : (trendingPosts.length > 3 ? 3 : trendingPosts.length);
-                final displayedPosts = trendingPosts.take(displayCount).toList();
+                final maxItems = _showAllTrending ? 10 : 3;
+                final displayCount = trends.length.clamp(0, maxItems);
+                final displayedTrends = trends.take(displayCount).toList();
+                final canExpand = trends.length > 3;
 
                 return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // List Trending Posts
+                    // FIX: Added padding: EdgeInsets.zero to remove ListView default padding
                     ListView.separated(
                       shrinkWrap: true,
                       physics: NeverScrollableScrollPhysics(),
-                      itemCount: displayedPosts.length,
-                      separatorBuilder: (context, index) => Divider(height: 1),
+                      padding: EdgeInsets.zero,
+                      itemCount: displayedTrends.length,
+                      separatorBuilder: (context, index) => Divider(
+                        height: 1,
+                        thickness: 0.5,
+                        color: theme.dividerColor.withOpacity(0.3), // FIX: Subtle divider
+                      ),
                       itemBuilder: (context, index) {
-                        final doc = displayedPosts[index];
-                        final data = doc.data() as Map<String, dynamic>;
+                        final tag = displayedTrends[index]['tag'];
+                        final count = displayedTrends[index]['count'];
+                        final isHashtag = tag.toString().startsWith('#');
+                        final isTopTrending = index == 0; // FIX: Check if #1 trending
                         
-                        // Tampilan sedikit berbeda untuk trending list (misal: ada nomor urut)
-                        return Stack(
-                          children: [
-                            BlogPostCard(
-                              postId: doc.id,
-                              postData: data,
-                              isOwner: data['userId'] == _auth.currentUser?.uid,
+                        // FIX: Added contentPadding to control ListTile spacing
+                        return ListTile(
+                          dense: false,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          leading: Text(
+                            "${index + 1}",
+                            style: TextStyle(color: theme.hintColor, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          title: Text(
+                            tag,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold, 
+                              fontSize: 16,
+                              color: isHashtag ? TwitterTheme.blue : theme.textTheme.bodyLarge?.color
                             ),
-                            // Badge Nomor Trending
-                            Positioned(
-                              top: 8,
-                              right: 8,
-                              child: Container(
-                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: TwitterTheme.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
+                          ),
+                          subtitle: Text("$count buzzing interactions"),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // FIX: Add fire icon for top trending
+                              if (isTopTrending)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8.0),
+                                  child: Icon(Icons.local_fire_department, color: Colors.orange, size: 20),
                                 ),
-                                child: Text(
-                                  "#${index + 1}",
-                                  style: TextStyle(
-                                    color: TwitterTheme.blue,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                              Icon(Icons.arrow_forward_ios, size: 14, color: theme.hintColor),
+                            ],
+                          ),
+                          onTap: () => _onTrendingTagClicked(tag),
                         );
                       },
                     ),
-
-                    // Tombol Show More / Less
-                    if (trendingPosts.length > 3)
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _showAllTrending = !_showAllTrending;
-                          });
-                        },
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(_showAllTrending ? "Show Less" : "Show More Trending"),
-                            Icon(_showAllTrending ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-                          ],
+                    
+                    if (canExpand)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                        child: InkWell(
+                          onTap: () => setState(() => _showAllTrending = !_showAllTrending),
+                          child: Row(
+                            children: [
+                              Text(
+                                _showAllTrending ? "Show less" : "Show more",
+                                style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
+                              ),
+                              Icon(
+                                _showAllTrending ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                color: TwitterTheme.blue,
+                                size: 16,
+                              )
+                            ],
+                          ),
                         ),
                       ),
                   ],
@@ -380,67 +451,160 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
               },
             ),
 
-            SizedBox(height: 24),
-            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.3)),
-            SizedBox(height: 24),
+            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)), // FIX: More subtle thick divider
 
-            // Tombol Recommended For You
+            // --- DISCOVER SECTION (PERSONALIZED) ---
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Container(
-                width: double.infinity,
-                padding: EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [TwitterTheme.blue.withOpacity(0.1), theme.cardColor],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.explore_outlined, color: Colors.purple),
+                  SizedBox(width: 8),
+                  Text(
+                    "Discover For You",
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
-                ),
-                child: Column(
-                  children: [
-                    Icon(Icons.auto_awesome, size: 40, color: TwitterTheme.blue),
-                    SizedBox(height: 12),
-                    Text(
-                      "Curated Just For You",
-                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      "Discover content based on your interests and activity.",
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
-                    ),
-                    SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          if (widget.onNavigateToRecommended != null) {
-                            widget.onNavigateToRecommended!();
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text("Please go to Home > Recommended tab"))
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: TwitterTheme.blue,
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                        ),
-                        child: Text("See Recommended Feed"),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
-            
-            SizedBox(height: 40),
+
+            StreamBuilder<DocumentSnapshot>(
+              stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
+              builder: (context, userSnapshot) {
+                Map<String, dynamic> userProfile = {};
+                if (userSnapshot.hasData && userSnapshot.data!.exists) {
+                  userProfile = userSnapshot.data!.data() as Map<String, dynamic>;
+                }
+
+                return StreamBuilder<QuerySnapshot>(
+                  stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+                    
+                    final discoverDocs = _predictionService.getPersonalizedRecommendations(
+                      snapshot.data!.docs, 
+                      userProfile, 
+                      user?.uid ?? ''
+                    );
+
+                    if (discoverDocs.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
+                        child: Center(child: Text("No new recommendations. Interact more to personalize!")),
+                      );
+                    }
+
+                    // FIX: Show only first 10 posts
+                    final displayedPosts = discoverDocs.take(10).toList();
+                    final hasMore = discoverDocs.length > 10;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Display first 10 posts
+                        ...displayedPosts.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          
+                          return BlogPostCard(
+                            postId: doc.id,
+                            postData: data,
+                            isOwner: false,
+                            heroContextId: 'discover',
+                          );
+                        }).toList(),
+                        
+                        // Show "See More" button if there are more posts
+                        if (hasMore)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
+                            child: Center(
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  // TODO: Navigate to full discover page or expand list
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('More posts coming soon!')),
+                                  );
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                  side: BorderSide(color: TwitterTheme.blue),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                ),
+                                child: Text(
+                                  "See More Recommendations",
+                                  style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                );
+              }
+            ),
+
+            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
+
+            // --- PEOPLE YOU MIGHT KNOW SECTION ---
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.explore_outlined, color: Colors.purple),
+                  SizedBox(width: 8),
+                  Text(
+                    "Discover For You",
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ],
+              ),
+            ),
+
+            StreamBuilder<DocumentSnapshot>(
+              stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
+              builder: (context, userSnapshot) {
+                Map<String, dynamic> userProfile = {};
+                if (userSnapshot.hasData && userSnapshot.data!.exists) {
+                  userProfile = userSnapshot.data!.data() as Map<String, dynamic>;
+                }
+
+                return StreamBuilder<QuerySnapshot>(
+                  stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+                    
+                    final discoverDocs = _predictionService.getPersonalizedRecommendations(
+                      snapshot.data!.docs, 
+                      userProfile, 
+                      user?.uid ?? ''
+                    );
+
+                    if (discoverDocs.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
+                        child: Center(child: Text("No new recommendations. Interact more to personalize!")),
+                      );
+                    }
+
+                    // FIX: Use Column instead of ListView to have more control over spacing
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: discoverDocs.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        
+                        return BlogPostCard(
+                          postId: doc.id,
+                          postData: data,
+                          isOwner: false,
+                          heroContextId: 'discover',
+                        );
+                      }).toList(),
+                    );
+                  },
+                );
+              }
+            ),
           ],
         ),
       ),
@@ -509,6 +673,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
               postId: docs[index].id,
               postData: data,
               isOwner: data['userId'] == _auth.currentUser?.uid,
+              heroContextId: 'search_results',
             );
           },
         );

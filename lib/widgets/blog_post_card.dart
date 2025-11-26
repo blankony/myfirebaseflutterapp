@@ -500,7 +500,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
           color: theme.cardColor,
         ),
-        padding: const EdgeInsets.all(12.0),
+        // UPDATED: Padding increased from 12.0 to 16.0 for consistent UI alignment
+        padding: const EdgeInsets.all(16.0), 
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
