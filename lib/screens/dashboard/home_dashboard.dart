@@ -1,7 +1,8 @@
 // ignore_for_file: prefer_const_constructors
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui'; // Penting untuk ImageFilter
+import 'dart:ui';
+import 'dart:async'; // PENTING: Untuk StreamController
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:myfirebaseflutterapp/widgets/side_panel.dart';
+import 'package:myfirebaseflutterapp/widgets/ai_history_drawer.dart'; // IMPORT DRAWER BARU
 import 'home_page.dart';
 import 'ai_assistant_page.dart';
 import 'search_page.dart';
@@ -18,7 +20,6 @@ import '../create_post_screen.dart';
 import '../../main.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
 
-import 'dart:async'; 
 import '../../services/overlay_service.dart';
 import '../../services/notification_prefs_service.dart';
 import 'package:myfirebaseflutterapp/screens/post_detail_screen.dart';
@@ -257,18 +258,20 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     );
   }
 
+  // === 1. MODIFIKASI ACTIONS UNTUK TAB AI (INDEX 1) ===
   List<Widget> _appBarActions(BuildContext context) {
     switch (_selectedIndex) {
       case 0:
         return [ _NotificationButton(onPressed: _showNotificationPopup) ];
       case 1:
+        // Tombol khusus untuk membuka Panel History
         return [
-          PopupMenuButton<String>(
-            onSelected: (value) {},
-            itemBuilder: (BuildContext context) {
-              return {'New Chat', 'Chat History'}.map((String choice) {
-                return PopupMenuItem<String>(value: choice, child: Text(choice));
-              }).toList();
+          IconButton(
+            icon: const Icon(Icons.history), // Ikon History
+            tooltip: 'Chat History',
+            onPressed: () {
+              // Membuka Panel Kanan (End Drawer)
+              _scaffoldKey.currentState?.openEndDrawer();
             },
           ),
         ];
@@ -347,10 +350,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           onSearchPressed: () { setState(() { _isSearching = !_isSearching; }); },
         ),
       ),
-      // --- PERUBAHAN DI SINI: HAPUS KeepAlivePage ---
-      // ProfileTabPage sekarang akan di-reset setiap kali ditinggalkan
       ProfileTabPage(), 
-      // ---------------------------------------------
     ];
 
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -366,6 +366,22 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
       key: _scaffoldKey,
       extendBody: true,
       extendBodyBehindAppBar: true,
+      
+      // === 2. TAMBAHKAN END DRAWER DI SINI ===
+      // Ini adalah Side Panel yang muncul dari kanan
+      endDrawer: _selectedIndex == 1 
+          ? AiHistoryDrawer(
+              onNewChat: () {
+                 // Kirim sinyal ke AiAssistantPage untuk reset
+                 aiPageEventBus.fire(AiPageEvent(type: AiEventType.newChat));
+              },
+              onChatSelected: (sessionId) {
+                 // Kirim sinyal ke AiAssistantPage untuk load session
+                 aiPageEventBus.fire(AiPageEvent(type: AiEventType.loadChat, sessionId: sessionId));
+              },
+            ) 
+          : null,
+
       appBar: _selectedIndex == 3
           ? null
           : AppBar(
@@ -495,6 +511,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 }
 
+// === WIDGETS PENDUKUNG (TIDAK BERUBAH) ===
 class _NotificationBlurPopup extends StatefulWidget {
   @override
   State<_NotificationBlurPopup> createState() => _NotificationBlurPopupState();
@@ -1058,3 +1075,22 @@ class BottomNavyBarItem {
   final Color? inactiveColor;
   final TextAlign? textAlign;
 }
+
+// === EVENT BUS GLOBAL ===
+// Ini digunakan agar Drawer (di Home) bisa berkomunikasi dengan AiPage
+enum AiEventType { newChat, loadChat }
+
+class AiPageEvent {
+  final AiEventType type;
+  final String? sessionId;
+  AiPageEvent({required this.type, this.sessionId});
+}
+
+class AiPageEventBus {
+  final _controller = StreamController<AiPageEvent>.broadcast();
+  Stream<AiPageEvent> get stream => _controller.stream;
+  void fire(AiPageEvent event) => _controller.sink.add(event);
+  void dispose() => _controller.close();
+}
+
+final aiPageEventBus = AiPageEventBus();

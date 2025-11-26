@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_auth/firebase_auth.dart';     // PENTING
+import 'package:cloud_firestore/cloud_firestore.dart'; // PENTING
 import '../../main.dart';
+import 'home_dashboard.dart'; // Akses aiPageEventBus
 
 class AiAssistantPage extends StatefulWidget {
   const AiAssistantPage({super.key});
@@ -17,21 +20,18 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   final ScrollController _scrollController = ScrollController();
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
+  bool _isLoadingHistory = false;
+
+  // STATE UNTUK SESSION
+  String? _currentSessionId;
+  StreamSubscription? _eventBusSubscription;
 
   final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
-
   late GenerativeModel _model;
   late ChatSession _chatSession;
 
-  @override
-  void initState() {
-    super.initState();
-    _initModel();
-  }
-
-  void _initModel() {
-    // --- PERSONA DEFINITION & ACADEMIC CONTEXT ---
-    final systemInstruction = Content.system("""
+  // Persona
+  final Content _systemInstruction = Content.system("""
       Kamu adalah asisten virtual cerdas untuk aplikasi media sosial bernama "Sapa PNJ" (Sarana Pengguna Aplikasi Politeknik Negeri Jakarta).
       
       IDENTITAS KAMU:
@@ -40,69 +40,118 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       - Afiliasi: Politeknik Negeri Jakarta (PNJ).
       
       KONTEKS KALENDER AKADEMIK PNJ (Tahun 2025/2026):
-      Ini adalah jadwal akademik RESMI dan PASTI dari PNJ. Kamu harus menjawab dengan YAKIN dan LANGSUNG tanpa ragu-ragu:
-      
       1. Semester Ganjil (2025/2026):
-         - Batas Laporan Yudisium (Genap 24/25): 04 Agustus 2025.
          - Awal Perkuliahan: 25 Agustus 2025.
-         - Wisuda (Genap 24/25): 20 September 2025.
-         - UTS (Minggu ke-8): 13 - 17 Oktober 2025.
-         - Minggu Perkuliahan Pengganti (Minggu ke-16): 08 - 12 Desember 2025.
-         - Evaluasi Dosen oleh Mahasiswa (EDOM): 08 - 31 Desember 2025.
-         - UAS (Minggu ke-16): 15 - 19 Desember 2025.
-         - Ujian Remedial (Minggu 17-18): 22 - 30 Desember 2025.
-         - Evaluasi Nilai Semester: 05 - 09 Januari 2026.
-         - Batas Input Nilai Dosen: 12 Januari 2026.
-         - Penerbitan Nilai (Jurusan): 13 Januari 2026.
-         - Laporan Status Mahasiswa: 14 Januari 2026.
-         - Daftar Ulang (Genap 25/26): 15 - 23 Januari 2026.
-         - Libur Semester Ganjil: 26 Januari - 06 Februari 2026.
-         - Pelaporan PD Dikti: 14 Maret 2026.
+         - UTS: 13 - 17 Oktober 2025.
+         - UAS: 15 - 19 Desember 2025.
+         - Libur Semester: 26 Januari - 06 Februari 2026.
 
       2. Semester Genap (2025/2026):
          - Awal Perkuliahan: 09 Februari 2026.
-         - Libur Idul Fitri 1447 H: 19 - 20 Maret 2026.
-         - UTS (Minggu ke-8 & 9): 30 Maret - 06 April 2026.
-         - Minggu Perkuliahan Pengganti: 25 - 29 Mei 2026.
-         - EDOM: 25 Mei - 12 Juni 2026.
+         - UTS: 30 Maret - 06 April 2026.
          - UAS: 02 - 08 Juni 2026.
-         - Ujian Remedial: 09 - 12 Juni 2026.
-         - Evaluasi Nilai Semester: 15 - 22 Juni 2026.
-         - Batas Input Nilai Dosen: 23 Juni 2026.
-         - Penerbitan Nilai: 24 Juni 2026.
-         - Laporan Status Mahasiswa: 25 Juni 2026.
-         - Libur Semester Genap: 26 Juni - 21 Agustus 2026.
-         - Daftar Ulang (Ganjil 26/27): 29 Juni - 03 Juli 2026.
-         - Pendaftaran Wisuda: 13 Juli - 13 Agustus 2026.
-         - Batas Laporan Yudisium: 03 Agustus 2026.
-         - Awal Perkuliahan (Ganjil 26/27): 24 Agustus 2026.
-         - Wisuda (Tentative): September 2026.
+         - Libur Semester: 26 Juni - 21 Agustus 2026.
 
       ATURAN PENTING:
-      1. Jika ditanya "Kapan UTS?" atau "Kapan libur?", cek tanggal hari ini dan berikan jawaban berdasarkan kalender di atas.
-      2. Jika ditanya "Siapa kamu?", jawablah: "Saya adalah asisten virtual Sapa PNJ, teman digitalmu di Politeknik Negeri Jakarta."
-      3. JANGAN PERNAH mengaku sebagai "Gemini" atau "model buatan Google". Kamu harus tetap pada karakter (Roleplay).
-      4. Gaya bicara: Ramah, sopan, gaul khas mahasiswa, suportif, dan informatif. Gunakan emoji sesekali.
-      5. Jika user bertanya hal teknis tentang model bahasamu, jawablah secara diplomatis bahwa kamu dikembangkan khusus untuk aplikasi ini.
+      1. Jawab ramah khas mahasiswa.
+      2. Jangan mengaku sebagai Gemini.
     """);
 
+  @override
+  void initState() {
+    super.initState();
+    _initModel();
+
+    // LISTEN EVENT DARI DRAWER
+    _eventBusSubscription = aiPageEventBus.stream.listen((event) {
+      if (event.type == AiEventType.newChat) {
+        _startNewChat();
+      } else if (event.type == AiEventType.loadChat && event.sessionId != null) {
+        _loadChatSession(event.sessionId!);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _eventBusSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _initModel() {
+    if (_apiKey.isEmpty) return;
     try {
-      // Coba model Pro
       _model = GenerativeModel(
-        model: 'gemini-2.5-pro', // Menggunakan versi stabil saat ini (bisa disesuaikan kembali ke 2.5 jika preview tersedia)
+        model: 'gemini-2.5-pro', 
         apiKey: _apiKey,
-        systemInstruction: systemInstruction, // Inject Persona & Calendar Data
+        systemInstruction: _systemInstruction,
       );
       _chatSession = _model.startChat();
     } catch (e) {
-      print('Model utama gagal -> fallback ke flash');
-      // Fallback ke Flash
-      _model = GenerativeModel(
-        model: 'gemini-1.5-flash',
-        apiKey: _apiKey,
-        systemInstruction: systemInstruction, // Inject Persona & Calendar Data juga di fallback
-      );
+      print('Model Error: $e');
+    }
+  }
+
+  // === FUNGSI LOGIKA BARU ===
+
+  void _startNewChat() {
+    setState(() {
+      _messages.clear();
+      _currentSessionId = null;
+      _isTyping = false;
       _chatSession = _model.startChat();
+    });
+  }
+
+  Future<void> _loadChatSession(String sessionId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() {
+      _isLoadingHistory = true;
+      _messages.clear();
+      _currentSessionId = sessionId;
+    });
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_sessions')
+          .doc(sessionId)
+          .collection('messages')
+          .orderBy('timestamp', descending: false)
+          .get();
+
+      final List<ChatMessage> loadedUiMessages = [];
+      final List<Content> geminiHistory = [];
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final text = data['text'] ?? '';
+        final isUser = data['isUser'] ?? true;
+        
+        loadedUiMessages.add(ChatMessage(
+          text: text,
+          isUser: isUser,
+          timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        ));
+
+        // Format history untuk Gemini agar konteks nyambung
+        geminiHistory.add(Content(isUser ? 'user' : 'model', [TextPart(text)]));
+      }
+
+      setState(() {
+        _messages.addAll(loadedUiMessages);
+        _isLoadingHistory = false;
+        // Restore session Gemini dengan history
+        _chatSession = _model.startChat(history: geminiHistory);
+      });
+
+      _scrollToBottom();
+    } catch (e) {
+      print("Error loading history: $e");
+      setState(() => _isLoadingHistory = false);
     }
   }
 
@@ -110,7 +159,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     _textController.clear();
     if (text.trim().isEmpty) return;
 
-    // Tambah pesan user
+    final user = FirebaseAuth.instance.currentUser;
+
+    // 1. Tambah User Message ke UI
     setState(() {
       _messages.add(ChatMessage(
         text: text,
@@ -119,27 +170,20 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       ));
       _isTyping = true;
     });
-
     _scrollToBottom();
 
+    // 2. Simpan User Message ke Firestore
+    if (user != null) {
+      await _saveMessageToFirestore(user.uid, text, true);
+    }
+
     try {
-      // Kirim ke Gemini
+      // 3. Kirim ke Gemini
       final response = await _chatSession.sendMessage(Content.text(text));
-
-      String aiText = "";
-
-      // Parse berbagai format respons
-      try {
-        if (response.text != null && response.text!.isNotEmpty) {
-          aiText = response.text!;
-        } else {
-          aiText = "Maaf, saya tidak bisa memproses itu sekarang.";
-        }
-      } catch (e) {
-        aiText = "Terjadi kesalahan parsing respons.";
-      }
+      final aiText = response.text ?? "Maaf, saya tidak dapat menjawab saat ini.";
 
       if (mounted) {
+        // 4. Tambah AI Message ke UI
         setState(() {
           _isTyping = false;
           _messages.add(ChatMessage(
@@ -149,30 +193,64 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
           ));
         });
         _scrollToBottom();
+
+        // 5. Simpan AI Message ke Firestore
+        if (user != null) {
+          await _saveMessageToFirestore(user.uid, aiText, false);
+        }
       }
     } catch (e) {
-      print("ERROR AI: $e");
-
       if (mounted) {
         setState(() {
           _isTyping = false;
           _messages.add(ChatMessage(
-            text: "Maaf, koneksi ke server Sapa PNJ sedang gangguan. Coba lagi nanti ya!",
+            text: "Error: $e (Cek koneksi atau kuota API)",
             isUser: false,
             timestamp: DateTime.now(),
           ));
         });
+        _scrollToBottom();
       }
     }
   }
 
-  // Scroll otomatis
+  Future<void> _saveMessageToFirestore(String uid, String text, bool isUser) async {
+    final sessionsRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('chat_sessions');
+
+    // Buat Session baru jika belum ada
+    if (_currentSessionId == null) {
+      // Judul otomatis dari pesan pertama (max 30 char)
+      String title = text.replaceAll('\n', ' ');
+      if (title.length > 30) title = "${title.substring(0, 30)}...";
+      if (!isUser) title = "New Chat"; 
+
+      final newSession = await sessionsRef.add({
+        'title': title,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+      _currentSessionId = newSession.id;
+    } else {
+      // Update waktu terakhir sesi
+      sessionsRef.doc(_currentSessionId).update({
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Simpan pesan
+    await sessionsRef.doc(_currentSessionId).collection('messages').add({
+      'text': text,
+      'isUser': isUser,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
   void _scrollToBottom() {
-    Future.delayed(Duration(milliseconds: 120), () {
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 350),
+          duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
       }
@@ -183,6 +261,11 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // Tampilan Loading saat memuat history
+    if (_isLoadingHistory) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       body: Column(
         children: [
@@ -191,14 +274,13 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
                 ? _buildEmptyState(theme)
                 : _buildChatList(),
           ),
-
-          // INPUT BAR
+          // Input Area
           Container(
             decoration: BoxDecoration(
               color: theme.scaffoldBackgroundColor,
               border: Border(top: BorderSide(color: theme.dividerColor)),
             ),
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: SafeArea(
               top: false,
               child: Row(
@@ -206,16 +288,14 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
                   Expanded(
                     child: TextField(
                       controller: _textController,
-                      onSubmitted:
-                          _isTyping ? null : _handleSubmitted,
+                      onSubmitted: _isTyping ? null : _handleSubmitted,
                       decoration: InputDecoration(
                         hintText: 'Tanya seputar PNJ...',
                         filled: true,
                         fillColor: theme.brightness == Brightness.dark
                             ? TwitterTheme.darkGrey.withOpacity(0.2)
                             : TwitterTheme.extraLightGrey,
-                        contentPadding: EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 10),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -223,18 +303,15 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
                       ),
                     ),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Container(
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       color: TwitterTheme.blue,
                       shape: BoxShape.circle,
                     ),
                     child: IconButton(
-                      icon: Icon(Icons.send_rounded,
-                          color: Colors.white, size: 20),
-                      onPressed: _isTyping
-                          ? null
-                          : () => _handleSubmitted(_textController.text),
+                      icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                      onPressed: _isTyping ? null : () => _handleSubmitted(_textController.text),
                     ),
                   ),
                 ],
@@ -246,25 +323,27 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     );
   }
 
-  // ================== UI builders ==================
-
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.school, size: 48, // Ganti ikon jadi lebih relevan
-                color: TwitterTheme.blue.withOpacity(0.5)),
-            SizedBox(height: 16),
+            Icon(Icons.school, size: 60, color: TwitterTheme.blue.withOpacity(0.5)),
+            const SizedBox(height: 16),
             Text(
-              "Halo! Saya Asisten Sapa PNJ.\nAda yang bisa saya bantu tentang kampus?",
+              "Halo! Saya Asisten Sapa PNJ.\nSilakan tanya jadwal atau info kampus.",
               textAlign: TextAlign.center,
               style: theme.textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
               ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Tips: Geser dari kanan layar untuk lihat History.",
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
             ),
           ],
         ),
@@ -275,7 +354,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   Widget _buildChatList() {
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 120, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 100, 16, 16), // Top padding for AppBar
       itemCount: _messages.length + (_isTyping ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _messages.length) {
@@ -290,8 +369,8 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.only(bottom: 16),
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
@@ -300,9 +379,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
           width: 40,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: List.generate(
-              3,
-              (_) => Container(
+            children: List.generate(3, (_) => Container(
                 width: 6,
                 height: 6,
                 decoration: BoxDecoration(
@@ -318,20 +395,11 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   }
 }
 
-// ======================================================
-// ===================== MODEL =========================
-// ======================================================
-
 class ChatMessage {
   final String text;
   final bool isUser;
   final DateTime timestamp;
-
-  ChatMessage({
-    required this.text,
-    required this.isUser,
-    required this.timestamp,
-  });
+  ChatMessage({required this.text, required this.isUser, required this.timestamp});
 }
 
 class _ChatBubble extends StatelessWidget {
@@ -342,35 +410,24 @@ class _ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isUser = message.isUser;
-
-    // Tentukan warna teks dasar
     final textColor = isUser ? Colors.white : theme.textTheme.bodyLarge?.color ?? Colors.black;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.only(bottom: 12),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.85,
-        ),
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        margin: const EdgeInsets.only(bottom: 12),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isUser ? TwitterTheme.blue : theme.cardColor,
           borderRadius: BorderRadius.circular(16),
         ),
         child: MarkdownBody(
           data: message.text,
-          selectable: true, 
+          selectable: true,
           styleSheet: MarkdownStyleSheet(
-            p: TextStyle(
-              color: textColor,
-              fontSize: 15,
-            ),
-            strong: TextStyle(
-              color: textColor,
-              fontWeight: FontWeight.bold,
-            ),
-            // Styling untuk list dan header agar konsisten dengan tema
+            p: TextStyle(color: textColor, fontSize: 15),
+            strong: TextStyle(color: textColor, fontWeight: FontWeight.bold),
             listBullet: TextStyle(color: textColor),
           ),
         ),
