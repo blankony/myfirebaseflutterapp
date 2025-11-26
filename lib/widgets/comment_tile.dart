@@ -2,8 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:share_plus/share_plus.dart'; // NEW
-import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // NEW
+import 'package:share_plus/share_plus.dart'; 
+import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
 import '../screens/post_detail_screen.dart'; 
 import '../screens/dashboard/profile_page.dart'; 
 import '../screens/image_viewer_screen.dart'; 
@@ -20,6 +20,7 @@ class CommentTile extends StatefulWidget {
   final String postId; 
   final bool isOwner;
   final bool showPostContext; 
+  final String heroContextId; // 1. PARAMETER BARU
 
   const CommentTile({
     super.key,
@@ -28,6 +29,7 @@ class CommentTile extends StatefulWidget {
     required this.postId,
     required this.isOwner,
     this.showPostContext = false, 
+    this.heroContextId = 'comment', // Default value
   });
 
   @override
@@ -40,8 +42,8 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
   // Stats State
   late bool _isLiked;
   late int _likeCount;
-  late bool _isReposted; // NEW
-  late int _repostCount; // NEW
+  late bool _isReposted; 
+  late int _repostCount; 
   
   late AnimationController _likeController;
   late Animation<double> _likeAnimation;
@@ -65,14 +67,14 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
   void _syncStatsState() {
     final currentUser = _auth.currentUser;
     final likes = widget.commentData['likes'] as Map<String, dynamic>? ?? {};
-    final reposts = widget.commentData['repostedBy'] as List? ?? []; // NEW
+    final reposts = widget.commentData['repostedBy'] as List? ?? []; 
     
     if (mounted) {
       setState(() {
         _isLiked = currentUser != null && likes.containsKey(currentUser.uid);
         _likeCount = likes.length;
-        _isReposted = currentUser != null && reposts.contains(currentUser.uid); // NEW
-        _repostCount = reposts.length; // NEW
+        _isReposted = currentUser != null && reposts.contains(currentUser.uid); 
+        _repostCount = reposts.length; 
       });
     }
   }
@@ -101,11 +103,10 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
         await commentRef.update({'likes.${user.uid}': FieldValue.delete()});
       }
     } catch (e) {
-      _syncStatsState(); // Revert on error
+      _syncStatsState(); 
     }
   }
 
-  // NEW: Repost Logic for Comments
   Future<void> _toggleRepost() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -128,12 +129,11 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
         await commentRef.update({'repostedBy': FieldValue.arrayRemove([user.uid])});
       }
     } catch (e) {
-      print("Repost Error: $e"); // Debugging
+      print("Repost Error: $e"); 
       _syncStatsState();
     }
   }
 
-  // NEW: Share Logic for Comments
   Future<void> _shareComment() async {
     final String text = widget.commentData['text'] ?? '';
     final String? mediaUrl = widget.commentData['mediaUrl'];
@@ -265,12 +265,21 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
   }
 
   void _openMediaViewer(String url, String? type) {
+    // 2. GUNAKAN CONTEXT ID DI SINI
+    final String heroTag = '${widget.heroContextId}_${widget.commentId}_$url';
+
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ImageViewerScreen(
+      PageRouteBuilder(
+        opaque: false, 
+        barrierColor: Colors.black,
+        pageBuilder: (_, __, ___) => ImageViewerScreen(
           imageUrl: url,
           mediaType: type,
+          heroTag: heroTag, 
         ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        }
       ),
     );
   }
@@ -393,7 +402,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
     final String text = data['text'] ?? '';
     final Timestamp? timestamp = data['timestamp'] as Timestamp?;
     
-    // Media Data
     final String? mediaUrl = data['mediaUrl'];
     final String? mediaType = data['mediaType'];
 
@@ -422,9 +430,8 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
         color: theme.cardColor,
         child: IntrinsicHeight(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start, // Changed from stretch to start to fix alignment
+            crossAxisAlignment: CrossAxisAlignment.start, 
             children: [
-              // Tree Structure
               Container(
                 width: 48,
                 color: Colors.transparent,
@@ -452,9 +459,8 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                 ),
               ),
 
-              // Avatar - RESTORED TOP PADDING TO FIX OVERLAP
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0), // Added top padding back
+                padding: const EdgeInsets.symmetric(vertical: 8.0), 
                 child: GestureDetector(
                   onTap: _navigateToUserProfile,
                   child: avatarWidget, 
@@ -463,10 +469,9 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
 
               SizedBox(width: 10),
 
-              // Content
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0), // Kept vertical padding here for text
+                  padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0), 
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -505,7 +510,7 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                height: 150, // Constrained height for replies
+                                height: 150, 
                                 width: double.infinity,
                                 decoration: BoxDecoration(
                                   color: Colors.black,
@@ -513,33 +518,35 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                                 ),
                                 child: mediaType == 'video'
                                     ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 40))
-                                    : CachedNetworkImage(
-                                        imageUrl: mediaUrl,
-                                        fit: BoxFit.cover,
-                                        placeholder: (context, url) => Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                                        errorWidget: (context, url, error) => Icon(Icons.error, color: Colors.grey),
+                                    : Hero(
+                                        // 3. GUNAKAN TAG DENGAN CONTEXT ID
+                                        tag: '${widget.heroContextId}_${widget.commentId}_$mediaUrl',
+                                        child: CachedNetworkImage(
+                                          imageUrl: mediaUrl,
+                                          fit: BoxFit.cover,
+                                          placeholder: (context, url) => Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                                          errorWidget: (context, url, error) => Icon(Icons.error, color: Colors.grey),
+                                        ),
                                       ),
                               ),
                             ),
                           ),
                         ),
                       
-                      // --- UPDATED ACTIONS ROW (Repost, Like, Share) ---
+                      // Actions Row
                       Padding(
                         padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.start, // Left aligned
+                          mainAxisAlignment: MainAxisAlignment.start,
                           children: [
-                            // 1. Repost Button
                             _buildActionButton(
                               icon: Icons.repeat,
                               text: _repostCount.toString(),
                               color: _isReposted ? Colors.green : null,
                               onTap: _toggleRepost
                             ),
-                            SizedBox(width: 24), // Spacing
+                            SizedBox(width: 24), 
                             
-                            // 2. Like Button
                             _buildActionButton(
                               icon: _isLiked ? Icons.favorite : Icons.favorite_border,
                               text: _likeCount.toString(),
@@ -549,7 +556,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                             ),
                             SizedBox(width: 24),
                             
-                            // 3. Share Button
                             _buildActionButton(
                               icon: Icons.share_outlined,
                               text: null,
@@ -570,7 +576,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
     );
   }
 
-  // Helper for consistent buttons in comment tile
   Widget _buildActionButton({
     required IconData icon,
     required String? text,

@@ -50,15 +50,17 @@ class _PostMediaPreview extends StatelessWidget {
   final String mediaUrl;
   final String? mediaType;
   final String text;
-  final Map<String, dynamic> postData; // NEW
-  final String postId; // NEW
+  final Map<String, dynamic> postData; 
+  final String postId; 
+  final String heroContextId; // PARAMETER BARU
 
   const _PostMediaPreview({
     required this.mediaUrl,
     this.mediaType,
     required this.text,
-    required this.postData, // NEW
-    required this.postId, // NEW
+    required this.postData, 
+    required this.postId, 
+    required this.heroContextId, // WAJIB DIISI
   });
 
   String? _getVideoId(String url) {
@@ -76,13 +78,25 @@ class _PostMediaPreview extends StatelessWidget {
   }
 
   void _navigateToViewer(BuildContext context, {String? url, String? type}) {
+     // BUAT TAG UNIK DENGAN CONTEXT ID
+     // Format: contextId_postId_url
+     final String heroTag = '${heroContextId}_${postId}_${url ?? mediaUrl}';
+
      Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ImageViewerScreen(
-        imageUrl: url ?? mediaUrl, 
-        mediaType: type ?? mediaType,
-        postData: postData, // PASS DATA
-        postId: postId, // PASS ID
-      )),
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black, 
+        pageBuilder: (_, __, ___) => ImageViewerScreen(
+          imageUrl: url ?? mediaUrl, 
+          mediaType: type ?? mediaType,
+          postData: postData, 
+          postId: postId,
+          heroTag: heroTag, // KIRIM TAG UNIK INI
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        }
+      ),
     );
   }
 
@@ -91,6 +105,9 @@ class _PostMediaPreview extends StatelessWidget {
     final theme = Theme.of(context);
     
     if (mediaUrl.isNotEmpty) {
+      // GUNAKAN TAG YANG SAMA DI SINI
+      final String heroTag = '${heroContextId}_${postId}_$mediaUrl';
+
       return AspectRatio( 
         aspectRatio: 4 / 3,
         child: ClipRRect(
@@ -99,16 +116,20 @@ class _PostMediaPreview extends StatelessWidget {
             onTap: () => _navigateToViewer(context, type: mediaType),
             child: mediaType == 'video' 
                 ? _VideoPlayerWidget(videoUrl: mediaUrl)
-                : CachedNetworkImage( 
-                    imageUrl: mediaUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(
-                        color: theme.dividerColor.withOpacity(0.5),
-                        child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
-                      ),
-                    errorWidget: (context, url, error) => Container(
-                        color: Colors.red.withOpacity(0.1),
-                        child: Center(child: Text('Failed to load media.', style: TextStyle(color: Colors.red))),
+                : Hero( 
+                    tag: heroTag,
+                    transitionOnUserGestures: true,
+                    child: CachedNetworkImage( 
+                        imageUrl: mediaUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                            color: theme.dividerColor.withOpacity(0.5),
+                            child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
+                          ),
+                        errorWidget: (context, url, error) => Container(
+                            color: Colors.red.withOpacity(0.1),
+                            child: Center(child: Text('Failed to load media.', style: TextStyle(color: Colors.red))),
+                          ),
                       ),
                   ),
           ),
@@ -160,6 +181,7 @@ class BlogPostCard extends StatefulWidget {
   final bool isOwner;
   final bool isClickable; 
   final bool isDetailView;
+  final String heroContextId; // PARAMETER BARU DI SINI
 
   const BlogPostCard({
     super.key,
@@ -168,6 +190,7 @@ class BlogPostCard extends StatefulWidget {
     required this.isOwner,
     this.isClickable = true,
     this.isDetailView = false,
+    this.heroContextId = 'feed', // Default value agar tidak error di tempat lain
   });
 
   @override
@@ -339,7 +362,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
-  // Helper for Slide Left Animation
   Route _createSlideLeftRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -360,6 +382,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         PostDetailScreen(
           postId: widget.postId,
           initialPostData: widget.postData, 
+          heroContextId: widget.heroContextId, 
         ),
       ),
     );
@@ -425,7 +448,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     return timeago.format(timestamp.toDate(), locale: 'en_short');
   }
 
-  // UPDATED: Indeterminate progress bar (stripes animation)
   Widget _buildUploadStatus(double progress) {
     return Padding(
       padding: const EdgeInsets.only(top: 8.0),
@@ -437,7 +459,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
             style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
           ),
           SizedBox(height: 4),
-          // Setting value to null enables the indeterminate (moving stripes) animation
           LinearProgressIndicator(
             value: null, 
             backgroundColor: Theme.of(context).dividerColor,
@@ -456,7 +477,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDarkMode = theme.brightness == Brightness.dark;
     final text = widget.postData['text'] ?? '';
     final mediaUrl = widget.postData['mediaUrl'];
     final mediaType = widget.postData['mediaType'];
@@ -484,19 +504,15 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- AVATAR ---
             _buildAvatar(context),
             SizedBox(width: 12),
             
-            // --- CONTENT ---
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- HEADER (NAME & HANDLE) ---
                   _buildPostHeader(context),
                   
-                  // --- TEXT ---
                   if (text.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4.0),
@@ -508,7 +524,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                       ),
                     ),
                   
-                  // --- MEDIA ---
                   if (isUploading)
                     _buildUploadStatus(uploadProgress)
                   else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
@@ -518,12 +533,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                         mediaUrl: mediaUrl ?? '',
                         mediaType: mediaType,
                         text: text,
-                        postData: widget.postData, // PASSED DATA
-                        postId: widget.postId, // PASSED ID
+                        postData: widget.postData, 
+                        postId: widget.postId, 
+                        heroContextId: widget.heroContextId, // PASSING PARAMETER
                       ),
                     ),
                   
-                  // --- ACTIONS ---
                   if (widget.isDetailView && !isUploading)
                     _buildDetailActionRow()
                   else if (!isUploading)
@@ -585,7 +600,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Row 1: Name + Time + Option
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -606,7 +620,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
             ),
           ],
         ),
-        // Row 2: Handle
         Text(
           handle,
           style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13),
@@ -616,7 +629,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
-  // MODIFIED: Changed to PopupMenuButton for better UX
   Widget _buildOptionsButton() {
     return PopupMenuButton<String>(
       icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor, size: 18),
@@ -629,7 +641,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         } else if (value == 'delete') {
           _deletePost();
         } else if (value == 'pin') {
-           // Placeholder for the "New Button" feature functionality
            if (mounted) {
              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post pinned to profile (Demo)")));
            }
@@ -646,7 +657,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
             ],
           ),
         ),
-        // THE NEW BUTTON: Pin to Profile
         PopupMenuItem(
           value: 'pin',
           child: Row(

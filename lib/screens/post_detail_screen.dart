@@ -19,11 +19,14 @@ final CloudinaryService _cloudinaryService = CloudinaryService();
 class PostDetailScreen extends StatefulWidget {
   final String postId;
   final Map<String, dynamic>? initialPostData;
+  // 1. TAMBAHKAN PARAMETER INI
+  final String heroContextId; 
 
   const PostDetailScreen({
     super.key,
     required this.postId,
     this.initialPostData,
+    this.heroContextId = 'feed', // Default ke 'feed' jika tidak diisi
   });
 
   @override
@@ -35,18 +38,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final PredictionService _predictionService = PredictionService();
   final User? _currentUser = _auth.currentUser;
 
-  // Predictive Text State
   String? _predictedText;
   Timer? _debounce;
-
-  // Sending State (FIX for spamming)
   bool _isSending = false;
-
-  // Media State (NEW)
   File? _selectedMediaFile;
-  String? _mediaType; // 'image' or 'video'
+  String? _mediaType;
 
-  // Listener for Predictive Text
   void _onCommentChanged(String text) {
     setState(() {
       _predictedText = null;
@@ -83,7 +80,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
-  // NEW: Media Picker Logic
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
     final picker = ImagePicker();
     XFile? pickedFile;
@@ -119,14 +115,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _postComment() async {
-    // FIX: Prevent empty sends and multiple taps
     if ((_commentController.text.trim().isEmpty && _selectedMediaFile == null) || _currentUser == null || _isSending) {
       return;
     }
 
-    setState(() { _isSending = true; }); // Lock button
+    setState(() { _isSending = true; });
 
-    // 1. Upload Media if exists
     String? mediaUrl;
     if (_selectedMediaFile != null) {
       mediaUrl = await _cloudinaryService.uploadMedia(_selectedMediaFile!);
@@ -159,8 +153,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     final commentData = {
       'text': _commentController.text.trim(),
-      'mediaUrl': mediaUrl, // NEW
-      'mediaType': _mediaType, // NEW
+      'mediaUrl': mediaUrl,
+      'mediaType': _mediaType,
       'timestamp': FieldValue.serverTimestamp(),
       'userId': _currentUser!.uid,
       'originalPostId': widget.postId,
@@ -186,11 +180,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
       await writeBatch.commit();
 
-      // Send Notification
       final String? postOwnerId = widget.initialPostData?['userId'];
       if (postOwnerId != null && postOwnerId != _currentUser!.uid) {
         String commentSnippet = commentData['text'] as String;
-        if (commentSnippet.isEmpty) commentSnippet = "Sent a ${_mediaType ?? 'media'} attachment"; // Handle media-only comments
+        if (commentSnippet.isEmpty) commentSnippet = "Sent a ${_mediaType ?? 'media'} attachment";
         if (commentSnippet.length > 50) {
           commentSnippet = commentSnippet.substring(0, 50) + '...';
         }
@@ -209,13 +202,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
       }
 
-      // FIX: Clear inputs only AFTER success
       if (mounted) {
         _commentController.clear();
         _clearMedia();
         setState(() { 
           _predictedText = null; 
-          _isSending = false; // Unlock button
+          _isSending = false; 
         }); 
         FocusScope.of(context).unfocus();
       }
@@ -224,7 +216,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to post comment: $e')),
         );
-        setState(() { _isSending = false; }); // Unlock on error
+        setState(() { _isSending = false; }); 
       }
     }
   }
@@ -276,6 +268,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         isOwner: data['userId'] == _currentUser?.uid,
                         isClickable: false, 
                         isDetailView: true, 
+                        // 2. TERUSKAN ID AGAR ANIMASI HERO COCOK
+                        heroContextId: widget.heroContextId, 
                       );
                     },
                   ),
@@ -326,6 +320,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               commentData: data,
               postId: widget.postId, 
               isOwner: data['userId'] == _currentUser?.uid,
+              // Untuk komentar, kita pakai ID unik berdasarkan parent context
+              heroContextId: '${widget.heroContextId}_comments', 
             );
           },
         );
@@ -333,7 +329,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
-  // REDESIGNED: Modern Chat UI with Media Support
   Widget _buildCommentInput() {
     final theme = Theme.of(context);
     
@@ -358,7 +353,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // === AI PREDICTION SUGGESTION ===
           if (_predictedText != null)
             GestureDetector(
               onTap: _acceptPrediction,
@@ -391,7 +385,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ),
             ),
 
-          // === MEDIA PREVIEW (New Feature) ===
           if (_selectedMediaFile != null)
             Container(
               margin: EdgeInsets.only(bottom: 10),
@@ -421,11 +414,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ),
             ),
 
-          // === INPUT ROW ===
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // Media Button
               IconButton(
                 onPressed: () => _pickMedia(ImageSource.gallery),
                 icon: Icon(Icons.add_photo_alternate_outlined, color: TwitterTheme.blue),
@@ -433,12 +424,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 constraints: BoxConstraints(minWidth: 40, minHeight: 40),
               ),
               
-              // Text Field Area
               Expanded(
                 child: Container(
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    // Explicitly set the color to avoid transparency issues
                     color: theme.brightness == Brightness.dark 
                         ? TwitterTheme.darkGrey.withOpacity(0.2) 
                         : TwitterTheme.extraLightGrey,
@@ -450,8 +439,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     decoration: InputDecoration(
                       hintText: "Post your reply",
                       hintStyle: TextStyle(color: theme.hintColor),
-                      // Remove ALL default borders to prevent color inconsistency
-                      filled: false, // FIX: Disable default fill to avoid layering issues
+                      filled: false, 
                       border: InputBorder.none,
                       focusedBorder: InputBorder.none, 
                       enabledBorder: InputBorder.none,
@@ -468,7 +456,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               
               SizedBox(width: 8),
               
-              // Send Button (Distinct UI)
               _isSending 
                 ? Padding(
                     padding: const EdgeInsets.all(10.0),

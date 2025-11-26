@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/blog_post_card.dart';
-import '../create_post_screen.dart';
 import '../../main.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -26,7 +25,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   late Stream<QuerySnapshot> _postsStream;
   
-  // Keywords untuk "Keyword Extraction" & "Intelligent Querying"
   final List<String> _trendingKeywords = ['tech', 'flutter', 'coding', 'project', 'seminar'];
   final List<String> _personalKeywords = ['selamat pagi', 'morning', 'halo', 'hello', 'semangat'];
 
@@ -37,7 +35,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   }
 
   void _initStream() {
-    // Kita ambil 100 post terakhir untuk di-analisa oleh algoritma rekomendasi
     _postsStream = _firestore
         .collection('posts')
         .orderBy('timestamp', descending: true)
@@ -57,16 +54,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   @override
   bool get wantKeepAlive => true;
 
-  void _navigateToCreatePost() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (context) => CreatePostScreen(),
-      ),
-    );
-  }
-
-  // --- THE RECOMMENDATION ALGORITHM ---
   List<QueryDocumentSnapshot> _getRecommendedPosts(
     List<QueryDocumentSnapshot> allPosts, 
     Map<String, dynamic> userData
@@ -74,7 +61,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     final List<dynamic> following = userData['following'] ?? [];
     final String myUid = _auth.currentUser?.uid ?? '';
 
-    // Kita convert ke list of Map agar bisa menyisipkan 'score' sementara
     List<Map<String, dynamic>> scoredPosts = allPosts.map((doc) {
       final data = doc.data() as Map<String, dynamic>;
       double score = 0;
@@ -84,28 +70,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       final Timestamp? timestamp = data['timestamp'] as Timestamp?;
       final int likeCount = (data['likes'] as Map?)?.length ?? 0;
 
-      // 1. PRIORITY - Following Feed (+50 Points)
-      // Logic: Query the 'users' collection -> 'following' list.
-      if (following.contains(userId)) {
-        score += 50;
-      }
-
-      // 2. Analyze User Behavior (+Points per interaction)
-      // Logic: Track 'likes' (Jika user sudah like post ini, mungkin dia suka topiknya, atau justru bosan?
-      // Disini kita anggap jika like count tinggi (Trending), skor naik.
+      if (following.contains(userId)) score += 50;
       score += (likeCount * 0.5); 
 
-      // 3. Keyword Extraction (+10 Points)
-      // Logic: Extract tags/keywords (e.g., "tech", "flutter", "pnj").
       for (var keyword in _trendingKeywords) {
         if (text.contains(keyword)) {
           score += 10;
-          break; // Cukup sekali match
+          break;
         }
       }
 
-      // 5. Personalization (+15 Points)
-      // Logic: IF user likes "selamat pagi" posts -> Prioritize posts with "pagi", "morning".
       for (var keyword in _personalKeywords) {
         if (text.contains(keyword)) {
           score += 15;
@@ -113,30 +87,17 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         }
       }
 
-      // 4. Recency / Fallback (+Score based on freshness)
-      // Logic: Fallback Use "Random/Trending" but weighted by time.
       if (timestamp != null) {
         final hoursAgo = DateTime.now().difference(timestamp.toDate()).inHours;
-        // Semakin baru, semakin tinggi skor (max +20 poin untuk post < 1 jam)
-        // Post lama (24 jam) dapat +0.8 poin
         score += (20.0 / (hoursAgo + 1)); 
       }
 
-      // Own post penalty (optional, biar gak isinya post sendiri terus)
-      if (userId == myUid) {
-        score -= 5; 
-      }
+      if (userId == myUid) score -= 5; 
 
-      return {
-        'doc': doc,
-        'score': score,
-      };
+      return {'doc': doc, 'score': score};
     }).toList();
 
-    // SORTING: Highest score first
     scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
-
-    // Kembalikan List<QueryDocumentSnapshot> asli yang sudah diurutkan
     return scoredPosts.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
   }
 
@@ -148,14 +109,12 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     final double refreshIndicatorOffset = 120.0;
     final String? currentUserId = _auth.currentUser?.uid;
 
-    // Kita butuh Data User untuk tahu siapa yang di-follow
     return StreamBuilder<DocumentSnapshot>(
       stream: currentUserId != null 
           ? _firestore.collection('users').doc(currentUserId).snapshots() 
           : null,
       builder: (context, userSnapshot) {
         
-        // Default empty user data if loading
         Map<String, dynamic> userData = {};
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           userData = userSnapshot.data!.data() as Map<String, dynamic>;
@@ -166,20 +125,19 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
             StreamBuilder<QuerySnapshot>(
               stream: _postsStream,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                // FIX: Hanya loading jika data benar-benar kosong (mencegah flicker)
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                   return Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
                   return Center(child: Text('Error: ${snapshot.error}'));
                 }
 
-                List<QueryDocumentSnapshot> docs = snapshot.hasData ? snapshot.data!.docs : [];
+                List<QueryDocumentSnapshot> docs = snapshot.data?.docs ?? [];
                 
-                // --- APPLY ALGORITHM ---
                 if (widget.isRecommended && docs.isNotEmpty) {
                   docs = _getRecommendedPosts(docs, userData);
                 }
-                // -----------------------
 
                 return RefreshIndicator(
                   onRefresh: _handleRefresh,
@@ -187,6 +145,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   edgeOffset: refreshIndicatorOffset,
                   child: docs.isNotEmpty
                       ? ListView.builder(
+                          // PENTING: Key ini menjaga posisi scroll saat kembali dari full screen
+                          key: PageStorageKey('home_list_${widget.isRecommended ? 'rec' : 'recents'}'),
                           controller: widget.scrollController,
                           physics: const AlwaysScrollableScrollPhysics(),
                           padding: EdgeInsets.only(top: contentTopPadding, bottom: 100),
@@ -234,17 +194,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                         ),
                 );
               },
-            ),
-
-            // FIX: Always show FAB for posting, regardless of the tab (Requested Fix)
-            Positioned(
-              bottom: 16,
-              right: 16,
-              child: FloatingActionButton(
-                onPressed: _navigateToCreatePost,
-                tooltip: 'New Post',
-                child: const Icon(Icons.edit_outlined),
-              ),
             ),
           ],
         );

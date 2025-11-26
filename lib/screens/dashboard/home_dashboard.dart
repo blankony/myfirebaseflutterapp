@@ -1,7 +1,7 @@
 // ignore_for_file: prefer_const_constructors
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui'; 
+import 'dart:ui'; // Penting untuk ImageFilter
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,8 +13,10 @@ import 'home_page.dart';
 import 'ai_assistant_page.dart';
 import 'search_page.dart';
 import 'profile_tab_page.dart';
+import 'profile_page.dart'; 
+import '../create_post_screen.dart'; 
 import '../../main.dart'; 
-import '../../widgets/notification_sheet.dart';
+import 'package:timeago/timeago.dart' as timeago; 
 
 import 'dart:async'; 
 import '../../services/overlay_service.dart';
@@ -92,22 +94,15 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
       CurvedAnimation(parent: _entranceController, curve: Curves.easeOut),
     );
 
-    // Initial entrance animation for the Dashboard itself (Slide Up)
     _slideAnimation = Tween<Offset>(begin: const Offset(0.0, 0.1), end: Offset.zero).animate(
       CurvedAnimation(parent: _entranceController, curve: Curves.easeOutQuart),
     );
     
     _setupNotificationListener();
     
-    // Restore state after the first frame to ensure controllers are ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreState();
     });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
   }
 
   void _restoreState() {
@@ -148,7 +143,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     
     if (scroll0 != null || scroll1 != null) restoredAnyState = true;
 
-    // Fix for blinking: If state restored, snap to end. 
     if (restoredAnyState) {
       _entranceController.value = 1.0; 
     } else {
@@ -208,7 +202,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             () {
               doc.reference.update({'isRead': true});
               if (postId != null) {
-                 // Use _AnimatedRoute for smoother transitions
                  Navigator.push(context, _AnimatedRoute(page: PostDetailScreen(postId: postId)));
               } else if (type == 'follow') {
                 _onItemTapped(3); 
@@ -232,32 +225,42 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     super.dispose();
   }
 
-  void _showNotificationSheet() {
-    showModalBottomSheet(
+  void _showNotificationPopup() {
+    showGeneralDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.6,
-          minChildSize: 0.3,
-          maxChildSize: 0.9,
-          builder: (context, scrollController) {
-            return NotificationSheet(scrollController: scrollController);
-          },
+      barrierDismissible: true,
+      barrierLabel: 'Notifications',
+      barrierColor: Colors.black.withOpacity(0.4), 
+      transitionDuration: const Duration(milliseconds: 400),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return _NotificationBlurPopup();
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation, curve: Curves.easeOutQuart),
+          alignment: Alignment(0.9, -0.95),
+          child: FadeTransition(
+            opacity: animation,
+            child: child,
+          ),
         );
       },
+    );
+  }
+
+  void _navigateToCreatePost() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => CreatePostScreen(),
+      ),
     );
   }
 
   List<Widget> _appBarActions(BuildContext context) {
     switch (_selectedIndex) {
       case 0:
-        return [ _NotificationButton(onPressed: _showNotificationSheet) ];
+        return [ _NotificationButton(onPressed: _showNotificationPopup) ];
       case 1:
         return [
           PopupMenuButton<String>(
@@ -344,19 +347,18 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           onSearchPressed: () { setState(() { _isSearching = !_isSearching; }); },
         ),
       ),
-      KeepAlivePage(child: ProfileTabPage()),
+      // --- PERUBAHAN DI SINI: HAPUS KeepAlivePage ---
+      // ProfileTabPage sekarang akan di-reset setiap kali ditinggalkan
+      ProfileTabPage(), 
+      // ---------------------------------------------
     ];
 
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    // FIX: Improved Navbar Colors for Visibility
-    // Dark Mode: Deep Blue (0xFF15202B) with opacity for blur
-    // Light Mode: White with opacity
     final navBarBgColor = isDarkMode 
         ? Color(0xFF15202B).withOpacity(0.85) 
         : Colors.white.withOpacity(0.85);      
 
-    // Unselected icons: Bright White in Dark Mode, Dark Grey in Light Mode
     final inactiveIconColor = isDarkMode ? Colors.white : Colors.black54;
     final activeIconColor = TwitterTheme.blue;
 
@@ -406,6 +408,19 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           _onItemTapped(3);
         },
       ),
+      
+      floatingActionButton: (_selectedIndex == 1 || _selectedIndex == 2)
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 20.0), 
+              child: FloatingActionButton(
+                onPressed: _navigateToCreatePost,
+                backgroundColor: TwitterTheme.blue,
+                elevation: 4,
+                child: const Icon(Icons.edit_outlined, color: Colors.white),
+              ),
+            ),
+
       body: FadeTransition(
         opacity: _fadeAnimation,
         child: SlideTransition(
@@ -434,7 +449,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           ),
         ),
       ),
-      // FIX: Improved visibility for Bottom Navigation Bar with Acrylic Blur
       bottomNavigationBar: ClipRect(
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
@@ -446,7 +460,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             child: CustomAnimatedBottomBar(
               selectedIndex: _selectedIndex,
               onItemSelected: _onItemTapped,
-              backgroundColor: Colors.transparent, // Handled by Container above
+              backgroundColor: Colors.transparent, 
               items: <BottomNavyBarItem>[
                 BottomNavyBarItem(
                   icon: Icon(Icons.home),
@@ -481,15 +495,281 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 }
 
-// Helper class for automatic Fly-In animation from Right to Left
+class _NotificationBlurPopup extends StatefulWidget {
+  @override
+  State<_NotificationBlurPopup> createState() => _NotificationBlurPopupState();
+}
+
+class _NotificationBlurPopupState extends State<_NotificationBlurPopup> {
+  final User? _currentUser = FirebaseAuth.instance.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _markNotificationsAsRead();
+  }
+
+  Future<void> _markNotificationsAsRead() async {
+    if (_currentUser == null) return;
+    final notifQuery = FirebaseFirestore.instance
+        .collection('users')
+        .doc(_currentUser!.uid)
+        .collection('notifications')
+        .where('isRead', isEqualTo: false);
+    
+    final notifSnapshot = await notifQuery.get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in notifSnapshot.docs) {
+      batch.update(doc.reference, {'isRead': true});
+    }
+    await batch.commit();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final size = MediaQuery.of(context).size;
+
+    return Stack(
+      children: [
+        BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8.0, sigmaY: 8.0),
+          child: Container(
+            color: Colors.black.withOpacity(0.1), 
+          ),
+        ),
+        
+        Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: size.width * 0.9,
+              height: size.height * 0.7, 
+              decoration: BoxDecoration(
+                color: theme.scaffoldBackgroundColor, 
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 20,
+                    offset: Offset(0, 10),
+                  ),
+                ],
+                border: Border.all(color: theme.dividerColor.withOpacity(0.5)),
+              ),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "Notifications",
+                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1),
+                  
+                  Expanded(
+                    child: _currentUser == null
+                        ? Center(child: Text("Please log in."))
+                        : StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(_currentUser!.uid)
+                                .collection('notifications')
+                                .orderBy('timestamp', descending: true) 
+                                .limit(50) 
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              if (!snapshot.hasData) {
+                                return Center(child: CircularProgressIndicator());
+                              }
+                              if (snapshot.data!.docs.isEmpty) {
+                                return Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.notifications_off_outlined, size: 60, color: Colors.grey),
+                                        SizedBox(height: 16),
+                                        Text("No notifications yet.", style: TextStyle(color: Colors.grey)),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              return ListView.separated(
+                                padding: EdgeInsets.zero,
+                                itemCount: snapshot.data!.docs.length,
+                                separatorBuilder: (context, index) => Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                                  return _NotificationTile(notificationData: data);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _NotificationTile extends StatelessWidget {
+  final Map<String, dynamic> notificationData;
+  const _NotificationTile({required this.notificationData});
+
+  Future<DocumentSnapshot> _getSenderData(String senderId) {
+    return FirebaseFirestore.instance.collection('users').doc(senderId).get();
+  }
+
+  void _navigateToNotification(BuildContext context) {
+    final String type = notificationData['type'];
+    Navigator.of(context).pop(); 
+
+    if (type == 'follow') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ProfilePage(userId: notificationData['senderId'], includeScaffold: true), 
+      ));
+    } else if (type == 'like' || type == 'repost' || type == 'comment') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PostDetailScreen(postId: notificationData['postId']),
+      ));
+    }
+  }
+
+  String _formatTimestamp(Timestamp? timestamp) {
+    if (timestamp == null) return "just now";
+    return timeago.format(timestamp.toDate(), locale: 'en_short');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String type = notificationData['type'];
+    final String senderId = notificationData['senderId'];
+    final Timestamp? timestamp = notificationData['timestamp'];
+    
+    IconData iconData;
+    Color iconColor;
+
+    switch (type) {
+      case 'follow':
+        iconData = Icons.person_add;
+        iconColor = TwitterTheme.blue;
+        break;
+      case 'like':
+        iconData = Icons.favorite;
+        iconColor = Colors.pink;
+        break;
+      case 'repost':
+        iconData = Icons.repeat;
+        iconColor = Colors.green;
+        break;
+      case 'comment':
+        iconData = Icons.chat_bubble;
+        iconColor = Colors.grey; 
+        break;
+      default:
+        iconData = Icons.notifications;
+        iconColor = Colors.grey;
+    }
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: _getSenderData(senderId),
+      builder: (context, userSnapshot) {
+        String senderName = 'Someone';
+        String senderInitial = 'S';
+        String? senderImageUrl; 
+        
+        if (userSnapshot.hasData && userSnapshot.data!.exists) {
+          final data = userSnapshot.data!.data() as Map<String, dynamic>;
+          senderName = data['name'] ?? 'Anonymous';
+          senderImageUrl = data['profileImageUrl']; 
+          if (senderName.isNotEmpty) senderInitial = senderName[0].toUpperCase();
+        }
+        
+        String title = '';
+        String subtitle = '';
+
+        if(type == 'follow') {
+          title = '$senderName started following you';
+        } else if (type == 'like') {
+          title = '$senderName liked your post';
+          subtitle = notificationData['postTextSnippet'] ?? '';
+        } else if (type == 'repost') {
+          title = '$senderName reposted your post';
+          subtitle = notificationData['postTextSnippet'] ?? '';
+        } else if (type == 'comment') {
+          title = '$senderName replied to your post';
+          subtitle = notificationData['postTextSnippet'] ?? '';
+        }
+        
+        Widget senderAvatar;
+        if (senderImageUrl != null && senderImageUrl.isNotEmpty) {
+           senderAvatar = CircleAvatar(
+            backgroundImage: CachedNetworkImageProvider(senderImageUrl),
+            backgroundColor: Colors.grey, 
+          );
+        } else {
+           senderAvatar = CircleAvatar(child: Text(senderInitial));
+        }
+
+        return ListTile(
+          leading: Stack(
+            children: [
+              senderAvatar, 
+              Positioned(
+                bottom: 0, right: 0,
+                child: Container(
+                  padding: EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: iconColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)
+                  ),
+                  child: Icon(iconData, size: 12, color: Colors.white),
+                ),
+              )
+            ],
+          ),
+          title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          subtitle: Text(
+            subtitle.isNotEmpty ? '$subtitle\n${_formatTimestamp(timestamp)}' : _formatTimestamp(timestamp),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12),
+          ),
+          isThreeLine: subtitle.isNotEmpty,
+          onTap: () => _navigateToNotification(context),
+        );
+      },
+    );
+  }
+}
+
 class _AnimatedRoute extends PageRouteBuilder {
   final Widget page;
   _AnimatedRoute({required this.page})
       : super(
           pageBuilder: (context, animation, secondaryAnimation) => page,
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0); // Start from Right
-            const end = Offset.zero;        // End at Center
+            const begin = Offset(1.0, 0.0); 
+            const end = Offset.zero;        
             const curve = Curves.easeOutQuart;
             var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
             return SlideTransition(position: animation.drive(tween), child: child);
@@ -716,7 +996,6 @@ class _ItemWidget extends StatelessWidget {
         duration: animationDuration,
         curve: curve,
         decoration: BoxDecoration(
-          // Highlight logic: Use lighter version of active color for background
           color: isSelected 
               ? item.activeColor.withOpacity(0.15) 
               : (backgroundColor ?? Colors.transparent),

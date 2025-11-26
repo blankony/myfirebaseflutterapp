@@ -10,7 +10,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
-import 'settings_page.dart'; // Import SettingsPage for navigation
+import 'settings_page.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -44,12 +44,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     super.initState();
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
-    // Explicitly starting at index 0
+    
+    // Inisialisasi normal (index 0 = Posts)
     _tabController = TabController(length: 3, vsync: this, initialIndex: 0);
     
     _scrollController.addListener(_scrollListener);
   }
   
+  // Hapus fungsi _resetTabController yang lama (Nuclear Reset) karena bisa bikin glitch
+
   void _scrollListener() {
     if (_scrollController.hasClients) {
       final bool scrolled = _scrollController.offset > 100;
@@ -62,8 +65,19 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Future<void> _handleRefresh() async {
+    // 1. Scroll ke paling atas dulu agar NestedScrollView tidak bingung
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+
+    // 2. Tunggu sebentar (simulasi network)
     await Future.delayed(Duration(seconds: 1));
+    
     if (mounted) {
+      // 3. Pindahkan ke Tab 0 (Posts) dengan aman
+      if (_tabController.index != 0) {
+        _tabController.animateTo(0);
+      }
       setState(() {});
     }
   }
@@ -105,7 +119,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // UPDATED: Logout Function for the menu
   Future<void> _signOut(BuildContext context) async {
     final didConfirm = await showDialog<bool>(
       context: context,
@@ -124,60 +137,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       if (context.mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
-    }
-  }
-
-  // MODIFIED: Updated Options Menu
-  void _showMoreOptions(BuildContext context, String name, bool isMyProfile) {
-    // If my profile -> PopupMenu with Share, Settings, Logout
-    if (isMyProfile) {
-      final theme = Theme.of(context);
-      showModalBottomSheet(
-        context: context,
-        builder: (context) {
-          return SafeArea(
-            child: Wrap(
-              children: [
-                ListTile(
-                  leading: Icon(Icons.share_outlined),
-                  title: Text('Share Profile'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _shareProfile(name);
-                  },
-                ),
-                ListTile(
-                  leading: Icon(Icons.settings_outlined),
-                  title: Text('Settings'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
-                  },
-                ),
-                ListTile(
-                  leading: Icon(Icons.logout, color: Colors.red),
-                  title: Text('Logout', style: TextStyle(color: Colors.red)),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _signOut(context);
-                  },
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    } else {
-      // If other profile -> Dropdown (Popup) Menu
-      final RenderBox button = context.findRenderObject() as RenderBox;
-      final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-      final RelativeRect position = RelativeRect.fromRect(
-        Rect.fromPoints(
-          button.localToGlobal(Offset.zero, ancestor: overlay),
-          button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
-        ),
-        Offset.zero & overlay.size,
-      );
     }
   }
 
@@ -210,8 +169,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       notificationPredicate: (notification) {
         return notification.depth == 0; 
       },
-      // REMOVED: DefaultTabController. It is redundant and can cause state conflicts
-      // since we are using a manual _tabController.
       child: NestedScrollView(
         controller: _scrollController,
         headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -249,7 +206,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   ),
                   centerTitle: false,
                   actions: [
-                    // MODIFIED: Using PopupMenuButton for both cases to satisfy "drop down menu" request
                     PopupMenuButton<String>(
                       icon: Icon(Icons.more_vert, color: iconColor),
                       onSelected: (value) {
@@ -351,8 +307,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String email = data['email'] ?? '';
     final String nim = data['nim'] ?? '';
     final String bio = data['bio'] ?? '';
-    final String? departmentCode = data['departmentCode']; // e.g., "TE-BM"
-    // Pass full names for the popup info
+    final String? departmentCode = data['departmentCode']; 
     final String? departmentName = data['department'];
     final String? studyProgramName = data['studyProgram'];
     
@@ -401,7 +356,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 ),
               ),
 
-              // MODIFIED: Badge is now here, next to the action button
               Positioned(
                 top: bannerHeight + 16,
                 right: 16,
@@ -410,15 +364,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   children: [
                     if (departmentCode != null) ...[
                       _buildDepartmentBadge(departmentCode, departmentName, studyProgramName),
-                      SizedBox(width: 12), // Spacing between badge and button
+                      SizedBox(width: 12), 
                     ],
                     isMyProfile
                         ? OutlinedButton(
                             onPressed: () async {
-                              await Navigator.of(context).push(
+                              final result = await Navigator.of(context).push(
                                 MaterialPageRoute(builder: (context) => EditProfileScreen()),
                               );
-                              if (mounted) setState(() {});
+                              
+                              if (mounted) {
+                                if (result == true) {
+                                  // Logika pindah ke tab 0 setelah save edit
+                                  _tabController.animateTo(0); 
+                                }
+                                setState(() {});
+                              }
                             },
                             style: OutlinedButton.styleFrom(
                               foregroundColor: theme.textTheme.bodyLarge?.color,
@@ -441,9 +402,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // MODIFIED: Removed badge from here, kept only name
               Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22)),
-              
               Text("@${email.split('@')[0]}", style: theme.textTheme.titleSmall),
               SizedBox(height: 4),
               Text(nim, style: theme.textTheme.titleSmall),
@@ -519,30 +478,26 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // NEW: Two-part Badge Builder for Department Codes with Interaction
   Widget _buildDepartmentBadge(String code, String? fullDeptName, String? fullProdiName) {
     final parts = code.split('-');
     if (parts.length < 2) return SizedBox.shrink();
 
-    final dept = parts[0]; // e.g., "TE"
-    final prodi = parts[1]; // e.g., "BM"
+    final dept = parts[0]; 
+    final prodi = parts[1]; 
     
     Color deptColor;
     if (dept.toUpperCase() == 'TE') {
-       deptColor = Color(0xFF00008B); // Dark Blue for TE
+       deptColor = Color(0xFF00008B); 
     } else if (dept.toUpperCase() == 'TS') {
-       deptColor = Color(0xFF5D4037); // Dark Creamy Brown for TS
+       deptColor = Color(0xFF5D4037); 
     } else {
-       // Placeholder random color based on hash to keep it consistent
        deptColor = Colors.primaries[dept.hashCode.abs() % Colors.primaries.length];
     }
     
-    // NEW: Specific color logic for Prodi
     Color prodiColor;
     if (prodi.toUpperCase() == 'BM') {
-      prodiColor = Colors.orange; // Fixed orange for BM
+      prodiColor = Colors.orange; 
     } else {
-      // Random consistent color for other Prodis based on hash
       prodiColor = Colors.primaries[prodi.hashCode.abs() % Colors.primaries.length];
     }
 
@@ -555,7 +510,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Department Badge
           Container(
             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
@@ -564,8 +518,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ),
             child: Text(dept, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
           ),
-          SizedBox(width: 4), // Small gap between badges
-          // Study Program Badge
+          SizedBox(width: 4), 
           Container(
             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
@@ -636,21 +589,27 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('posts').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-        if (snapshot.data!.docs.isEmpty) return Center(child: Text('No posts yet.'));
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          return Center(child: CircularProgressIndicator());
+        }
+        
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) return Center(child: Text('No posts yet.'));
 
         return ListView.builder(
+          key: const PageStorageKey('profile_posts_list'),
           padding: const EdgeInsets.only(bottom: 100), 
           physics: const NeverScrollableScrollPhysics(),
           shrinkWrap: true,
-          itemCount: snapshot.data!.docs.length,
+          itemCount: docs.length,
           itemBuilder: (context, index) {
-            final doc = snapshot.data!.docs[index];
+            final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
             return BlogPostCard(
               postId: doc.id,
               postData: data,
               isOwner: data['userId'] == _auth.currentUser?.uid,
+              heroContextId: 'profile_posts', 
             );
           },
         );
@@ -662,16 +621,21 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collectionGroup('comments').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-        if (snapshot.data!.docs.isEmpty) return Center(child: Text('No replies yet.'));
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          return Center(child: CircularProgressIndicator());
+        }
+        
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) return Center(child: Text('No replies yet.'));
 
         return ListView.builder(
+          key: const PageStorageKey('profile_replies_list'),
           padding: const EdgeInsets.only(bottom: 100),
           physics: const NeverScrollableScrollPhysics(),
           shrinkWrap: true,
-          itemCount: snapshot.data!.docs.length,
+          itemCount: docs.length,
           itemBuilder: (context, index) {
-            final doc = snapshot.data!.docs[index];
+            final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
             final String originalPostId = doc.reference.parent.parent!.id;
 
@@ -681,6 +645,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               postId: originalPostId,
               isOwner: true,
               showPostContext: true,
+              heroContextId: 'profile_replies', 
             );
           },
         );
@@ -690,26 +655,30 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   Widget _buildMyReposts(String userId) {
     return CustomScrollView(
-      key: PageStorageKey('reposts_tab'),
+      key: const PageStorageKey('profile_reposts_list'),
       slivers: [
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
-            if (!snapshot.hasData) return SliverToBoxAdapter(child: SizedBox(height: 50, child: Center(child: CircularProgressIndicator())));
-            if (snapshot.data!.docs.isEmpty) return SliverToBoxAdapter(child: SizedBox.shrink());
+            if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+              return SliverToBoxAdapter(child: SizedBox(height: 50, child: Center(child: CircularProgressIndicator())));
+            }
+            final docs = snapshot.data?.docs ?? [];
+            if (docs.isEmpty) return SliverToBoxAdapter(child: SizedBox.shrink());
 
             return SliverList(
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
-                  final doc = snapshot.data!.docs[index];
+                  final doc = docs[index];
                   final data = doc.data() as Map<String, dynamic>;
                   return BlogPostCard(
                     postId: doc.id,
                     postData: data,
                     isOwner: data['userId'] == _auth.currentUser?.uid,
+                    heroContextId: 'profile_reposts', 
                   );
                 },
-                childCount: snapshot.data!.docs.length,
+                childCount: docs.length,
               ),
             );
           },
@@ -717,13 +686,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collectionGroup('comments').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
-            if (!snapshot.hasData) return SliverToBoxAdapter(child: SizedBox.shrink());
-            if (snapshot.data!.docs.isEmpty) return SliverToBoxAdapter(child: SizedBox.shrink());
+            if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+               return SliverToBoxAdapter(child: SizedBox.shrink());
+            }
+            final docs = snapshot.data?.docs ?? [];
+            if (docs.isEmpty) return SliverToBoxAdapter(child: SizedBox.shrink());
 
             return SliverList(
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
-                  final doc = snapshot.data!.docs[index];
+                  final doc = docs[index];
                   final data = doc.data() as Map<String, dynamic>;
                   final String originalPostId = doc.reference.parent.parent!.id;
                   
@@ -733,9 +705,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     postId: originalPostId,
                     isOwner: data['userId'] == _auth.currentUser?.uid,
                     showPostContext: true,
+                    heroContextId: 'profile_reposts', 
                   );
                 },
-                childCount: snapshot.data!.docs.length,
+                childCount: docs.length,
               ),
             );
           },
