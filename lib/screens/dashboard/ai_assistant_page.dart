@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:firebase_auth/firebase_auth.dart';     // PENTING
-import 'package:cloud_firestore/cloud_firestore.dart'; // PENTING
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../main.dart';
 import 'home_dashboard.dart'; // Akses aiPageEventBus
 
@@ -30,31 +30,17 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   late GenerativeModel _model;
   late ChatSession _chatSession;
 
-  // Persona
+  // Persona & Instruksi Dasar
   final Content _systemInstruction = Content.system("""
-      Kamu adalah asisten virtual cerdas untuk aplikasi media sosial bernama "Sapa PNJ" (Sarana Pengguna Aplikasi Politeknik Negeri Jakarta).
+      Kamu adalah asisten virtual cerdas untuk aplikasi "Sapa PNJ" (Politeknik Negeri Jakarta).
       
-      IDENTITAS KAMU:
-      - Nama: Sapa PNJ Assistant.
-      - Pembuat: Tim Pengembang Sapa PNJ (Arnold Holyridho R. dan Arya Setiawan), bukan Google.
-      - Afiliasi: Politeknik Negeri Jakarta (PNJ).
+      Gaya Bicara:
+      - Santai, gaul khas mahasiswa, tapi tetap sopan.
+      - Gunakan "lo/gue" atau "aku/kamu" tergantung lawan bicara.
+      - Jika user bertanya tentang hal sebelumnya, GUNAKAN INGATANMU dari history chat.
       
-      KONTEKS KALENDER AKADEMIK PNJ (Tahun 2025/2026):
-      1. Semester Ganjil (2025/2026):
-         - Awal Perkuliahan: 25 Agustus 2025.
-         - UTS: 13 - 17 Oktober 2025.
-         - UAS: 15 - 19 Desember 2025.
-         - Libur Semester: 26 Januari - 06 Februari 2026.
-
-      2. Semester Genap (2025/2026):
-         - Awal Perkuliahan: 09 Februari 2026.
-         - UTS: 30 Maret - 06 April 2026.
-         - UAS: 02 - 08 Juni 2026.
-         - Libur Semester: 26 Juni - 21 Agustus 2026.
-
-      ATURAN PENTING:
-      1. Jawab ramah khas mahasiswa.
-      2. Jangan mengaku sebagai Gemini.
+      KONTEKS (PENTING):
+      - Kamu memiliki ingatan atas percakapan ini. Jika user bertanya "Tadi aku bilang apa?", jawablah berdasarkan history pesan sebelumnya.
     """);
 
   @override
@@ -62,7 +48,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     super.initState();
     _initModel();
 
-    // LISTEN EVENT DARI DRAWER
+    // LISTEN EVENT DARI DRAWER (History Panel)
     _eventBusSubscription = aiPageEventBus.stream.listen((event) {
       if (event.type == AiEventType.newChat) {
         _startNewChat();
@@ -86,23 +72,24 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         apiKey: _apiKey,
         systemInstruction: _systemInstruction,
       );
+      // Mulai chat kosong dulu
       _chatSession = _model.startChat();
     } catch (e) {
       print('Model Error: $e');
     }
   }
 
-  // === FUNGSI LOGIKA BARU ===
-
   void _startNewChat() {
     setState(() {
       _messages.clear();
       _currentSessionId = null;
       _isTyping = false;
+      // Reset memori AI
       _chatSession = _model.startChat();
     });
   }
 
+  // === BAGIAN PENTING: MEMUAT MEMORI DARI DATABASE ===
   Future<void> _loadChatSession(String sessionId) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -114,37 +101,67 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     });
 
     try {
+      // 1. Ambil data dari Firestore (Diurutkan dari yang terlama ke terbaru)
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection('chat_sessions')
           .doc(sessionId)
           .collection('messages')
-          .orderBy('timestamp', descending: false)
+          .orderBy('timestamp', descending: false) // PENTING: Ascending agar urutan benar
           .get();
 
       final List<ChatMessage> loadedUiMessages = [];
       final List<Content> geminiHistory = [];
 
+      // Variabel bantu untuk merapikan history (Mencegah role ganda berturut-turut)
+      String? lastRole;
+      List<Part> bufferParts = [];
+
       for (var doc in snapshot.docs) {
         final data = doc.data();
         final text = data['text'] ?? '';
         final isUser = data['isUser'] ?? true;
-        
+        final String currentRole = isUser ? 'user' : 'model';
+
+        // Masukkan ke UI (Tampilan Chat Bubble)
         loadedUiMessages.add(ChatMessage(
           text: text,
           isUser: isUser,
           timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         ));
 
-        // Format history untuk Gemini agar konteks nyambung
-        geminiHistory.add(Content(isUser ? 'user' : 'model', [TextPart(text)]));
+        // --- LOGIKA MEMORI AI ---
+        // Gemini akan error jika urutannya: User -> User. Harus: User -> Model -> User.
+        // Jadi kita gabungkan jika ada role yang sama berturut-turut.
+        
+        if (lastRole == null) {
+          // Pesan pertama
+          lastRole = currentRole;
+          bufferParts.add(TextPart(text));
+        } else if (lastRole == currentRole) {
+          // Role sama dengan sebelumnya? Gabungkan teksnya.
+          bufferParts.add(TextPart("\n\n$text")); 
+        } else {
+          // Role berubah? Simpan buffer sebelumnya ke history, mulai buffer baru.
+          geminiHistory.add(Content(lastRole, [...bufferParts]));
+          
+          lastRole = currentRole;
+          bufferParts = [TextPart(text)]; // Reset buffer dengan pesan baru
+        }
+      }
+
+      // Jangan lupa masukkan buffer terakhir yang tersisa
+      if (lastRole != null && bufferParts.isNotEmpty) {
+        geminiHistory.add(Content(lastRole, bufferParts));
       }
 
       setState(() {
         _messages.addAll(loadedUiMessages);
         _isLoadingHistory = false;
-        // Restore session Gemini dengan history
+        
+        // 2. INJEKSI MEMORI KE GEMINI
+        // Di sinilah AI "ingat" percakapan sebelumnya
         _chatSession = _model.startChat(history: geminiHistory);
       });
 
@@ -161,7 +178,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
 
     final user = FirebaseAuth.instance.currentUser;
 
-    // 1. Tambah User Message ke UI
+    // UI Update (User)
     setState(() {
       _messages.add(ChatMessage(
         text: text,
@@ -172,18 +189,18 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     });
     _scrollToBottom();
 
-    // 2. Simpan User Message ke Firestore
+    // Save (User)
     if (user != null) {
       await _saveMessageToFirestore(user.uid, text, true);
     }
 
     try {
-      // 3. Kirim ke Gemini
+      // Kirim ke Gemini (Dia otomatis baca history dari _chatSession)
       final response = await _chatSession.sendMessage(Content.text(text));
-      final aiText = response.text ?? "Maaf, saya tidak dapat menjawab saat ini.";
+      final aiText = response.text ?? "Maaf, saya tidak mengerti.";
 
       if (mounted) {
-        // 4. Tambah AI Message ke UI
+        // UI Update (AI)
         setState(() {
           _isTyping = false;
           _messages.add(ChatMessage(
@@ -194,7 +211,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         });
         _scrollToBottom();
 
-        // 5. Simpan AI Message ke Firestore
+        // Save (AI)
         if (user != null) {
           await _saveMessageToFirestore(user.uid, aiText, false);
         }
@@ -203,8 +220,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       if (mounted) {
         setState(() {
           _isTyping = false;
+          // Tampilkan error di chat bubble tapi jangan simpan ke DB
           _messages.add(ChatMessage(
-            text: "Error: $e (Cek koneksi atau kuota API)",
+            text: "Error: $e",
             isUser: false,
             timestamp: DateTime.now(),
           ));
@@ -217,12 +235,11 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   Future<void> _saveMessageToFirestore(String uid, String text, bool isUser) async {
     final sessionsRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('chat_sessions');
 
-    // Buat Session baru jika belum ada
+    // Jika belum ada sesi aktif, buat baru
     if (_currentSessionId == null) {
-      // Judul otomatis dari pesan pertama (max 30 char)
       String title = text.replaceAll('\n', ' ');
       if (title.length > 30) title = "${title.substring(0, 30)}...";
-      if (!isUser) title = "New Chat"; 
+      if (!isUser) title = "Chat Baru"; 
 
       final newSession = await sessionsRef.add({
         'title': title,
@@ -231,7 +248,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       });
       _currentSessionId = newSession.id;
     } else {
-      // Update waktu terakhir sesi
+      // Update waktu terakhir
       sessionsRef.doc(_currentSessionId).update({
         'lastUpdated': FieldValue.serverTimestamp(),
       });
@@ -261,7 +278,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // Tampilan Loading saat memuat history
     if (_isLoadingHistory) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -330,11 +346,11 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.school, size: 60, color: TwitterTheme.blue.withOpacity(0.5)),
+            // Logo PNJ atau Robot
+            Image.asset('images/app_icon.png', height: 60, color: TwitterTheme.blue.withOpacity(0.8)), 
             const SizedBox(height: 16),
             Text(
-              "Halo! Saya Asisten Sapa PNJ.\nSilakan tanya jadwal atau info kampus.",
-              textAlign: TextAlign.center,
+              "Sapa PNJ Assistant",
               style: theme.textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
@@ -342,7 +358,8 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              "Tips: Geser dari kanan layar untuk lihat History.",
+              "Siap membantu! Tanya jadwal, info kampus, atau curhat kuliah.",
+              textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
             ),
           ],
@@ -354,7 +371,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   Widget _buildChatList() {
     return ListView.builder(
       controller: _scrollController,
-      padding: const EdgeInsets.fromLTRB(16, 100, 16, 16), // Top padding for AppBar
+      padding: const EdgeInsets.fromLTRB(16, 100, 16, 16), 
       itemCount: _messages.length + (_isTyping ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _messages.length) {
