@@ -1,13 +1,13 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:async'; 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cached_network_image/cached_network_image.dart'; 
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../widgets/blog_post_card.dart';
-import '../../main.dart'; 
-import 'profile_page.dart'; 
-import '../../services/prediction_service.dart'; 
+import '../../main.dart';
+import 'profile_page.dart';
+import '../../services/prediction_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -15,7 +15,7 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 class SearchPage extends StatefulWidget {
   final bool isSearching;
   final VoidCallback onSearchPressed;
-  final VoidCallback? onNavigateToRecommended; 
+  final VoidCallback? onNavigateToRecommended;
 
   const SearchPage({
     Key? key,
@@ -31,12 +31,12 @@ class SearchPage extends StatefulWidget {
 class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-  final PredictionService _predictionService = PredictionService(); 
+  final PredictionService _predictionService = PredictionService();
   
   late TabController _tabController;
   
   String _searchText = '';
-  String? _searchSuggestion; 
+  String? _searchSuggestion;
   Timer? _debounce;
   
   // State for Trending
@@ -79,7 +79,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   void _onSearchChanged(String value) {
     setState(() {
       _searchText = value.toLowerCase().trim();
-      _searchSuggestion = null; 
+      _searchSuggestion = null;
     });
 
     if (_debounce?.isActive ?? false) _debounce!.cancel();
@@ -100,7 +100,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   void _applySuggestion() {
     if (_searchSuggestion != null) {
       _searchController.text = _searchSuggestion!;
-      _onSearchChanged(_searchSuggestion!); 
+      _onSearchChanged(_searchSuggestion!);
       FocusScope.of(context).unfocus();
     }
   }
@@ -547,61 +547,44 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
 
             // --- PEOPLE YOU MIGHT KNOW SECTION ---
+            // FIXED: Replaced duplicate "Discover" section with actual User Recommendations
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  Icon(Icons.explore_outlined, color: Colors.purple),
+                  Icon(Icons.person_add_alt_1_outlined, color: Colors.blueAccent),
                   SizedBox(width: 8),
                   Text(
-                    "Discover For You",
+                    "People You Might Know",
                     style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
                   ),
                 ],
               ),
             ),
 
-            StreamBuilder<DocumentSnapshot>(
-              stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
-              builder: (context, userSnapshot) {
-                Map<String, dynamic> userProfile = {};
-                if (userSnapshot.hasData && userSnapshot.data!.exists) {
-                  userProfile = userSnapshot.data!.data() as Map<String, dynamic>;
+            FutureBuilder<List<DocumentSnapshot>>(
+              future: _getSuggestedUsers(user?.uid),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
                 }
-
-                return StreamBuilder<QuerySnapshot>(
-                  stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-                    
-                    final discoverDocs = _predictionService.getPersonalizedRecommendations(
-                      snapshot.data!.docs, 
-                      userProfile, 
-                      user?.uid ?? ''
+                
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text("No suggestions available right now."),
+                  );
+                }
+                
+                return Column(
+                  children: snapshot.data!.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return _UserSearchTile(
+                      userId: doc.id,
+                      userData: data,
+                      currentUserId: user?.uid,
                     );
-
-                    if (discoverDocs.isEmpty) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
-                        child: Center(child: Text("No new recommendations. Interact more to personalize!")),
-                      );
-                    }
-
-                    // FIX: Use Column instead of ListView to have more control over spacing
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: discoverDocs.map((doc) {
-                        final data = doc.data() as Map<String, dynamic>;
-                        
-                        return BlogPostCard(
-                          postId: doc.id,
-                          postData: data,
-                          isOwner: false,
-                          heroContextId: 'discover',
-                        );
-                      }).toList(),
-                    );
-                  },
+                  }).toList(),
                 );
               }
             ),
