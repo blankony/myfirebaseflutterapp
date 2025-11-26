@@ -29,8 +29,6 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-// CRITICAL FIX: Remove AutomaticKeepAliveClientMixin if it exists
-// and DO NOT implement RestorationMixin - this prevents state restoration
 class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
   late TabController _tabController;
   final ScrollController _scrollController = ScrollController();
@@ -40,6 +38,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   bool _isScrolled = false;
   bool _isBioExpanded = false;
+  int _targetTabIndex = 0;
 
   @override
   void initState() {
@@ -47,59 +46,24 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
     
-    // CRITICAL FIX: Create TabController and immediately lock it to index 0
     _tabController = TabController(
       length: 3, 
       vsync: this, 
       initialIndex: 0,
     );
     
-    // CRITICAL FIX: Add listener to prevent ANY programmatic changes
-    _tabController.addListener(() {
-      // If somehow the index changes during init, force it back
-      if (!_tabController.indexIsChanging && _tabController.index != _targetTabIndex) {
-        // This will be our controlled index
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _tabController.index = _targetTabIndex;
-          }
-        });
-      }
-    });
-    
     _scrollController.addListener(_scrollListener);
   }
   
-  // CRITICAL FIX: Track what tab we WANT to be on
-  int _targetTabIndex = 0;
-  
   void _scrollListener() {
     if (_scrollController.hasClients) {
+      // Mengubah state opacity judul AppBar saat di-scroll
       final bool scrolled = _scrollController.offset > 100;
       if (scrolled != _isScrolled) {
         setState(() {
           _isScrolled = scrolled;
         });
       }
-    }
-  }
-
-  Future<void> _handleRefresh() async {
-    // Scroll to top
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    }
-
-    // Simulate network delay
-    await Future.delayed(Duration(seconds: 1));
-    
-    if (mounted) {
-      // Return to Posts tab on refresh
-      _targetTabIndex = 0;
-      if (_tabController.index != 0) {
-        _tabController.animateTo(0);
-      }
-      setState(() {});
     }
   }
 
@@ -185,144 +149,140 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
 
-    Widget content = RefreshIndicator(
-      onRefresh: _handleRefresh,
-      notificationPredicate: (notification) {
-        return notification.depth == 0; 
-      },
-      child: NestedScrollView(
-        controller: _scrollController,
-        // CRITICAL FIX: Disable automatic state restoration for NestedScrollView
-        key: ValueKey('profile_nested_scroll_${_userId}_${DateTime.now().millisecondsSinceEpoch}'),
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            StreamBuilder<DocumentSnapshot>(
+    Widget content = NestedScrollView(
+      controller: _scrollController,
+      // FIX DI SINI: Gunakan Key statis atau PageStorageKey, JANGAN DateTime.now()
+      key: PageStorageKey('profile_nested_scroll_$_userId'), 
+      physics: AlwaysScrollableScrollPhysics(),
+      headerSliverBuilder: (context, innerBoxIsScrolled) {
+        return [
+          StreamBuilder<DocumentSnapshot>(
+            stream: _firestore.collection('users').doc(_userId).snapshots(),
+            builder: (context, snapshot) {
+              final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+              final String name = data['name'] ?? '';
+              final bool isMyProfile = _user?.uid == _userId;
+              
+              final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
+              final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
+              final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
+
+              return SliverAppBar(
+                pinned: true,
+                elevation: 0,
+                backgroundColor: appBarBgColor, 
+                systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+                automaticallyImplyLeading: widget.includeScaffold,
+                iconTheme: IconThemeData(
+                  color: iconColor, 
+                ),
+                // Judul hanya muncul saat di-scroll
+                title: AnimatedOpacity(
+                  opacity: _isScrolled ? 1.0 : 0.0,
+                  duration: Duration(milliseconds: 200),
+                  child: Text(
+                    name, 
+                    style: TextStyle(
+                      color: titleColor,
+                      fontWeight: FontWeight.bold
+                    )
+                  ),
+                ),
+                centerTitle: false,
+                actions: [
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert, color: iconColor),
+                    onSelected: (value) {
+                      if (value == 'share') _shareProfile(name);
+                      if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
+                      if (value == 'logout') _signOut(context);
+                      if (value == 'block') _blockUser(name);
+                    },
+                    itemBuilder: (BuildContext context) {
+                      if (isMyProfile) {
+                        return [
+                          PopupMenuItem(
+                            value: 'share',
+                            child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
+                          ),
+                          PopupMenuItem(
+                            value: 'settings',
+                            child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
+                          ),
+                          PopupMenuItem(
+                            value: 'logout',
+                            child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
+                          ),
+                        ];
+                      } else {
+                        return [
+                          PopupMenuItem(
+                            value: 'share',
+                            child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
+                          ),
+                          PopupMenuItem(
+                            value: 'block',
+                            child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
+                          ),
+                        ];
+                      }
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+
+          SliverToBoxAdapter(
+            child: StreamBuilder<DocumentSnapshot>(
               stream: _firestore.collection('users').doc(_userId).snapshots(),
               builder: (context, snapshot) {
-                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-                final String name = data['name'] ?? '';
+                if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+                
+                final data = snapshot.data!.data() as Map<String, dynamic>;
                 final bool isMyProfile = _user?.uid == _userId;
                 
-                final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
-                final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
-                final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
-
-                return SliverAppBar(
-                  pinned: true,
-                  elevation: 0,
-                  backgroundColor: appBarBgColor, 
-                  systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-                  automaticallyImplyLeading: widget.includeScaffold,
-                  iconTheme: IconThemeData(
-                    color: iconColor, 
-                  ),
-                  title: AnimatedOpacity(
-                    opacity: _isScrolled ? 1.0 : 0.0,
-                    duration: Duration(milliseconds: 200),
-                    child: Text(
-                      name, 
-                      style: TextStyle(
-                        color: titleColor,
-                        fontWeight: FontWeight.bold
-                      )
-                    ),
-                  ),
-                  centerTitle: false,
-                  actions: [
-                    PopupMenuButton<String>(
-                      icon: Icon(Icons.more_vert, color: iconColor),
-                      onSelected: (value) {
-                        if (value == 'share') _shareProfile(name);
-                        if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
-                        if (value == 'logout') _signOut(context);
-                        if (value == 'block') _blockUser(name);
-                      },
-                      itemBuilder: (BuildContext context) {
-                        if (isMyProfile) {
-                          return [
-                            PopupMenuItem(
-                              value: 'share',
-                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
-                            ),
-                            PopupMenuItem(
-                              value: 'settings',
-                              child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
-                            ),
-                            PopupMenuItem(
-                              value: 'logout',
-                              child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
-                            ),
-                          ];
-                        } else {
-                          return [
-                            PopupMenuItem(
-                              value: 'share',
-                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
-                            ),
-                            PopupMenuItem(
-                              value: 'block',
-                              child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
-                            ),
-                          ];
-                        }
-                      },
-                    ),
-                  ],
-                );
+                return _buildUnifiedProfileHeader(context, data, isMyProfile);
               },
             ),
+          ),
 
-            SliverToBoxAdapter(
-              child: StreamBuilder<DocumentSnapshot>(
-                stream: _firestore.collection('users').doc(_userId).snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-                  
-                  final data = snapshot.data!.data() as Map<String, dynamic>;
-                  final bool isMyProfile = _user?.uid == _userId;
-                  
-                  return _buildUnifiedProfileHeader(context, data, isMyProfile);
+          SliverPersistentHeader(
+            delegate: _SliverAppBarDelegate(
+              TabBar(
+                controller: _tabController,
+                onTap: (index) {
+                  _targetTabIndex = index;
                 },
+                tabs: [
+                  Tab(text: 'Posts'),
+                  Tab(text: 'Reposts'),
+                  Tab(text: 'Replies'),
+                ],
+                labelColor: theme.primaryColor,
+                unselectedLabelColor: theme.hintColor,
+                indicatorColor: theme.primaryColor,
               ),
             ),
-
-            SliverPersistentHeader(
-              delegate: _SliverAppBarDelegate(
-                TabBar(
-                  controller: _tabController,
-                  // CRITICAL FIX: Handle tab changes manually to maintain control
-                  onTap: (index) {
-                    _targetTabIndex = index;
-                  },
-                  tabs: [
-                    Tab(text: 'Posts'),
-                    Tab(text: 'Reposts'),
-                    Tab(text: 'Replies'),
-                  ],
-                  labelColor: theme.primaryColor,
-                  unselectedLabelColor: theme.hintColor,
-                  indicatorColor: theme.primaryColor,
-                ),
-              ),
-              pinned: true,
-            ),
-          ];
-        },
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildMyPosts(_userId),
-            _buildMyReposts(_userId),
-            _buildMyReplies(_userId),
-          ],
-        ),
+            pinned: true,
+          ),
+        ];
+      },
+      body: TabBarView(
+        controller: _tabController,
+        // NestedScrollView body biasanya tidak butuh scroll physics di sini jika list di dalamnya sudah punya
+        physics: NeverScrollableScrollPhysics(), 
+        children: [
+          _buildMyPosts(_userId),
+          _buildMyReposts(_userId),
+          _buildMyReplies(_userId),
+        ],
       ),
     );
 
     if (widget.includeScaffold) {
       return Scaffold(
         extendBodyBehindAppBar: true,
-        // CRITICAL FIX: Disable state restoration at scaffold level too
         restorationId: null,
         body: content,
       );
@@ -404,7 +364,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                               
                               if (mounted) {
                                 if (result == true) {
-                                  // Return to Posts tab after editing
                                   _targetTabIndex = 0;
                                   _tabController.animateTo(0); 
                                 }
@@ -627,8 +586,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         if (docs.isEmpty) return Center(child: Text('No posts yet.'));
 
         return ListView.builder(
+          // Key statis mencegah rebuild dan scroll reset
           key: const PageStorageKey('profile_posts_list'),
+          // Padding bawah agar tidak tertutup BottomBar jika ada
           padding: const EdgeInsets.only(bottom: 100), 
+          // Physics biarkan default (clamping/bouncing) sesuai platform karena ini di dalam NestedScrollView
+          // Tapi jika conflict, bisa pakai NeverScrollableScrollPhysics() jika NestedScrollView menghandle
+          // Untuk NestedScrollView, biasanya CustomScrollView atau builder OK.
+          // Di sini kita pakai NeverScrollableScrollPhysics agar scroll ditangani parent (NestedScrollView)
           physics: const NeverScrollableScrollPhysics(),
           shrinkWrap: true,
           itemCount: docs.length,
@@ -667,6 +632,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           itemBuilder: (context, index) {
             final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
+            // Safety check untuk parent
+            if (doc.reference.parent.parent == null) return SizedBox.shrink();
             final String originalPostId = doc.reference.parent.parent!.id;
 
             return CommentTile(
@@ -686,6 +653,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Widget _buildMyReposts(String userId) {
     return CustomScrollView(
       key: const PageStorageKey('profile_reposts_list'),
+      // Disini kita bisa menggunakan physics parent
+      physics: const NeverScrollableScrollPhysics(),
       slivers: [
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
@@ -727,6 +696,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 (context, index) {
                   final doc = docs[index];
                   final data = doc.data() as Map<String, dynamic>;
+                  if (doc.reference.parent.parent == null) return SizedBox.shrink();
                   final String originalPostId = doc.reference.parent.parent!.id;
                   
                   return CommentTile(
