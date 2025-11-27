@@ -51,19 +51,17 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   @override
   void didUpdateWidget(SearchPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Fix: Reset tab to "Posts" (index 0) whenever search is opened
+    // Reset tab ke "Posts" (index 0) saat mulai searching
     if (widget.isSearching && !oldWidget.isSearching) {
       _tabController.index = 0;
     }
     
-    // FIX: Auto-open search bar when navigating to search page
-    if (!oldWidget.isSearching && !widget.isSearching) {
-      // This means we just navigated to search page, open search bar
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!widget.isSearching) {
-          widget.onSearchPressed();
-        }
-      });
+    // JIKA SEARCH DIMATIKAN (DARI HOME), BERSIHKAN TEXT
+    if (oldWidget.isSearching && !widget.isSearching) {
+      _searchController.clear();
+      _searchText = '';
+      _searchSuggestion = null;
+      FocusScope.of(context).unfocus(); // Tutup keyboard
     }
   }
 
@@ -112,7 +110,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       _searchSuggestion = null;
     });
     
-    // FIX: Close search bar when clearing search
+    // Tutup search bar jika di-clear
     if (widget.isSearching) {
       widget.onSearchPressed();
     }
@@ -197,37 +195,35 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     final screenWidth = MediaQuery.of(context).size.width;
     final theme = Theme.of(context);
     
-    // Layout Constants
     final double searchBarBaseHeight = 70.0;
     final double suggestionHeight = _searchSuggestion != null ? 30.0 : 0.0;
     final double currentSearchBarHeight = widget.isSearching ? (searchBarBaseHeight + suggestionHeight) : 0.0;
     
-    // FIX: Use a fixed value that matches your app bar
     final double topAnchor = 90.0;
 
-    // FIX: Content padding is consistent with small gap below
     final double contentTopPadding = widget.isSearching 
         ? (topAnchor + currentSearchBarHeight) 
         : topAnchor;
 
-    // FIX: Handle back button to close search bar
+    // Handle back button to close search bar
     return WillPopScope(
       onWillPop: () async {
         if (widget.isSearching) {
-          // Clear search and close search bar
+          // Jika sedang searching, back button akan menutup search bar
+          // dan membersihkan input
           setState(() {
             _searchController.clear();
             _searchText = '';
             _searchSuggestion = null;
           });
-          widget.onSearchPressed(); // Close search bar
-          return false; // Don't pop the route
+          widget.onSearchPressed(); 
+          return false; 
         }
-        return true; // Allow back navigation
+        return true; 
       },
       child: Stack(
         children: [
-          // --- 1. MAIN CONTENT LAYER ---
+          // 1. MAIN CONTENT
           Positioned.fill(
             child: Padding(
               padding: EdgeInsets.only(top: contentTopPadding),
@@ -237,7 +233,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             ),
           ),
 
-          // --- 2. SEARCH BAR LAYER (Overlay) ---
+          // 2. SEARCH BAR OVERLAY
           Positioned(
             top: topAnchor,
             left: 0,
@@ -337,7 +333,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // --- TRENDING SECTION ---
-            // FIX: Reduced bottom padding for tighter spacing
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Row(
@@ -375,7 +370,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // FIX: Added padding: EdgeInsets.zero to remove ListView default padding
                     ListView.separated(
                       shrinkWrap: true,
                       physics: NeverScrollableScrollPhysics(),
@@ -384,15 +378,14 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                       separatorBuilder: (context, index) => Divider(
                         height: 1,
                         thickness: 0.5,
-                        color: theme.dividerColor.withOpacity(0.3), // FIX: Subtle divider
+                        color: theme.dividerColor.withOpacity(0.3),
                       ),
                       itemBuilder: (context, index) {
                         final tag = displayedTrends[index]['tag'];
                         final count = displayedTrends[index]['count'];
                         final isHashtag = tag.toString().startsWith('#');
-                        final isTopTrending = index == 0; // FIX: Check if #1 trending
+                        final isTopTrending = index == 0;
                         
-                        // FIX: Added contentPadding to control ListTile spacing
                         return ListTile(
                           dense: false,
                           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -412,7 +405,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // FIX: Add fire icon for top trending
                               if (isTopTrending)
                                 Padding(
                                   padding: const EdgeInsets.only(right: 8.0),
@@ -451,9 +443,9 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
               },
             ),
 
-            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)), // FIX: More subtle thick divider
+            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
 
-            // --- DISCOVER SECTION (PERSONALIZED) ---
+            // --- DISCOVER SECTION ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
@@ -494,14 +486,12 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                       );
                     }
 
-                    // FIX: Show only first 10 posts
                     final displayedPosts = discoverDocs.take(10).toList();
                     final hasMore = discoverDocs.length > 10;
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Display first 10 posts
                         ...displayedPosts.map((doc) {
                           final data = doc.data() as Map<String, dynamic>;
                           
@@ -513,14 +503,12 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                           );
                         }).toList(),
                         
-                        // Show "See More" button if there are more posts
                         if (hasMore)
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
                             child: Center(
                               child: OutlinedButton(
                                 onPressed: () {
-                                  // TODO: Navigate to full discover page or expand list
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: Text('More posts coming soon!')),
                                   );
@@ -546,8 +534,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
 
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
 
-            // --- PEOPLE YOU MIGHT KNOW SECTION ---
-            // FIXED: Replaced duplicate "Discover" section with actual User Recommendations
+            // --- PEOPLE YOU MIGHT KNOW ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
