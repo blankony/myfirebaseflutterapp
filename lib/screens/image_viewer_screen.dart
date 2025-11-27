@@ -1,25 +1,28 @@
-// ignore_for_file: prefer_const_constructors
+// ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:photo_view/photo_view.dart'; 
-import 'package:cached_network_image/cached_network_image.dart'; 
-import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
-import 'package:share_plus/share_plus.dart'; 
-import 'package:cloud_firestore/cloud_firestore.dart'; 
-import 'package:firebase_auth/firebase_auth.dart'; 
-import '../main.dart'; 
+import 'package:photo_view/photo_view.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:gal/gal.dart';
+import 'package:path_provider/path_provider.dart'; // IMPORT WAJIB
+import 'package:path/path.dart' as p;             // IMPORT WAJIB
+import '../main.dart';
 
 class ImageViewerScreen extends StatefulWidget {
   final String imageUrl;
   final String? mediaType;
-  final Map<String, dynamic>? postData; 
+  final Map<String, dynamic>? postData;
   final String? postId; 
-  final String heroTag; 
-  
+  final String heroTag;
+
   const ImageViewerScreen({
-    super.key, 
-    required this.imageUrl, 
-    required this.heroTag, 
+    super.key,
+    required this.imageUrl,
+    required this.heroTag,
     this.mediaType,
     this.postData,
     this.postId,
@@ -34,11 +37,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   late AnimationController _menuController;
   late Animation<Offset> _menuAnimation;
   bool _isMenuOpen = false;
-  
+
   bool _isLiked = false;
   int _likeCount = 0;
   bool _isReposted = false;
   int _repostCount = 0;
+  bool _isSaving = false; 
+
+  bool get _isPostContent => widget.postId != null;
 
   @override
   void initState() {
@@ -49,7 +55,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       vsync: this,
     );
     _menuAnimation = Tween<Offset>(
-      begin: const Offset(1.5, 0.0), 
+      begin: const Offset(1.5, 0.0),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _menuController,
@@ -65,7 +71,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
 
   void _initStats() {
     if (widget.postData == null) return;
-    
+
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final likes = widget.postData!['likes'] as Map<String, dynamic>? ?? {};
     final reposts = widget.postData!['repostedBy'] as List? ?? [];
@@ -104,7 +110,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   }
 
   Future<void> _toggleLike() async {
-    if (widget.postId == null) return;
+    if (!_isPostContent) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     setState(() { _isLiked = !_isLiked; _isLiked ? _likeCount++ : _likeCount--; });
@@ -116,7 +122,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   }
 
   Future<void> _toggleRepost() async {
-    if (widget.postId == null) return;
+    if (!_isPostContent) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     setState(() { _isReposted = !_isReposted; _isReposted ? _repostCount++ : _repostCount--; });
@@ -130,46 +136,124 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   Future<void> _shareImage() async {
     try {
       final file = await DefaultCacheManager().getSingleFile(widget.imageUrl);
-      await Share.shareXFiles([XFile(file.path)], text: 'Check out this image!');
-    } catch (e) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load image.'))); }
+      await Share.shareXFiles([XFile(file.path)], text: 'Check out this image from Sapa PNJ!');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load image.')));
+    }
   }
 
+  // --- FUNGSI SAVE BARU MENGGUNAKAN GAL ---
   Future<void> _saveImage() async {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Image saved to Gallery (Mock).')));
     _closeMenu();
+    setState(() { _isSaving = true; });
+
+    try {
+      print("--- MULAI PROSES SAVE KE PICTURES ---");
+
+      // 1. Download Gambar ke Cache
+      final File cacheFile = await DefaultCacheManager().getSingleFile(widget.imageUrl);
+      
+      // 2. Tentukan Ekstensi File (Penting agar terbaca di Galeri)
+      String extension = p.extension(widget.imageUrl);
+      if (extension.isEmpty || extension.length > 5) { 
+        extension = '.jpg'; 
+      }
+      
+      // 3. Buat Nama File Baru yang Bersih di Folder Sementara
+      final Directory tempDir = await getTemporaryDirectory();
+      final String newFileName = "SapaPNJ_${DateTime.now().millisecondsSinceEpoch}$extension";
+      final File newFile = await cacheFile.copy('${tempDir.path}/$newFileName');
+      
+      print("   - File siap disimpan: ${newFile.path}");
+
+      // 4. Simpan menggunakan Gal
+      await Gal.putImage(newFile.path, album: null); 
+      
+      print("   - BERHASIL DISIMPAN KE PICTURES");
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: const [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Saved to "Pictures" folder!', style: TextStyle(color: Colors.white))),
+            ]),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } on GalException catch (e) {
+      print("❌ GAL ERROR: Type: ${e.type}, Message: $e");
+      if (mounted) {
+        String msg = "Gagal menyimpan.";
+        if (e.type == GalExceptionType.accessDenied) msg = "Izin penyimpanan ditolak.";
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      print("❌ GENERAL ERROR: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() { _isSaving = false; });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true, 
+      extendBodyBehindAppBar: true,
       body: GestureDetector(
         onTap: _toggleOverlays,
         child: Stack(
           children: [
-            // 1. THE IMAGE (PERBAIKAN DI SINI)
-            // Widget Hero manual DIHAPUS, karena PhotoViewHeroAttributes sudah membuat Hero secara internal.
+            // 1. THE IMAGE
             Center(
               child: widget.mediaType == 'video'
                   ? Text('Video Placeholder', style: TextStyle(color: Colors.white))
                   : PhotoView(
-                      imageProvider: CachedNetworkImageProvider(widget.imageUrl), 
+                      imageProvider: CachedNetworkImageProvider(widget.imageUrl),
                       backgroundDecoration: BoxDecoration(color: Colors.black),
                       initialScale: PhotoViewComputedScale.contained,
                       minScale: PhotoViewComputedScale.contained,
                       maxScale: PhotoViewComputedScale.covered * 2.5,
-                      // INI SUDAH CUKUP UNTUK ANIMASI HERO:
                       heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
                     ),
             ),
+
+            // Loading Indicator saat menyimpan
+            if (_isSaving)
+              Center(
+                child: Container(
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(10)
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 10),
+                      Text("Saving...", style: TextStyle(color: Colors.white))
+                    ],
+                  ),
+                ),
+              ),
 
             // 2. Top Bar Overlay
             AnimatedOpacity(
               opacity: _showOverlays ? 1.0 : 0.0,
               duration: Duration(milliseconds: 200),
               child: Container(
-                height: 100, 
+                height: 100,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -196,7 +280,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
               ),
             ),
 
-            // 3. Menu
+            // 3. Menu (Save Image)
             if (_isMenuOpen)
               Positioned(
                 top: 50, right: 10,
@@ -207,7 +291,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                     decoration: BoxDecoration(
                       color: const Color(0xFF15202B),
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 10)],
+                      boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -223,8 +307,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                 ),
               ),
 
-            // 4. Bottom Action Bar
-            if (_showOverlays)
+            // 4. Bottom Action Bar (Hanya jika ini adalah postingan)
+            if (_showOverlays && _isPostContent)
               Positioned(
                 bottom: 0, left: 0, right: 0,
                 child: Container(

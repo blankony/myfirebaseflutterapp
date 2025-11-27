@@ -169,22 +169,38 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.11"
+  device_info_plus:
+    dependency: "direct main"
+    description:
+      name: device_info_plus
+      sha256: a7fd703482b391a87d60b6061d04dfdeab07826b96f9abd8f5ed98068acc0074
+      url: "https://pub.dev"
+    source: hosted
+    version: "10.1.2"
+  device_info_plus_platform_interface:
+    dependency: transitive
+    description:
+      name: device_info_plus_platform_interface
+      sha256: e1ea89119e34903dca74b883d0dd78eb762814f97fb6c76f35e9ff74d261a18f
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.0.3"
   extended_image:
     dependency: transitive
     description:
       name: extended_image
-      sha256: f6cbb1d798f51262ed1a3d93b4f1f2aa0d76128df39af18ecb77fa740f88b2e0
+      sha256: "69d4299043334ecece679996e47d0b0891cd8c29d8da0034868443506f1d9a78"
       url: "https://pub.dev"
     source: hosted
-    version: "10.0.1"
+    version: "8.3.1"
   extended_image_library:
     dependency: transitive
     description:
       name: extended_image_library
-      sha256: "1f9a24d3a00c2633891c6a7b5cab2807999eb2d5b597e5133b63f49d113811fe"
+      sha256: e61dafd94400fff6ef7ed1523d445ff3af137f198f3228e4a3107bc5b4bec5d1
       url: "https://pub.dev"
     source: hosted
-    version: "5.0.1"
+    version: "4.0.6"
   fake_async:
     dependency: transitive
     description:
@@ -376,6 +392,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "10.9.1"
+  gal:
+    dependency: "direct main"
+    description:
+      name: gal
+      sha256: "969598f986789127fd407a750413249e1352116d4c2be66e81837ffeeaafdfee"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.3.2"
   google_generative_ai:
     dependency: "direct main"
     description:
@@ -460,10 +484,10 @@ packages:
     dependency: "direct main"
     description:
       name: image_editor_plus
-      sha256: "160170c78767635cee874dcef7d0f413b9576817eef06777f3d598a1b886223e"
+      sha256: "0108c24756e7867f9a325c8f1d15ff29ca0a40aae03517e7d55dee6135f9b3e6"
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.8"
+    version: "1.0.6"
   image_picker:
     dependency: "direct main"
     description:
@@ -713,21 +737,21 @@ packages:
     source: hosted
     version: "2.3.0"
   permission_handler:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: permission_handler
-      sha256: bc917da36261b00137bbc8896bf1482169cd76f866282368948f032c8c1caae1
+      sha256: "59adad729136f01ea9e35a48f5d1395e25cba6cea552249ddbe9cf950f5d7849"
       url: "https://pub.dev"
     source: hosted
-    version: "12.0.1"
+    version: "11.4.0"
   permission_handler_android:
     dependency: transitive
     description:
       name: permission_handler_android
-      sha256: "1e3bc410ca1bf84662104b100eb126e066cb55791b7451307f9708d4007350e6"
+      sha256: d3971dcdd76182a0c198c096b5db2f0884b0d4196723d21a866fc4cdea057ebc
       url: "https://pub.dev"
     source: hosted
-    version: "13.0.1"
+    version: "12.1.0"
   permission_handler_apple:
     dependency: transitive
     description:
@@ -1181,6 +1205,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.15.0"
+  win32_registry:
+    dependency: transitive
+    description:
+      name: win32_registry
+      sha256: "21ec76dfc731550fd3e2ce7a33a9ea90b828fdf19a5c3bcf556fa992cfa99852"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.5"
   xdg_directories:
     dependency: transitive
     description:

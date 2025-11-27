@@ -54,6 +54,9 @@ dependencies:
   image_editor_plus: ^1.0.0
   cached_network_image: ^3.3.1
   flutter_cache_manager: ^3.4.1
+  gal: ^2.3.0  
+  permission_handler: ^11.3.0  
+  device_info_plus: ^10.1.0    
 
 dev_dependencies:
   flutter_test:

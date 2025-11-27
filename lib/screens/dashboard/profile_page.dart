@@ -10,6 +10,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
+import '../image_viewer_screen.dart'; // IMPORT PENTING INI
 import 'settings_page.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -57,7 +58,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   void _scrollListener() {
     if (_scrollController.hasClients) {
-      // Mengubah state opacity judul AppBar saat di-scroll
       final bool scrolled = _scrollController.offset > 100;
       if (scrolled != _isScrolled) {
         setState(() {
@@ -65,6 +65,24 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         });
       }
     }
+  }
+
+  // --- FUNGSI BARU: Buka Gambar Full Screen ---
+  void _openFullImage(BuildContext context, String url, String heroTag) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        pageBuilder: (_, __, ___) => ImageViewerScreen(
+          imageUrl: url,
+          heroTag: heroTag,
+          mediaType: 'image', // Default image
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        }
+      ),
+    );
   }
 
   Future<void> _followUser() async {
@@ -151,7 +169,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
     Widget content = NestedScrollView(
       controller: _scrollController,
-      // FIX DI SINI: Gunakan Key statis atau PageStorageKey, JANGAN DateTime.now()
       key: PageStorageKey('profile_nested_scroll_$_userId'), 
       physics: AlwaysScrollableScrollPhysics(),
       headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -176,7 +193,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 iconTheme: IconThemeData(
                   color: iconColor, 
                 ),
-                // Judul hanya muncul saat di-scroll
                 title: AnimatedOpacity(
                   opacity: _isScrolled ? 1.0 : 0.0,
                   duration: Duration(milliseconds: 200),
@@ -270,7 +286,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       },
       body: TabBarView(
         controller: _tabController,
-        // NestedScrollView body biasanya tidak butuh scroll physics di sini jika list di dalamnya sudah punya
         physics: NeverScrollableScrollPhysics(), 
         children: [
           _buildMyPosts(_userId),
@@ -311,6 +326,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final bool isLongBio = bio.length > 100;
     final String displayBio = _isBioExpanded ? bio : (isLongBio ? bio.substring(0, 100) + '...' : bio);
 
+    // Hero Tags Unik
+    final String bannerTag = 'profile_banner_${_userId}';
+    final String avatarTag = 'profile_avatar_${_userId}';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -319,29 +338,52 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Container(
-                height: bannerHeight,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: TwitterTheme.darkGrey, 
+              // --- BANNER (MODIFIED) ---
+              GestureDetector(
+                onTap: () {
+                  if (bannerImageUrl != null && bannerImageUrl.isNotEmpty) {
+                    _openFullImage(context, bannerImageUrl, bannerTag);
+                  }
+                },
+                child: Hero(
+                  tag: bannerTag,
+                  child: Container(
+                    height: bannerHeight,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: TwitterTheme.darkGrey, 
+                    ),
+                    child: bannerImageUrl != null && bannerImageUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: bannerImageUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(color: TwitterTheme.darkGrey),
+                          errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey),
+                        )
+                      : null,
+                  ),
                 ),
-                child: bannerImageUrl != null && bannerImageUrl.isNotEmpty
-                  ? CachedNetworkImage(
-                      imageUrl: bannerImageUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) => Container(color: TwitterTheme.darkGrey),
-                      errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey),
-                    )
-                  : null,
               ),
               
+              // --- AVATAR (MODIFIED) ---
               Positioned(
                 top: bannerHeight - avatarRadius,
                 left: 16,
-                child: CircleAvatar(
-                  radius: avatarRadius + 4,
-                  backgroundColor: theme.scaffoldBackgroundColor,
-                  child: _buildAvatarImage(data),
+                child: GestureDetector(
+                  onTap: () {
+                    final String? profileUrl = data['profileImageUrl'];
+                    if (profileUrl != null && profileUrl.isNotEmpty) {
+                      _openFullImage(context, profileUrl, avatarTag);
+                    }
+                  },
+                  child: Hero(
+                    tag: avatarTag,
+                    child: CircleAvatar(
+                      radius: avatarRadius + 4,
+                      backgroundColor: theme.scaffoldBackgroundColor,
+                      child: _buildAvatarImage(data),
+                    ),
+                  ),
                 ),
               ),
 
@@ -586,14 +628,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         if (docs.isEmpty) return Center(child: Text('No posts yet.'));
 
         return ListView.builder(
-          // Key statis mencegah rebuild dan scroll reset
           key: const PageStorageKey('profile_posts_list'),
-          // Padding bawah agar tidak tertutup BottomBar jika ada
           padding: const EdgeInsets.only(bottom: 100), 
-          // Physics biarkan default (clamping/bouncing) sesuai platform karena ini di dalam NestedScrollView
-          // Tapi jika conflict, bisa pakai NeverScrollableScrollPhysics() jika NestedScrollView menghandle
-          // Untuk NestedScrollView, biasanya CustomScrollView atau builder OK.
-          // Di sini kita pakai NeverScrollableScrollPhysics agar scroll ditangani parent (NestedScrollView)
           physics: const NeverScrollableScrollPhysics(),
           shrinkWrap: true,
           itemCount: docs.length,
@@ -632,7 +668,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           itemBuilder: (context, index) {
             final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
-            // Safety check untuk parent
             if (doc.reference.parent.parent == null) return SizedBox.shrink();
             final String originalPostId = doc.reference.parent.parent!.id;
 
@@ -653,7 +688,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Widget _buildMyReposts(String userId) {
     return CustomScrollView(
       key: const PageStorageKey('profile_reposts_list'),
-      // Disini kita bisa menggunakan physics parent
       physics: const NeverScrollableScrollPhysics(),
       slivers: [
         StreamBuilder<QuerySnapshot>(
