@@ -16,7 +16,7 @@ import '../edit_profile_screen.dart';
 import '../image_viewer_screen.dart'; 
 import 'settings_page.dart'; 
 import '../../services/overlay_service.dart';
-import '../../services/cloudinary_service.dart';
+import '../../services/cloudinary_service.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -46,7 +46,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _isScrolled = false;
   bool _isBioExpanded = false;
   int _targetTabIndex = 0;
-  // _isUploading variable is removed as we use OverlayEntry for visual state now
 
   @override
   void initState() {
@@ -91,8 +90,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- NEW: Custom Upload Overlay Helper ---
-  // Fungsi ini membuat tampilan loading yang sama persis dengan post upload
+  // --- LOADING OVERLAY ---
   OverlayEntry _showUploadingOverlay() {
     OverlayEntry entry = OverlayEntry(
       builder: (context) => Positioned(
@@ -138,7 +136,39 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return entry;
   }
 
-  // --- MODIFIED: Image Picker & Upload Logic ---
+  // --- UPDATE SEMUA POSTINGAN & KOMENTAR LAMA (BUG FIX) ---
+  Future<void> _updateAllPastContent(String newImageUrl) async {
+    // Fungsi ini berjalan di background agar tidak memblokir UI
+    try {
+      final batch = _firestore.batch();
+      
+      // 1. Cari semua Postingan user ini
+      final postsQuery = await _firestore.collection('posts')
+          .where('userId', isEqualTo: _userId)
+          .get();
+
+      for (var doc in postsQuery.docs) {
+        batch.update(doc.reference, {'profileImageUrl': newImageUrl});
+      }
+
+      // 2. Cari semua Komentar user ini (di semua postingan)
+      final commentsQuery = await _firestore.collectionGroup('comments')
+          .where('userId', isEqualTo: _userId)
+          .get();
+
+      for (var doc in commentsQuery.docs) {
+        batch.update(doc.reference, {'profileImageUrl': newImageUrl});
+      }
+
+      // Commit update (Max 500 operasi per batch, untuk app skala kecil ini aman)
+      await batch.commit();
+      print("Berhasil mengupdate foto profil di postingan lama.");
+    } catch (e) {
+      print("Gagal update konten lama: $e");
+    }
+  }
+
+  // --- IMAGE PICKER & UPLOAD ---
   Future<void> _pickAndUploadImage({required bool isBanner}) async {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(
@@ -148,13 +178,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
     if (pickedFile == null) return;
 
-    // Crop Image
     final croppedFile = await ImageCropper().cropImage(
       sourcePath: pickedFile.path,
       compressQuality: 70,
       aspectRatio: isBanner 
-          ? CropAspectRatio(ratioX: 3, ratioY: 1) // Banner Ratio
-          : CropAspectRatio(ratioX: 1, ratioY: 1), // Avatar Ratio
+          ? CropAspectRatio(ratioX: 3, ratioY: 1) 
+          : CropAspectRatio(ratioX: 1, ratioY: 1),
       uiSettings: [
         AndroidUiSettings(
           toolbarTitle: isBanner ? 'Crop Banner' : 'Crop Avatar',
@@ -172,29 +201,30 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
     if (croppedFile == null) return;
 
-    // 1. Tampilkan Overlay Loading (Ganti dari SnackBar)
     final OverlayEntry loadingOverlay = _showUploadingOverlay();
 
     try {
-      // Upload to Cloudinary
       final String? downloadUrl = await _cloudinaryService.uploadImage(File(croppedFile.path));
 
-      // 2. Hapus Overlay Loading
       loadingOverlay.remove();
 
       if (downloadUrl != null) {
-        // Update Firestore
         final Map<String, dynamic> updateData = {};
         if (isBanner) {
           updateData['bannerImageUrl'] = downloadUrl;
         } else {
           updateData['profileImageUrl'] = downloadUrl;
-          updateData['avatarIconId'] = -1; // Reset icon ID if setting custom image
+          updateData['avatarIconId'] = -1; 
         }
 
+        // 1. Update Dokumen User Utama
         await _firestore.collection('users').doc(_userId).update(updateData);
         
-        // 3. Tampilkan Notifikasi Sukses
+        // 2. JIKA GANTI AVATAR: Update semua postingan & komentar lama (BUG FIX)
+        if (!isBanner) {
+          _updateAllPastContent(downloadUrl);
+        }
+
         if (mounted) {
           OverlayService().showTopNotification(
             context, 
@@ -208,10 +238,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         throw Exception("Upload returned null");
       }
     } catch (e) {
-      // Pastikan overlay dihapus jika error
-      try {
-        loadingOverlay.remove(); 
-      } catch(_) {} 
+      try { loadingOverlay.remove(); } catch(_) {} 
 
       if (mounted) {
         OverlayService().showTopNotification(
@@ -225,7 +252,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
-  // --- NEW: Profile Options Bottom Sheet ---
   void _showProfileOptions(BuildContext context, String? currentImageUrl, String heroTag) {
     showModalBottomSheet(
       context: context,
@@ -511,7 +537,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return content;
   }
 
-  // MODIFIED: Updated Header with Interactive Tap Logic
   Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name';
