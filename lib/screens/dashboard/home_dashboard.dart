@@ -19,10 +19,11 @@ import 'profile_page.dart';
 import '../create_post_screen.dart'; 
 import '../../main.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
+import '../../widgets/notification_sheet.dart'; 
 
 import '../../services/overlay_service.dart';
 import '../../services/notification_prefs_service.dart';
-import '../../services/ai_event_bus.dart'; // IMPORT BARU INI WAJIB ADA
+import '../../services/ai_event_bus.dart';
 import 'package:myfirebaseflutterapp/screens/post_detail_screen.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -227,23 +228,32 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     super.dispose();
   }
 
+  // --- UPDATED: Click-outside-to-dismiss Logic ---
   void _showNotificationPopup() {
-    showGeneralDialog(
+    showModalBottomSheet(
       context: context,
-      barrierDismissible: true,
-      barrierLabel: 'Notifications',
-      barrierColor: Colors.black.withOpacity(0.4), 
-      transitionDuration: const Duration(milliseconds: 400),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        return _NotificationBlurPopup();
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        return ScaleTransition(
-          scale: CurvedAnimation(parent: animation, curve: Curves.easeOutQuart),
-          alignment: Alignment(0.9, -0.95),
-          child: FadeTransition(
-            opacity: animation,
-            child: child,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54, // Ensure a dark background we can tap
+      useSafeArea: true,
+      isDismissible: true,
+      enableDrag: true,
+      builder: (context) {
+        // Outer GestureDetector catches taps on the empty space
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(context).pop(), // Close sheet
+          child: DraggableScrollableSheet(
+            initialChildSize: 0.75, // 75% height allows room to tap above
+            minChildSize: 0.5,
+            maxChildSize: 0.95,
+            builder: (context, scrollController) {
+              // Inner GestureDetector consumes taps so they don't close the sheet
+              return GestureDetector(
+                onTap: () {}, 
+                child: NotificationSheet(scrollController: scrollController),
+              );
+            },
           ),
         );
       },
@@ -519,324 +529,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           ),
         ),
       ),
-    );
-  }
-}
-
-class _NotificationBlurPopup extends StatefulWidget {
-  @override
-  State<_NotificationBlurPopup> createState() => _NotificationBlurPopupState();
-}
-
-class _NotificationBlurPopupState extends State<_NotificationBlurPopup> {
-  final User? _currentUser = FirebaseAuth.instance.currentUser;
-
-  @override
-  void initState() {
-    super.initState();
-    _markNotificationsAsRead();
-  }
-
-  Future<void> _markNotificationsAsRead() async {
-    if (_currentUser == null) return;
-    final notifQuery = FirebaseFirestore.instance
-        .collection('users')
-        .doc(_currentUser!.uid)
-        .collection('notifications')
-        .where('isRead', isEqualTo: false);
-    
-    final notifSnapshot = await notifQuery.get();
-    final batch = FirebaseFirestore.instance.batch();
-    for (final doc in notifSnapshot.docs) {
-      batch.update(doc.reference, {'isRead': true});
-    }
-    await batch.commit();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final size = MediaQuery.of(context).size;
-
-    return Stack(
-      children: [
-        BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8.0, sigmaY: 8.0),
-          child: Container(
-            color: Colors.black.withOpacity(0.1), 
-          ),
-        ),
-        
-        Center(
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              width: size.width * 0.9,
-              height: size.height * 0.7, 
-              decoration: BoxDecoration(
-                color: theme.scaffoldBackgroundColor, 
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 20,
-                    offset: Offset(0, 10),
-                  ),
-                ],
-                border: Border.all(color: theme.dividerColor.withOpacity(0.5)),
-              ),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          "Notifications",
-                          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.close),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(height: 1),
-                  
-                  Expanded(
-                    child: _currentUser == null
-                        ? Center(child: Text("Please log in."))
-                        : StreamBuilder<QuerySnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(_currentUser!.uid)
-                                .collection('notifications')
-                                .orderBy('timestamp', descending: true) 
-                                .limit(50) 
-                                .snapshots(),
-                            builder: (context, snapshot) {
-                              if (!snapshot.hasData) {
-                                return Center(child: CircularProgressIndicator());
-                              }
-                              if (snapshot.data!.docs.isEmpty) {
-                                return Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.notifications_off_outlined, size: 60, color: Colors.grey),
-                                        SizedBox(height: 16),
-                                        Text("No notifications yet.", style: TextStyle(color: Colors.grey)),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              return ListView.separated(
-                                padding: EdgeInsets.zero,
-                                itemCount: snapshot.data!.docs.length,
-                                separatorBuilder: (context, index) => Divider(height: 1),
-                                itemBuilder: (context, index) {
-                                  final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
-                                  return _NotificationTile(notificationData: data);
-                                },
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _NotificationTile extends StatelessWidget {
-  final Map<String, dynamic> notificationData;
-  const _NotificationTile({required this.notificationData});
-
-  Future<DocumentSnapshot> _getSenderData(String senderId) {
-    return FirebaseFirestore.instance.collection('users').doc(senderId).get();
-  }
-
-  void _navigateToNotification(BuildContext context) {
-    final String type = notificationData['type'];
-    final String? postId = notificationData['postId']; // Get post ID safely
-
-    Navigator.of(context).pop(); 
-
-    if (type == 'follow') {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ProfilePage(userId: notificationData['senderId'], includeScaffold: true), 
-      ));
-    } else if ((type == 'like' || type == 'repost' || type == 'comment') && postId != null) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => PostDetailScreen(postId: postId),
-      ));
-    }
-    // 'upload_complete' does nothing on tap or could go to profile
-  }
-
-  String _formatTimestamp(Timestamp? timestamp) {
-    if (timestamp == null) return "just now";
-    return timeago.format(timestamp.toDate(), locale: 'en_short');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final String type = notificationData['type'];
-    final String senderId = notificationData['senderId'];
-    final Timestamp? timestamp = notificationData['timestamp'];
-    
-    IconData iconData;
-    Color iconColor;
-
-    switch (type) {
-      case 'follow':
-        iconData = Icons.person_add;
-        iconColor = TwitterTheme.blue;
-        break;
-      case 'like':
-        iconData = Icons.favorite;
-        iconColor = Colors.pink;
-        break;
-      case 'repost':
-        iconData = Icons.repeat;
-        iconColor = Colors.green;
-        break;
-      case 'comment':
-        iconData = Icons.chat_bubble;
-        iconColor = Colors.grey; 
-        break;
-      case 'upload_complete':
-        iconData = Icons.check_circle;
-        iconColor = Colors.green;
-        break;
-      default:
-        iconData = Icons.notifications;
-        iconColor = Colors.grey;
-    }
-
-    // --- HANDLE SYSTEM NOTIFICATIONS (FIX FOR BLANK NOTIFICATIONS) ---
-    if (senderId == 'system') {
-      String title = 'Notification';
-      String subtitle = notificationData['postTextSnippet'] ?? '';
-      
-      if (type == 'upload_complete') {
-        title = "Post Uploaded";
-      }
-
-      return ListTile(
-        leading: Stack(
-          children: [
-            CircleAvatar(
-              backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-              child: Icon(Icons.cloud_upload, color: TwitterTheme.blue),
-            ),
-            Positioned(
-              bottom: 0, right: 0,
-              child: Container(
-                padding: EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: iconColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: theme.scaffoldBackgroundColor, width: 2)
-                ),
-                child: Icon(iconData, size: 12, color: Colors.white),
-              ),
-            )
-          ],
-        ),
-        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        subtitle: Text(
-          subtitle.isNotEmpty ? '$subtitle\n${_formatTimestamp(timestamp)}' : _formatTimestamp(timestamp),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 12),
-        ),
-        isThreeLine: subtitle.isNotEmpty,
-        onTap: () => _navigateToNotification(context),
-      );
-    }
-
-    // --- HANDLE USER NOTIFICATIONS ---
-    return FutureBuilder<DocumentSnapshot>(
-      future: _getSenderData(senderId),
-      builder: (context, userSnapshot) {
-        String senderName = 'Someone';
-        String senderInitial = 'S';
-        String? senderImageUrl; 
-        
-        if (userSnapshot.hasData && userSnapshot.data!.exists) {
-          final data = userSnapshot.data!.data() as Map<String, dynamic>;
-          senderName = data['name'] ?? 'Anonymous';
-          senderImageUrl = data['profileImageUrl']; 
-          if (senderName.isNotEmpty) senderInitial = senderName[0].toUpperCase();
-        }
-        
-        String title = '';
-        String subtitle = '';
-
-        if(type == 'follow') {
-          title = '$senderName started following you';
-        } else if (type == 'like') {
-          title = '$senderName liked your post';
-          subtitle = notificationData['postTextSnippet'] ?? '';
-        } else if (type == 'repost') {
-          title = '$senderName reposted your post';
-          subtitle = notificationData['postTextSnippet'] ?? '';
-        } else if (type == 'comment') {
-          title = '$senderName replied to your post';
-          subtitle = notificationData['postTextSnippet'] ?? '';
-        }
-        
-        Widget senderAvatar;
-        if (senderImageUrl != null && senderImageUrl.isNotEmpty) {
-           senderAvatar = CircleAvatar(
-            backgroundImage: CachedNetworkImageProvider(senderImageUrl),
-            backgroundColor: Colors.grey, 
-          );
-        } else {
-           senderAvatar = CircleAvatar(child: Text(senderInitial));
-        }
-
-        return ListTile(
-          leading: Stack(
-            children: [
-              senderAvatar, 
-              Positioned(
-                bottom: 0, right: 0,
-                child: Container(
-                  padding: EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: iconColor,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)
-                  ),
-                  child: Icon(iconData, size: 12, color: Colors.white),
-                ),
-              )
-            ],
-          ),
-          title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          subtitle: Text(
-            subtitle.isNotEmpty ? '$subtitle\n${_formatTimestamp(timestamp)}' : _formatTimestamp(timestamp),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12),
-          ),
-          isThreeLine: subtitle.isNotEmpty,
-          onTap: () => _navigateToNotification(context),
-        );
-      },
     );
   }
 }
