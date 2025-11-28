@@ -18,6 +18,10 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  
+  // 1. Tambahkan FocusNode untuk password
+  final FocusNode _passwordFocusNode = FocusNode();
+
   String _errorMessage = '';
   bool _isLoading = false; 
   bool _isPasswordObscured = true;
@@ -99,6 +103,8 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    // 2. Jangan lupa dispose FocusNode
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -108,7 +114,7 @@ class _LoginPageState extends State<LoginPage> {
     final isDarkMode = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // Allow blobs to sit behind AppBar
+      extendBodyBehindAppBar: true, 
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -116,7 +122,7 @@ class _LoginPageState extends State<LoginPage> {
       ),
       body: Stack(
         children: [
-          // --- DECORATIVE BACKGROUND (Matches Welcome Screen) ---
+          // --- DECORATIVE BACKGROUND ---
           Positioned(
             top: -100,
             right: -100,
@@ -197,6 +203,13 @@ class _LoginPageState extends State<LoginPage> {
                         controller: _emailController,
                         decoration: InputDecoration(labelText: 'Enter email'),
                         keyboardType: TextInputType.emailAddress,
+                        
+                        // 3. Konfigurasi Enter -> Next
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) {
+                          FocusScope.of(context).requestFocus(_passwordFocusNode);
+                        },
+
                         validator: _validateEmail,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
@@ -204,6 +217,7 @@ class _LoginPageState extends State<LoginPage> {
                       
                       TextFormField(
                         controller: _passwordController,
+                        focusNode: _passwordFocusNode, // 4. Pasang FocusNode
                         obscureText: _isPasswordObscured,
                         decoration: InputDecoration(
                           labelText: 'Enter password',
@@ -218,6 +232,13 @@ class _LoginPageState extends State<LoginPage> {
                             },
                           ),
                         ),
+                        
+                        // 5. Konfigurasi Enter -> Done/Login
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) {
+                          _signIn();
+                        },
+
                         validator: _validatePassword,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),

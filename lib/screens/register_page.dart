@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import '../main.dart';
 import 'login_page.dart'; 
-import 'setup/setup_profile_screen.dart'; // IMPORTED
+import 'setup/setup_profile_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -24,11 +24,18 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _confirmPasswordController = TextEditingController();
   final TextEditingController _namaController = TextEditingController(); 
   final TextEditingController _nimController = TextEditingController(); 
+  
+  // 1. Tambahkan FocusNode untuk navigasi
+  final FocusNode _nimFocus = FocusNode();
+  final FocusNode _emailFocus = FocusNode();
+  final FocusNode _passwordFocus = FocusNode();
+  final FocusNode _confirmPasswordFocus = FocusNode();
+
   String _errorMessage = '';
 
   bool _isPasswordObscured = true;
   bool _isConfirmPasswordObscured = true;
-  bool _isLoading = false; // Added loading state
+  bool _isLoading = false; 
 
   // Helper for custom transition
   Route _createSlideUpRoute(Widget page) {
@@ -68,14 +75,9 @@ class _RegisterPageState extends State<RegisterPage> {
           'createdAt': FieldValue.serverTimestamp(),
           'following': [],
           'followers': [],
-          // New fields for setup tracking could be added here, e.g., 'isSetupComplete': false
         });
         
-        // Optional: sendEmailVerification here, or let Setup screen do it. 
-        // Let's let the Setup screen handle the explicit "Verify" action to give context.
-        
         if (mounted) {
-           // Navigate to Setup Flow
            Navigator.of(context).pushAndRemoveUntil(
              MaterialPageRoute(builder: (context) => const SetupProfileScreen()),
              (route) => false,
@@ -144,6 +146,12 @@ class _RegisterPageState extends State<RegisterPage> {
     _confirmPasswordController.dispose();
     _namaController.dispose();
     _nimController.dispose();
+    
+    // 2. Dispose FocusNodes
+    _nimFocus.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
+    _confirmPasswordFocus.dispose();
     super.dispose();
   }
 
@@ -225,18 +233,27 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                       SizedBox(height: 32),
                       
+                      // 3. Chain Focus Logic: Name -> NIM -> Email -> Password -> Confirm
+                      
+                      // NAME
                       TextFormField( 
                         controller: _namaController,
                         decoration: const InputDecoration(labelText: 'Name'),
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_nimFocus),
                         validator: _validateName,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
                       SizedBox(height: 16),
                       
+                      // NIM
                       TextFormField( 
                         controller: _nimController,
+                        focusNode: _nimFocus,
                         decoration: const InputDecoration(labelText: 'NIM'),
                         keyboardType: TextInputType.number, 
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_emailFocus),
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
                           LengthLimitingTextInputFormatter(10),
@@ -246,17 +263,23 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                       SizedBox(height: 16),
                       
+                      // EMAIL
                       TextFormField( 
                         controller: _emailController,
+                        focusNode: _emailFocus,
                         decoration: const InputDecoration(labelText: 'Enter email (must be @stu.pnj.ac.id)'),
                         keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_passwordFocus),
                         validator: _validateEmail,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
                       SizedBox(height: 16),
                       
+                      // PASSWORD
                       TextFormField( 
                         controller: _passwordController,
+                        focusNode: _passwordFocus,
                         obscureText: _isPasswordObscured,
                         decoration: InputDecoration(
                           labelText: 'Enter password',
@@ -271,13 +294,17 @@ class _RegisterPageState extends State<RegisterPage> {
                             },
                           ),
                         ),
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_confirmPasswordFocus),
                         validator: _validatePassword,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
                        SizedBox(height: 16),
                       
+                      // CONFIRM PASSWORD
                       TextFormField( 
                         controller: _confirmPasswordController,
+                        focusNode: _confirmPasswordFocus,
                         obscureText: _isConfirmPasswordObscured,
                         decoration: InputDecoration(
                           labelText: 'Confirm password',
@@ -292,6 +319,8 @@ class _RegisterPageState extends State<RegisterPage> {
                             },
                           ),
                         ),
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _signUp(),
                         validator: _validateConfirmPassword,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
