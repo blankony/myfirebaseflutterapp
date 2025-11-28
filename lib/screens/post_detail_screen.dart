@@ -6,12 +6,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart'; 
 import 'package:cached_network_image/cached_network_image.dart'; 
-import 'package:video_player/video_player.dart'; // REQUIRED
+import 'package:video_player/video_player.dart'; 
 import '../widgets/blog_post_card.dart'; 
 import '../widgets/comment_tile.dart'; 
 import '../services/prediction_service.dart'; 
 import '../services/cloudinary_service.dart'; 
 import '../main.dart'; 
+import '../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -21,7 +22,6 @@ class PostDetailScreen extends StatefulWidget {
   final String postId;
   final Map<String, dynamic>? initialPostData;
   final String heroContextId;
-  // FIX: Added this parameter to resolve the build error
   final VideoPlayerController? preloadedController; 
 
   const PostDetailScreen({
@@ -29,7 +29,7 @@ class PostDetailScreen extends StatefulWidget {
     required this.postId,
     this.initialPostData,
     this.heroContextId = 'feed', 
-    this.preloadedController, // FIX: Accept the controller
+    this.preloadedController,
   });
 
   @override
@@ -99,7 +99,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       mediaUrl = await _cloudinaryService.uploadMedia(_selectedMediaFile!);
       if (mediaUrl == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload media. Please try again.')));
+          OverlayService().showTopNotification(context, "Media upload failed", Icons.cloud_off, (){}, color: Colors.red);
           setState(() { _isSending = false; });
         }
         return;
@@ -170,7 +170,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to post comment: $e')));
+        OverlayService().showTopNotification(context, "Failed to reply", Icons.error, (){}, color: Colors.red);
         setState(() { _isSending = false; }); 
       }
     }
@@ -215,7 +215,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         isClickable: false, 
                         isDetailView: true, 
                         heroContextId: widget.heroContextId,
-                        // FIX: Pass the controller to the card so it doesn't reload
                         preloadedController: widget.preloadedController, 
                       );
                     },

@@ -12,6 +12,7 @@ import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../image_viewer_screen.dart'; 
 import 'settings_page.dart'; 
+import '../../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -106,7 +107,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           'isRead': false,
         });
 
-    } catch (e) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to follow: $e'))); }
+    } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Failed to follow", Icons.error, (){}, color: Colors.red); }
   }
 
   Future<void> _unfollowUser() async {
@@ -126,7 +127,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         .doc(notificationId)
         .delete();
 
-    } catch (e) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to unfollow: $e'))); }
+    } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Failed to unfollow", Icons.error, (){}, color: Colors.red); }
   }
 
   void _shareProfile(String name) {
@@ -175,6 +176,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return 'Joined $formattedDate';
   }
 
+  // --- REFRESH ACTION ---
+  Future<void> _handleRefresh() async {
+    // 1. Wait briefly for visual effect
+    await Future.delayed(Duration(seconds: 1));
+    // 2. Trigger rebuild to re-run FutureBuilders (fetching pinnedPostId)
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_userId == null) {
@@ -184,131 +193,136 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
 
-    Widget content = NestedScrollView(
-      controller: _scrollController,
-      key: PageStorageKey('profile_nested_scroll_$_userId'), 
-      physics: AlwaysScrollableScrollPhysics(),
-      headerSliverBuilder: (context, innerBoxIsScrolled) {
-        return [
-          StreamBuilder<DocumentSnapshot>(
-            stream: _firestore.collection('users').doc(_userId).snapshots(),
-            builder: (context, snapshot) {
-              final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-              final String name = data['name'] ?? '';
-              final bool isMyProfile = _user?.uid == _userId;
-              
-              final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
-              final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
-              final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
-
-              return SliverAppBar(
-                pinned: true,
-                elevation: 0,
-                backgroundColor: appBarBgColor, 
-                systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-                automaticallyImplyLeading: widget.includeScaffold,
-                iconTheme: IconThemeData(
-                  color: iconColor, 
-                ),
-                title: AnimatedOpacity(
-                  opacity: _isScrolled ? 1.0 : 0.0,
-                  duration: Duration(milliseconds: 200),
-                  child: Text(
-                    name, 
-                    style: TextStyle(
-                      color: titleColor,
-                      fontWeight: FontWeight.bold
-                    )
-                  ),
-                ),
-                centerTitle: false,
-                actions: [
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_vert, color: iconColor),
-                    onSelected: (value) {
-                      if (value == 'share') _shareProfile(name);
-                      if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
-                      if (value == 'logout') _signOut(context);
-                      if (value == 'block') _blockUser(name);
-                    },
-                    itemBuilder: (BuildContext context) {
-                      if (isMyProfile) {
-                        return [
-                          PopupMenuItem(
-                            value: 'share',
-                            child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
-                          ),
-                          PopupMenuItem(
-                            value: 'settings',
-                            child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
-                          ),
-                          PopupMenuItem(
-                            value: 'logout',
-                            child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
-                          ),
-                        ];
-                      } else {
-                        return [
-                          PopupMenuItem(
-                            value: 'share',
-                            child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
-                          ),
-                          PopupMenuItem(
-                            value: 'block',
-                            child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
-                          ),
-                        ];
-                      }
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
-
-          SliverToBoxAdapter(
-            child: StreamBuilder<DocumentSnapshot>(
+    Widget content = RefreshIndicator(
+      onRefresh: _handleRefresh,
+      color: TwitterTheme.blue,
+      edgeOffset: widget.includeScaffold ? 100 : 0, // Adjust offset if under AppBar
+      child: NestedScrollView(
+        controller: _scrollController,
+        key: PageStorageKey('profile_nested_scroll_$_userId'), 
+        physics: AlwaysScrollableScrollPhysics(),
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            StreamBuilder<DocumentSnapshot>(
               stream: _firestore.collection('users').doc(_userId).snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-                
-                final data = snapshot.data!.data() as Map<String, dynamic>;
+                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+                final String name = data['name'] ?? '';
                 final bool isMyProfile = _user?.uid == _userId;
                 
-                return _buildUnifiedProfileHeader(context, data, isMyProfile);
+                final Color appBarBgColor = isDarkMode ? Color(0xFF15202B) : TwitterTheme.white;
+                final Color iconColor = isDarkMode ? TwitterTheme.white : TwitterTheme.blue;
+                final Color titleColor = isDarkMode ? TwitterTheme.white : TwitterTheme.black;
+
+                return SliverAppBar(
+                  pinned: true,
+                  elevation: 0,
+                  backgroundColor: appBarBgColor, 
+                  systemOverlayStyle: isDarkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+                  automaticallyImplyLeading: widget.includeScaffold,
+                  iconTheme: IconThemeData(
+                    color: iconColor, 
+                  ),
+                  title: AnimatedOpacity(
+                    opacity: _isScrolled ? 1.0 : 0.0,
+                    duration: Duration(milliseconds: 200),
+                    child: Text(
+                      name, 
+                      style: TextStyle(
+                        color: titleColor,
+                        fontWeight: FontWeight.bold
+                      )
+                    ),
+                  ),
+                  centerTitle: false,
+                  actions: [
+                    PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: iconColor),
+                      onSelected: (value) {
+                        if (value == 'share') _shareProfile(name);
+                        if (value == 'settings') Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsPage()));
+                        if (value == 'logout') _signOut(context);
+                        if (value == 'block') _blockUser(name);
+                      },
+                      itemBuilder: (BuildContext context) {
+                        if (isMyProfile) {
+                          return [
+                            PopupMenuItem(
+                              value: 'share',
+                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Profile')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'settings',
+                              child: Row(children: [Icon(Icons.settings_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Settings')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'logout',
+                              child: Row(children: [Icon(Icons.logout, color: Colors.red), SizedBox(width: 8), Text('Logout', style: TextStyle(color: Colors.red))]),
+                            ),
+                          ];
+                        } else {
+                          return [
+                            PopupMenuItem(
+                              value: 'share',
+                              child: Row(children: [Icon(Icons.share_outlined, color: theme.iconTheme.color), SizedBox(width: 8), Text('Share Account')]),
+                            ),
+                            PopupMenuItem(
+                              value: 'block',
+                              child: Row(children: [Icon(Icons.block_outlined, color: Colors.red), SizedBox(width: 8), Text('Block @$name', style: TextStyle(color: Colors.red))]),
+                            ),
+                          ];
+                        }
+                      },
+                    ),
+                  ],
+                );
               },
             ),
-          ),
 
-          SliverPersistentHeader(
-            delegate: _SliverAppBarDelegate(
-              TabBar(
-                controller: _tabController,
-                onTap: (index) {
-                  _targetTabIndex = index;
+            SliverToBoxAdapter(
+              child: StreamBuilder<DocumentSnapshot>(
+                stream: _firestore.collection('users').doc(_userId).snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+                  
+                  final data = snapshot.data!.data() as Map<String, dynamic>;
+                  final bool isMyProfile = _user?.uid == _userId;
+                  
+                  return _buildUnifiedProfileHeader(context, data, isMyProfile);
                 },
-                tabs: [
-                  Tab(text: 'Posts'),
-                  Tab(text: 'Reposts'),
-                  Tab(text: 'Replies'),
-                ],
-                labelColor: theme.primaryColor,
-                unselectedLabelColor: theme.hintColor,
-                indicatorColor: theme.primaryColor,
               ),
             ),
-            pinned: true,
-          ),
-        ];
-      },
-      body: TabBarView(
-        controller: _tabController,
-        physics: NeverScrollableScrollPhysics(), 
-        children: [
-          _buildMyPosts(_userId),
-          _buildMyReposts(_userId),
-          _buildMyReplies(_userId),
-        ],
+
+            SliverPersistentHeader(
+              delegate: _SliverAppBarDelegate(
+                TabBar(
+                  controller: _tabController,
+                  onTap: (index) {
+                    _targetTabIndex = index;
+                  },
+                  tabs: [
+                    Tab(text: 'Posts'),
+                    Tab(text: 'Reposts'),
+                    Tab(text: 'Replies'),
+                  ],
+                  labelColor: theme.primaryColor,
+                  unselectedLabelColor: theme.hintColor,
+                  indicatorColor: theme.primaryColor,
+                ),
+              ),
+              pinned: true,
+            ),
+          ];
+        },
+        body: TabBarView(
+          controller: _tabController,
+          physics: NeverScrollableScrollPhysics(), 
+          children: [
+            _buildMyPosts(_userId),
+            _buildMyReposts(_userId),
+            _buildMyReplies(_userId),
+          ],
+        ),
       ),
     );
 
@@ -322,8 +336,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return content;
   }
 
-  // ... (Header UI helper methods: _buildUnifiedProfileHeader, _buildDepartmentBadge, etc. same as before) ...
-  // Re-including them for completeness so the file is ready to use
   Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name';
@@ -333,6 +345,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String? departmentCode = data['departmentCode']; 
     final String? departmentName = data['department'];
     final String? studyProgramName = data['studyProgram'];
+    
     final List<dynamic> following = data['following'] ?? [];
     final List<dynamic> followers = data['followers'] ?? [];
     final String? bannerImageUrl = data['bannerImageUrl']; 
@@ -340,8 +353,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     const double bannerHeight = 150.0;
     const double avatarRadius = 45.0;
     const double headerStackHeight = bannerHeight + 60.0;
+
     final bool isLongBio = bio.length > 100;
     final String displayBio = _isBioExpanded ? bio : (isLongBio ? bio.substring(0, 100) + '...' : bio);
+
+    // Hero Tags Unik
     final String bannerTag = 'profile_banner_${_userId}';
     final String avatarTag = 'profile_avatar_${_userId}';
 
@@ -353,6 +369,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: Stack(
             clipBehavior: Clip.none,
             children: [
+              // --- BANNER (MODIFIED) ---
               GestureDetector(
                 onTap: () {
                   if (bannerImageUrl != null && bannerImageUrl.isNotEmpty) {
@@ -362,14 +379,24 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 child: Hero(
                   tag: bannerTag,
                   child: Container(
-                    height: bannerHeight, width: double.infinity,
-                    decoration: BoxDecoration(color: TwitterTheme.darkGrey),
+                    height: bannerHeight,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: TwitterTheme.darkGrey, 
+                    ),
                     child: bannerImageUrl != null && bannerImageUrl.isNotEmpty
-                      ? CachedNetworkImage(imageUrl: bannerImageUrl, fit: BoxFit.cover, placeholder: (context, url) => Container(color: TwitterTheme.darkGrey), errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey))
+                      ? CachedNetworkImage(
+                          imageUrl: bannerImageUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(color: TwitterTheme.darkGrey),
+                          errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey),
+                        )
                       : null,
                   ),
                 ),
               ),
+              
+              // --- AVATAR (MODIFIED) ---
               Positioned(
                 top: bannerHeight - avatarRadius,
                 left: 16,
@@ -390,6 +417,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   ),
                 ),
               ),
+
               Positioned(
                 top: bannerHeight + 16,
                 right: 16,
@@ -403,14 +431,24 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     isMyProfile
                         ? OutlinedButton(
                             onPressed: () async {
-                              final result = await Navigator.of(context).push(MaterialPageRoute(builder: (context) => EditProfileScreen()));
-                              if (mounted && result == true) {
-                                _targetTabIndex = 0;
-                                _tabController.animateTo(0); 
+                              final result = await Navigator.of(context).push(
+                                MaterialPageRoute(builder: (context) => EditProfileScreen()),
+                              );
+                              
+                              if (mounted) {
+                                if (result == true) {
+                                  _targetTabIndex = 0;
+                                  _tabController.animateTo(0); 
+                                }
                                 setState(() {});
                               }
                             },
-                            style: OutlinedButton.styleFrom(foregroundColor: theme.textTheme.bodyLarge?.color, side: BorderSide(color: theme.dividerColor), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), visualDensity: VisualDensity.compact),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: theme.textTheme.bodyLarge?.color,
+                              side: BorderSide(color: theme.dividerColor),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              visualDensity: VisualDensity.compact,
+                            ),
                             child: Text("Edit Profile"),
                           )
                         : _buildFollowButton(followers),
@@ -420,6 +458,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ],
           ),
         ),
+
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Column(
@@ -430,16 +469,43 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               SizedBox(height: 4),
               Text(nim, style: theme.textTheme.titleSmall),
               SizedBox(height: 8),
-              Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge?.copyWith(fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal)),
+              
+              Text(
+                displayBio.isEmpty ? "No bio set." : displayBio,
+                style: theme.textTheme.bodyLarge?.copyWith(fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal),
+              ),
               if (isLongBio)
                 GestureDetector(
-                  onTap: () => setState(() => _isBioExpanded = !_isBioExpanded),
-                  child: Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(_isBioExpanded ? "Show less" : "Read more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold))),
+                  onTap: () {
+                    setState(() {
+                      _isBioExpanded = !_isBioExpanded;
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4.0),
+                    child: Text(
+                      _isBioExpanded ? "Show less" : "Read more",
+                      style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 ),
+
               SizedBox(height: 8),
-              Row(children: [Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor), SizedBox(width: 8), Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall)]),
+              Row(
+                children: [
+                  Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor),
+                  SizedBox(width: 8),
+                  Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall),
+                ],
+              ),
               SizedBox(height: 8),
-              Row(children: [_buildStatText(context, following.length, "Following"), SizedBox(width: 16), _buildStatText(context, followers.length, "Followers")]),
+              Row(
+                children: [
+                  _buildStatText(context, following.length, "Following"),
+                  SizedBox(width: 16),
+                  _buildStatText(context, followers.length, "Followers"),
+                ],
+              ),
               SizedBox(height: 16),
             ],
           ),
@@ -449,18 +515,82 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _showBadgeInfo(BuildContext context, String dept, String prodi) {
-    showDialog(context: context, builder: (context) => AlertDialog(title: Text("Academic Info"), content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(dept, style: TextStyle(fontSize: 16)), SizedBox(height: 16), Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(prodi, style: TextStyle(fontSize: 16))]), actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("Close", style: TextStyle(color: TwitterTheme.blue)))]));
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Academic Info"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(dept, style: TextStyle(fontSize: 16)),
+            SizedBox(height: 16),
+            Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(prodi, style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("Close", style: TextStyle(color: TwitterTheme.blue)),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildDepartmentBadge(String code, String? fullDeptName, String? fullProdiName) {
     final parts = code.split('-');
     if (parts.length < 2) return SizedBox.shrink();
-    final dept = parts[0]; final prodi = parts[1]; 
-    Color deptColor = (dept.toUpperCase() == 'TE') ? Color(0xFF00008B) : (dept.toUpperCase() == 'TS' ? Color(0xFF5D4037) : Colors.primaries[dept.hashCode.abs() % Colors.primaries.length]);
-    Color prodiColor = (prodi.toUpperCase() == 'BM') ? Colors.orange : Colors.primaries[prodi.hashCode.abs() % Colors.primaries.length];
+
+    final dept = parts[0]; 
+    final prodi = parts[1]; 
+    
+    Color deptColor;
+    if (dept.toUpperCase() == 'TE') {
+       deptColor = Color(0xFF00008B); 
+    } else if (dept.toUpperCase() == 'TS') {
+       deptColor = Color(0xFF5D4037); 
+    } else {
+       deptColor = Colors.primaries[dept.hashCode.abs() % Colors.primaries.length];
+    }
+    
+    Color prodiColor;
+    if (prodi.toUpperCase() == 'BM') {
+      prodiColor = Colors.orange; 
+    } else {
+      prodiColor = Colors.primaries[prodi.hashCode.abs() % Colors.primaries.length];
+    }
+
     return GestureDetector(
-      onTap: () { if (fullDeptName != null && fullProdiName != null) _showBadgeInfo(context, fullDeptName, fullProdiName); },
-      child: Row(mainAxisSize: MainAxisSize.min, children: [Container(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: deptColor, borderRadius: BorderRadius.circular(4)), child: Text(dept, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))), SizedBox(width: 4), Container(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: prodiColor, borderRadius: BorderRadius.circular(4)), child: Text(prodi, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))]),
+      onTap: () {
+        if (fullDeptName != null && fullProdiName != null) {
+          _showBadgeInfo(context, fullDeptName, fullProdiName);
+        }
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: deptColor, 
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(dept, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+          SizedBox(width: 4), 
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: prodiColor,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(prodi, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -469,30 +599,58 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String? colorHex = data['avatarHex'];
     final String? profileImageUrl = data['profileImageUrl']; 
     final Color bgColor = AvatarHelper.getColor(colorHex);
+    
     if (profileImageUrl != null && profileImageUrl.isNotEmpty) {
-      return CircleAvatar(radius: 45, backgroundColor: Colors.grey, backgroundImage: CachedNetworkImageProvider(profileImageUrl));
+      return CircleAvatar(
+        radius: 45,
+        backgroundColor: Colors.grey,
+        backgroundImage: CachedNetworkImageProvider(profileImageUrl), 
+      );
     }
-    return CircleAvatar(radius: 45, backgroundColor: bgColor, child: Icon(AvatarHelper.getIcon(iconId), size: 50, color: Colors.white));
+
+    return CircleAvatar(
+      radius: 45,
+      backgroundColor: bgColor,
+      child: Icon(
+        AvatarHelper.getIcon(iconId),
+        size: 50,
+        color: Colors.white,
+      ),
+    );
   }
 
   Widget _buildFollowButton(List<dynamic> followers) {
     final bool amIFollowing = followers.contains(_user?.uid);
     return amIFollowing
-      ? OutlinedButton(onPressed: _unfollowUser, child: Text("Unfollow"))
-      : ElevatedButton(onPressed: _followUser, style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white), child: Text("Follow"));
+      ? OutlinedButton(
+          onPressed: _unfollowUser,
+          child: Text("Unfollow"),
+        )
+      : ElevatedButton(
+          onPressed: _followUser,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TwitterTheme.blue,
+            foregroundColor: Colors.white,
+          ),
+          child: Text("Follow"),
+        );
   }
 
   Widget _buildStatText(BuildContext context, int count, String label) {
     final theme = Theme.of(context);
-    return Row(children: [Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), SizedBox(width: 4), Text(label, style: theme.textTheme.titleSmall)]);
+    return Row(
+      children: [
+        Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        SizedBox(width: 4),
+        Text(label, style: theme.textTheme.titleSmall),
+      ],
+    );
   }
 
-  // --- UPDATED: Pin Logic in My Posts ---
   Widget _buildMyPosts(String userId) {
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(userId).get(),
       builder: (context, userSnapshot) {
-        // 1. Get Pinned Post ID
         String? pinnedPostId;
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           final data = userSnapshot.data!.data() as Map<String, dynamic>;
@@ -509,7 +667,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             final docs = snapshot.data?.docs ?? [];
             if (docs.isEmpty) return Center(child: Text('No posts yet.'));
 
-            // 2. Sort: Move Pinned Post to Top
             if (pinnedPostId != null) {
               final pinnedIndex = docs.indexWhere((doc) => doc.id == pinnedPostId);
               if (pinnedIndex != -1) {
@@ -527,16 +684,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               itemBuilder: (context, index) {
                 final doc = docs[index];
                 final data = doc.data() as Map<String, dynamic>;
-                
-                // 3. Pass isPinned to Card
-                final isPinned = doc.id == pinnedPostId;
-
                 return BlogPostCard(
                   postId: doc.id,
                   postData: data,
                   isOwner: data['userId'] == _auth.currentUser?.uid,
-                  heroContextId: 'profile_posts', 
-                  isPinned: isPinned, 
+                  heroContextId: 'profile_posts',
+                  isPinned: doc.id == pinnedPostId,
                 );
               },
             );
@@ -583,13 +736,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- UPDATED: Repost Logic (Combined) ---
   Widget _buildMyReposts(String userId) {
     return CustomScrollView(
       key: const PageStorageKey('profile_reposts_list'),
       physics: const NeverScrollableScrollPhysics(),
       slivers: [
-        // 1. Reposted Posts
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
@@ -616,7 +767,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             );
           },
         ),
-        // 2. Reposted Comments (Using CollectionGroup)
         StreamBuilder<QuerySnapshot>(
           stream: _firestore.collectionGroup('comments').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
@@ -624,10 +774,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                return SliverToBoxAdapter(child: SizedBox.shrink());
             }
             final docs = snapshot.data?.docs ?? [];
-            if (docs.isEmpty && snapshot.connectionState == ConnectionState.done) {
-               // Optional: Show empty state only if BOTH are empty, hard to track here
-               return SliverToBoxAdapter(child: SizedBox.shrink());
-            }
+            if (docs.isEmpty) return SliverToBoxAdapter(child: SizedBox.shrink());
 
             return SliverList(
               delegate: SliverChildBuilderDelegate(
@@ -643,7 +790,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     postId: originalPostId,
                     isOwner: data['userId'] == _auth.currentUser?.uid,
                     showPostContext: true,
-                    heroContextId: 'profile_reposts_comment', 
+                    heroContextId: 'profile_reposts', 
                   );
                 },
                 childCount: docs.length,

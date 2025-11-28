@@ -1,71 +1,89 @@
 # SAPA PNJ (Sarana Pengguna Aplikasi Politeknik Negeri Jakarta)
 
-SAPA PNJ is a specialized social media and communication platform designed exclusively for the Politeknik Negeri Jakarta (PNJ) community.
-
-## Meaning of the Name
-
-Sarana Pengguna Aplikasi: Refers to its primary function as a digital tool or container designed for use by PNJ community members (students, lecturers, staff). It emphasizes that this platform is the application infrastructure for its users.
-
-Politeknik Negeri Jakarta (PNJ): Affirms that this application focuses exclusively on the PNJ academic environment.
-Overall, SAPA PNJ serves as a medium to facilitate communication, information sharing, and real-time social interaction among all users in the Politeknik Negeri Jakarta campus environment.
+**SAPA PNJ** is a modern, feature-rich social media and communication platform designed exclusively for the Politeknik Negeri Jakarta (PNJ) community. Built with Flutter and backed by a powerful Firebase backend, this application serves as a central hub for students and lecturers to connect, share information, and interact in a dynamic academic environment.
 
 ## Project Overview
-A Flutter-based social platform for the PNJ community. Backed by Firebase for authentication, Firestore, and security rules. Built with a light-first UI.
+
+This project is a comprehensive social platform that goes beyond basic posting and liking. It incorporates a sophisticated, multi-step user onboarding process, AI-powered assistance using **Google Gemini**, rich media handling with **Cloudinary**, and a real-time notification system. The user interface is designed to be intuitive and clean, with support for both light and dark themes, ensuring a great user experience.
+
+The architecture emphasizes denormalized data for a fast-reading feed, a secure authentication flow restricted to PNJ emails, and a personalized experience through department/study program identification.
 
 ## Core Features
 
-- Authentication: Firebase Authentication (login, register, password reset), persistent sessions, and optional email verification.
-- Real-time Interaction: Real-time Firestore backend with full CRUD for posts and replies.
-- Social Features: Like/Unlike, Repost, Follow/Unfollow interactions.
-- Feed: Live feed sorted by timestamp.
-- User Profiles: Profiles with bio, name, NIM, email, and navigation to other profiles.
-- Customization: Light/Dark theme toggle.
-- Account Management: Profile editing, password change, logout, delete account, and change profile picture.
-- AI Assistent: Real Gemini Based Backended AI Assistant integrated
-- Search: Search for posts, and users
+### 1. Authentication & Onboarding
+- **Exclusive Registration:** User registration is restricted to official PNJ student emails (`@stu.pnj.ac.id`), ensuring the community remains exclusive.
+- **Complete Auth Suite:** Full support for login, registration, and password reset.
+- **Guided Setup Flow:** A multi-step onboarding process for new users:
+    - **Profile Setup:** Set up an initial profile picture and banner.
+    - **Academic Info:** Select department and study program from official PNJ data.
+    - **Email Verification:** A dedicated step to encourage email verification for full app access.
+- **Smart Decision Gates:** After login, the app intelligently directs users to the appropriate screen, whether it's completing their profile or heading to the main dashboard.
+
+### 2. Social & Real-time Interaction
+- **Real-time Feed:** A live home feed showing the latest posts from the community, with a "Recommended" tab for personalized content.
+- **Full CRUD:** Create, read, update, and delete posts and comments.
+- **Social Actions:** Users can **Like**, **Repost**, and **Comment** on posts.
+- **Follow System:** Follow and unfollow other users to customize the feed and interactions.
+
+### 3. AI-Powered Features (Google Gemini)
+- **AI Assistant:** A dedicated, conversational AI assistant powered by `gemini-1.5-flash` to answer questions and provide help in a friendly, casual tone. Chat history is saved per user.
+- **Predictive Text:** AI-powered text completion suggests relevant words and phrases while creating posts or comments, speeding up user input.
+
+### 4. Media Handling
+- **Image & Video Uploads:** Users can attach images and videos to posts and comments.
+- **Cloudinary Integration:** All media is uploaded to Cloudinary for optimized storage and delivery.
+- **Image Cropper & Editor:** An integrated image editor allows users to crop, rotate, and adjust images before posting.
+- **Video Trimmer:** A built-in tool to trim videos to a maximum length before uploading.
+- **Media Viewer:** A fullscreen, immersive media viewer for photos and videos with action buttons (like, share, etc.).
+
+### 5. Profiles & Account Management
+- **Detailed User Profiles:** Profiles display user's name, NIM, bio, department, study program, avatar, and banner.
+- **Post History:** Profile pages include tabs for a user's **Posts**, **Reposts**, and **Replies**.
+- **Pin Post to Profile:** Users can pin one of their posts to the top of their profile page.
+- **Full Account Control:** Users can edit their profile, change their password, log out, or permanently delete their account.
+
+### 6. UI & UX
+- **Theming:** Seamlessly switch between **Light and Dark** themes.
+- **Side Panel & Drawers:** An intuitive side panel for navigation and a dedicated drawer for AI chat history.
+- **In-App Notifications:** A real-time notification system with a top-down overlay for new alerts and a bottom sheet to view all activity history (likes, comments, follows, etc.).
+- **Haptic Feedback:** Subtle haptic feedback on interactions for a more tactile experience.
 
 ## Screenshots
-### Landing & Auth
-| Landing | Login | Register |
-|--------|--------|----------|
-| <img src="screenshots/landing.png" width="250"/> | <img src="screenshots/login.png" width="250"/> | <img src="screenshots/register.png" width="250"/> |
+### Authentication & Setup
+| Welcome | Login | Register | Forgot Password | Setup Profile | Setup Department | Setup Verification |
+|---|---|---|---|---|---|---|
+| <img src="screenshots/welcome.png" width="250"/> | <img src="screenshots/login.png" width="250"/> | <img src="screenshots/register.png" width="250"/> | <img src="screenshots/forgot_password.png" width="250"/> | <img src="screenshots/setup_profile.png" width="250"/> | <img src="screenshots/setup_department.png" width="250"/> | <img src="screenshots/setup_verification.png" width="250"/> |
 
-### Home & Profile
-| Home | Profile | Others Profile |
-|------|--------|-----------------|
-| <img src="screenshots/home.png" width="250"/> | <img src="screenshots/profile.png" width="250"/> | <img src="screenshots/others.png" width="250"/> |
+### Main App
+| Home | AI Assistant | Search | My Profile | Other's Profile |
+|---|---|---|---|---|
+| <img src="screenshots/home.png" width="250"/> | <img src="screenshots/ai_assistant.png" width="250"/> | <img src="screenshots/search.png" width="250"/> | <img src="screenshots/profile.png" width="250"/> | <img src="screenshots/others.png" width="250"/> |
 
-### Posting & Interacting
-| Post | Reply | Like |
-|------|--------|------|
-| <img src="screenshots/post.png" width="250"/> | <img src="screenshots/reply.png" width="250"/> | <img src="screenshots/repost_like.png" width="250"/> |
+### Content Creation & Viewing
+| Create Post | Post Detail | Image Viewer | Video Trimmer |
+|---|---|---|---|
+| <img src="screenshots/create_post.png" width="250"/> | <img src="screenshots/post_detail.png" width="250"/> | <img src="screenshots/image_viewer.png" width="250"/> | <img src="screenshots/video_trimmer.png" width="250"/> |
 
-### Settings
-| Settings | Edit Profile | About |
-|----------|--------------|-------|
-| <img src="screenshots/settings.png" width="250"/> | <img src="screenshots/edit_profile.png" width="250"/> | <img src="screenshots/about.png" width="250"/> |
+### Account Management
+| Settings | Account Center | Edit Profile | Change Password | About |
+|---|---|---|---|---|
+| <img src="screenshots/settings.png" width="250"/> | <img src="screenshots/account_center.png" width="250"/> | <img src="screenshots/edit_profile.png" width="250"/> | <img src="screenshots/change_password.png" width="250"/> | <img src="screenshots/about.png" width="250"/> |
 
 ---
 
 ## Getting Started
 
-Firebase configuration is required before running the application.
+Firebase and API key configuration is required before running the application.
 
----
+### 1. Firebase Project Setup
+- **Create a Firebase Project:** Go to the [Firebase Console](https://console.firebase.google.com/) and create a new project.
+- **Add FlutterApp:** Follow the setup guide to connect your Flutter application.
+- **Enable Services:**
+  - **Authentication:** Enable the `Email/Password` sign-in provider.
+  - **Firestore:** Create a Firestore database and use the security rules below.
 
-## 1. Firebase Project Setup
-
-### Create a Firebase Project
-- Create a new project in the Firebase Console.
-
-### Add FlutterApp
-- Follow the setup guide
-
-### Enable Services
-- Authentication → Enable Email/Password  
-- Firestore → Create database  
-
-### Firestore Security Rules
+### 2. Firestore Security Rules
+Copy and paste the following rules into your Firestore rules editor:
 ```txt
 rules_version = '2';
 service cloud.firestore {
@@ -120,38 +138,30 @@ service cloud.firestore {
   }
 }
 ```
-### Firestore Indexes
 
-**Posts Tab (Collection):**
+### 3. Environment Setup
+The application uses AI and media upload features that require API keys.
+1. Create a file named `.env` in the root of the project.
+2. Add your secret keys to this file:
+   ```env
+   # Google AI for Gemini features
+   GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 
-* Collection ID: `posts`
-* `userId` Ascending
-* `timestamp` Descending
+   # Cloudinary for media uploads
+   CLOUDINARY_CLOUD_NAME=YOUR_CLOUDINARY_CLOUD_NAME
+   CLOUDINARY_UPLOAD_PRESET=YOUR_CLOUDINARY_UPLOAD_PRESET
+   ```
 
-**Replies Tab (Collection Group):**
-
-* Collection ID: `comments`
-* `userId` Ascending
-* `timestamp` Descending
-
----
-
-## 2. Local Setup
-
-Clone:
-
+### 4. Local Setup
+Clone the repository:
 ```sh
 git clone https://github.com/blankony/myfirebaseflutterapp
 ```
-
-Install:
-
+Install dependencies:
 ```sh
 flutter pub get
 ```
-
-Run:
-
+Run the application:
 ```sh
 flutter run
 ```
@@ -160,8 +170,11 @@ flutter run
 
 ## Main Dependencies
 
-* `firebase_core`
-* `firebase_auth`
-* `cloud_firestore`
-* `timeago`
+- `firebase_core`, `firebase_auth`, `cloud_firestore`
+- `google_generative_ai` for AI features.
+- `cloudinary_public` via `http` for media uploads.
+- `image_picker`, `image_cropper`, `video_player`, `video_compress` for media handling.
+- `flutter_markdown`, `cached_network_image`, `timeago` for UI.
+- `flutter_dotenv` for environment variable management.
+- `share_plus`, `url_launcher` for system integrations.
 

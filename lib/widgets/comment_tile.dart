@@ -10,6 +10,7 @@ import '../screens/image_viewer_screen.dart';
 import 'package:timeago/timeago.dart' as timeago; 
 import '../main.dart';
 import 'package:cached_network_image/cached_network_image.dart'; 
+import '../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -177,11 +178,11 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
         'commentCount': FieldValue.increment(-1),
       });
       await writeBatch.commit();
+      
+      if(mounted) OverlayService().showTopNotification(context, "Reply deleted", Icons.delete_outline, (){});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete reply: $e')),
-        );
+        OverlayService().showTopNotification(context, "Failed to delete", Icons.error, (){}, color: Colors.red);
       }
     }
   }
@@ -224,12 +225,13 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
           .update({
         'text': _editController.text,
       });
-      if(mounted) Navigator.of(context).pop(); 
+      if(mounted) {
+        Navigator.of(context).pop(); 
+        OverlayService().showTopNotification(context, "Reply updated", Icons.check_circle, (){});
+      }
     } catch (e) {
       if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update reply: $e'))
-        );
+        OverlayService().showTopNotification(context, "Failed to update", Icons.error, (){}, color: Colors.red);
         Navigator.of(context).pop(); 
       }
     }
@@ -435,10 +437,11 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                 color: Colors.transparent,
                 child: Stack(
                   children: [
+                    // THREAD VISUALS: Full vertical line
                     if (isThreaded)
                       Positioned(
                         top: 0,
-                        bottom: 0, // Extend all the way down
+                        bottom: -10, // Extend below to connect
                         left: 20, 
                         child: Container(
                           width: 2,

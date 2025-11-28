@@ -6,6 +6,7 @@ import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../change_password_screen.dart';
 import '../welcome_screen.dart'; 
+import '../../services/overlay_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -87,7 +88,6 @@ class AccountCenterPage extends StatelessWidget {
                         // Attempt re-auth
                         await user.reauthenticateWithCredential(credential);
                         
-                        // FIX: Check mounted before using context after await
                         if (context.mounted) {
                           Navigator.of(context).pop(); // Close password dialog
                           _showFinalDeleteConfirmation(ctx); // Use parent ctx or ensure validity
@@ -176,15 +176,18 @@ class AccountCenterPage extends StatelessWidget {
         // 2. Delete Auth Account
         await user.delete();
         
-        // FIX: Crucial check before using context
         if (context.mounted) {
           // Dismiss loading dialog if possible
           if (Navigator.canPop(context)) {
             Navigator.of(context).pop(); 
           }
           
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Account deleted successfully.'))
+          OverlayService().showTopNotification(
+            context, 
+            "Account deleted successfully.", 
+            Icons.delete_forever, 
+            (){},
+            color: Colors.grey
           );
           
           // Navigate to Welcome Screen and remove all previous routes
@@ -195,15 +198,18 @@ class AccountCenterPage extends StatelessWidget {
         }
       }
     } catch (e) {
-      // FIX: Check mounted before showing error
       if (context.mounted) {
         // Try to pop loading dialog
         if (Navigator.canPop(context)) {
            Navigator.of(context).pop();
         }
         
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete account: $e'))
+        OverlayService().showTopNotification(
+          context, 
+          "Failed to delete account: $e", 
+          Icons.error, 
+          (){},
+          color: Colors.red
         );
       }
     }

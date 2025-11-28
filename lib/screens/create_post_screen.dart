@@ -748,7 +748,6 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
     );
   }
 }
-
 class _UploadCard extends StatelessWidget {
   final bool isSuccess;
   final bool isError;
@@ -767,52 +766,55 @@ class _UploadCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Material(
-      elevation: 8,
-      borderRadius: BorderRadius.circular(12),
-      color: isDark ? TwitterTheme.darkGrey : Colors.white,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                if (isSuccess)
-                  Icon(Icons.check_circle, color: TwitterTheme.blue)
-                else if (isError)
-                  Icon(Icons.error, color: Colors.red)
-                else
-                  SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    message,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black,
+    // ADDED DISMISSIBLE WRAPPER HERE
+    return Dismissible(
+      key: ValueKey("upload_card_dismiss"),
+      direction: DismissDirection.horizontal,
+      onDismissed: (_) => onDismiss(), // Triggers minimize
+      child: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(12),
+        color: isDark ? TwitterTheme.darkGrey : Colors.white,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  if (isSuccess)
+                    Icon(Icons.check_circle, color: TwitterTheme.blue)
+                  else if (isError)
+                    Icon(Icons.error, color: Colors.red)
+                  else
+                    SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      message,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
                     ),
                   ),
-                ),
-                if (!isSuccess && !isError)
-                  GestureDetector(
-                    onTap: onDismiss,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4.0),
-                      child: Text("Hide", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
-                    ),
+                  // Visual drag handle
+                  Container(
+                    width: 4, height: 24,
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.5), borderRadius: BorderRadius.circular(2)),
+                  )
+                ],
+              ),
+              if (!isSuccess && !isError)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: LinearProgressIndicator(
+                    backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                    valueColor: AlwaysStoppedAnimation(TwitterTheme.blue),
                   ),
-              ],
-            ),
-            if (!isSuccess && !isError)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: LinearProgressIndicator(
-                  backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-                  valueColor: AlwaysStoppedAnimation(TwitterTheme.blue),
-                ),
-              )
-          ],
+                )
+            ],
+          ),
         ),
       ),
     );

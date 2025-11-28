@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../widgets/blog_post_card.dart'; 
 import '../widgets/comment_tile.dart'; 
 import '../main.dart'; 
+import '../../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -45,15 +46,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
 
   Future<void> _followUser() async {
     if (_currentUser == null) return;
-    
-    final batch = _firestore.batch();
-    final myDocRef = _firestore.collection('users').doc(_currentUser!.uid);
-    batch.update(myDocRef, { 'following': FieldValue.arrayUnion([widget.userId]) });
-    final targetDocRef = _firestore.collection('users').doc(widget.userId);
-    batch.update(targetDocRef, { 'followers': FieldValue.arrayUnion([_currentUser!.uid]) });
-    
     try {
+      final batch = _firestore.batch();
+      final myDocRef = _firestore.collection('users').doc(_currentUser!.uid);
+      final targetDocRef = _firestore.collection('users').doc(widget.userId);
+      batch.update(myDocRef, { 'following': FieldValue.arrayUnion([widget.userId]) });
+      batch.update(targetDocRef, { 'followers': FieldValue.arrayUnion([_currentUser!.uid]) });
+      
       await batch.commit();
+      
       final notificationId = 'follow_${_currentUser!.uid}';
       _firestore.collection('users').doc(widget.userId).collection('notifications')
         .doc(notificationId)
@@ -64,27 +65,27 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
           'isRead': false,
         });
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to follow: $e')));
+      if(mounted) OverlayService().showTopNotification(context, 'Failed to follow', Icons.error, (){}, color: Colors.red);
     }
   }
 
   Future<void> _unfollowUser() async {
     if (_currentUser == null) return;
-    
-    final batch = _firestore.batch();
-    final myDocRef = _firestore.collection('users').doc(_currentUser!.uid);
-    batch.update(myDocRef, { 'following': FieldValue.arrayRemove([widget.userId]) });
-    final targetDocRef = _firestore.collection('users').doc(widget.userId);
-    batch.update(targetDocRef, { 'followers': FieldValue.arrayRemove([_currentUser!.uid]) });
-    
     try {
+      final batch = _firestore.batch();
+      final myDocRef = _firestore.collection('users').doc(_currentUser!.uid);
+      final targetDocRef = _firestore.collection('users').doc(widget.userId);
+      batch.update(myDocRef, { 'following': FieldValue.arrayRemove([widget.userId]) });
+      batch.update(targetDocRef, { 'followers': FieldValue.arrayRemove([_currentUser!.uid]) });
+      
       await batch.commit();
+      
       final notificationId = 'follow_${_currentUser!.uid}';
       _firestore.collection('users').doc(widget.userId).collection('notifications')
         .doc(notificationId)
         .delete();
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to unfollow: $e')));
+      if(mounted) OverlayService().showTopNotification(context, 'Failed to unfollow', Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -173,10 +174,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     );
   }
 
-  // ... (Header UI code omitted, identical to profile_page.dart) ...
-  // Assuming helpers like _buildProfileHeader, _buildProfileInfo are same or shared.
-  // For simplicity in this file output, I'll include the necessary logic methods.
-
   Widget _buildProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile, bool amIFollowing) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'User';
@@ -251,7 +248,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
             final docs = snapshot.data?.docs ?? [];
             if (docs.isEmpty) return Center(child: Text('This user has no posts.'));
 
-            // Sort Pinned
+            // Sort Pinned to Top
             if (pinnedPostId != null) {
               final pinnedIndex = docs.indexWhere((doc) => doc.id == pinnedPostId);
               if (pinnedIndex != -1) {

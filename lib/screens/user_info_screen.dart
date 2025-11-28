@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../auth_gate.dart'; 
+import '../services/overlay_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -21,9 +22,13 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
 
   Future<void> _saveProfile() async {
     if (_nameController.text.isEmpty || _nimController.text.isEmpty) { 
-       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in your name and NIM.')), 
-      );
+       OverlayService().showTopNotification(
+         context, 
+         "Please fill in your name and NIM.", 
+         Icons.warning_amber_rounded, 
+         (){},
+         color: Colors.orange
+       );
       return;
     }
 
@@ -37,15 +42,17 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
         'name': _nameController.text.trim(),
         'nim': _nimController.text.trim(), 
         'bio': 'About me...', 
-        // ### PERUBAHAN DI SINI ###
-        'following': [], // Tambahkan daftar following kosong
-        'followers': [], // Tambahkan daftar followers kosong
-        // ### AKHIR PERUBAHAN ###
-      }, SetOptions(merge: true)); // merge: true agar tidak menimpa data lama
+        'following': [], 
+        'followers': [], 
+      }, SetOptions(merge: true));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile saved.')),
+        OverlayService().showTopNotification(
+          context, 
+          "Profile saved.", 
+          Icons.check_circle, 
+          (){},
+          color: Colors.green
         );
          Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const AuthGate()),
@@ -55,9 +62,13 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
 
     } catch (e) {
       if(mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save profile: $e')),
-        );
+         OverlayService().showTopNotification(
+           context, 
+           "Failed to save profile: $e", 
+           Icons.error, 
+           (){},
+           color: Colors.red
+         );
       }
       setState(() { _isLoading = false; });
     }
@@ -72,7 +83,6 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (Build method tidak berubah)
     return Scaffold(
       appBar: AppBar(title: const Text('Complete Your Profile')),
       body: Padding(
@@ -102,4 +112,4 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
       ),
     );
   }
-}
+} 

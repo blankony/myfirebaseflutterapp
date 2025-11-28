@@ -12,6 +12,7 @@ import '../main.dart';
 import 'package:flutter/services.dart'; 
 import 'package:cached_network_image/cached_network_image.dart'; 
 import 'package:video_player/video_player.dart'; 
+import '../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -131,28 +132,31 @@ class _PostMediaPreview extends StatelessWidget {
 
       return AspectRatio( 
         aspectRatio: 4 / 3,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: GestureDetector(
-            onTap: () => _navigateToViewer(context, type: mediaType),
-            child: (mediaType == 'video' && videoController != null)
-                ? _VideoPlayerWidget(controller: videoController!)
-                : Hero( 
-                    tag: heroTag,
-                    transitionOnUserGestures: true,
-                    child: CachedNetworkImage( 
-                        imageUrl: mediaUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                            color: theme.dividerColor.withOpacity(0.5),
-                            child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
-                          ),
-                        errorWidget: (context, url, error) => Container(
-                            color: Colors.red.withOpacity(0.1),
-                            child: Center(child: Text('Failed to load media.', style: TextStyle(color: Colors.red))),
-                          ),
-                      ),
-                  ),
+        // FIX: Moved GestureDetector OUTSIDE of ClipRRect and Hero
+        child: GestureDetector(
+          onTap: () => _navigateToViewer(context, type: mediaType),
+          // FIX: Hero is now the parent of ClipRRect. This ensures the clip 
+          // travels WITH the Hero animation, preventing "bursting" edges.
+          child: Hero(
+            tag: heroTag,
+            transitionOnUserGestures: true,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: (mediaType == 'video' && videoController != null)
+                  ? _VideoPlayerWidget(controller: videoController!)
+                  : CachedNetworkImage( 
+                      imageUrl: mediaUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                          color: theme.dividerColor.withOpacity(0.5),
+                          child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
+                        ),
+                      errorWidget: (context, url, error) => Container(
+                          color: Colors.red.withOpacity(0.1),
+                          child: Center(child: Text('Failed to load media.', style: TextStyle(color: Colors.red))),
+                        ),
+                    ),
+            ),
           ),
         ),
       );
@@ -204,7 +208,7 @@ class BlogPostCard extends StatefulWidget {
   final bool isDetailView;
   final String heroContextId; 
   final VideoPlayerController? preloadedController; 
-  final bool isPinned; // NEW: Pin Status
+  final bool isPinned; 
 
   const BlogPostCard({
     super.key,
@@ -215,7 +219,7 @@ class BlogPostCard extends StatefulWidget {
     this.isDetailView = false,
     this.heroContextId = 'feed', 
     this.preloadedController,
-    this.isPinned = false, // Default false
+    this.isPinned = false, 
   });
 
   @override
@@ -391,34 +395,31 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     if (confirm) {
       try {
         await _firestore.collection('posts').doc(widget.postId).delete();
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post deleted")));
+        if(mounted) OverlayService().showTopNotification(context, "Post deleted", Icons.delete_outline, (){});
       } catch (e) {
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to delete: $e")));
+        if(mounted) OverlayService().showTopNotification(context, "Failed to delete", Icons.error, (){}, color: Colors.red);
       }
     }
   }
 
-  // --- NEW: Toggle Pin Function ---
   Future<void> _togglePin() async {
     final user = _auth.currentUser;
     if (user == null) return;
 
     try {
       if (widget.isPinned) {
-        // Unpin: Remove field
         await _firestore.collection('users').doc(user.uid).update({
           'pinnedPostId': FieldValue.delete(),
         });
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post unpinned.")));
+        if(mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
       } else {
-        // Pin: Set field
         await _firestore.collection('users').doc(user.uid).update({
           'pinnedPostId': widget.postId,
         });
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post pinned to profile.")));
+        if(mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
       }
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to pin: $e")));
+      if(mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -443,7 +444,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           postId: widget.postId,
           initialPostData: widget.postData, 
           heroContextId: widget.heroContextId,
-          preloadedController: _videoController,
+          preloadedController: _videoController, 
         ),
       ),
     );
@@ -494,7 +495,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       if(mounted) Navigator.of(context).pop(); 
     } catch (e) {
       if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        OverlayService().showTopNotification(context, "Edit failed", Icons.error, (){}, color: Colors.red);
         Navigator.of(context).pop(); 
       }
     }
@@ -557,7 +558,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- PINNED HEADER ---
             if (widget.isPinned)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
@@ -693,11 +693,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       onSelected: (value) {
         if (value == 'edit') _showEditDialog();
         else if (value == 'delete') _deletePost();
-        else if (value == 'pin') _togglePin(); // Updated action
+        else if (value == 'pin') _togglePin(); 
       },
       itemBuilder: (context) => [
         PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
-        // Conditional Pin Text
         PopupMenuItem(
           value: 'pin', 
           child: Row(

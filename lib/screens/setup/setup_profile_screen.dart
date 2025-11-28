@@ -5,10 +5,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../main.dart';
 import '../../services/cloudinary_service.dart';
 import 'setup_department_screen.dart';
+import '../../services/overlay_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -137,7 +137,15 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) {
+        OverlayService().showTopNotification(
+          context, 
+          "Error: $e", 
+          Icons.error, 
+          (){},
+          color: Colors.red
+        );
+      }
     } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
@@ -167,7 +175,6 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -193,13 +200,11 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                 ),
                 SizedBox(height: 40),
 
-                // Banner & Avatar Combined UI
                 Center(
                   child: Stack(
                     clipBehavior: Clip.none,
                     alignment: Alignment.center,
                     children: [
-                      // Banner
                       GestureDetector(
                         onTap: () => _pickImage(isAvatar: false),
                         child: Container(
@@ -225,7 +230,6 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                         ),
                       ),
                       
-                      // Avatar (Overlapping)
                       Positioned(
                         bottom: -40,
                         child: GestureDetector(

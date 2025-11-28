@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import '../main.dart'; // For access to TwitterTheme
+import '../main.dart'; 
 
 class OverlayService {
   static final OverlayService _instance = OverlayService._internal();
@@ -10,7 +10,7 @@ class OverlayService {
   OverlayEntry? _overlayEntry;
   Timer? _timer;
 
-  void showTopNotification(BuildContext context, String message, IconData icon, VoidCallback onTap) {
+  void showTopNotification(BuildContext context, String message, IconData icon, VoidCallback onTap, {Color? color}) {
     // Remove existing overlay if any
     hideOverlay();
 
@@ -19,6 +19,7 @@ class OverlayService {
       builder: (context) => _TopNotificationWidget(
         message: message,
         icon: icon,
+        iconColor: color,
         onTap: () {
           hideOverlay();
           onTap();
@@ -46,12 +47,14 @@ class OverlayService {
 class _TopNotificationWidget extends StatefulWidget {
   final String message;
   final IconData icon;
+  final Color? iconColor;
   final VoidCallback onTap;
   final VoidCallback onDismiss;
 
   const _TopNotificationWidget({
     required this.message,
     required this.icon,
+    this.iconColor,
     required this.onTap,
     required this.onDismiss,
   });
@@ -102,39 +105,51 @@ class _TopNotificationWidgetState extends State<_TopNotificationWidget> with Sin
           color: Colors.transparent,
           child: Padding(
             padding: EdgeInsets.only(top: topPadding + 10, left: 16, right: 16),
-            child: GestureDetector(
-              onTap: widget.onTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: isDarkMode ? TwitterTheme.darkGrey : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 10,
-                      offset: const Offset(0, 5),
-                    )
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Icon(widget.icon, color: TwitterTheme.blue),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        widget.message,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: isDarkMode ? Colors.white : Colors.black,
+            child: Dismissible(
+              key: UniqueKey(),
+              direction: DismissDirection.horizontal, // ENABLE SWIPE
+              onDismissed: (direction) {
+                widget.onDismiss();
+              },
+              child: GestureDetector(
+                onTap: widget.onTap,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isDarkMode ? TwitterTheme.darkGrey : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      )
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(widget.icon, color: widget.iconColor ?? TwitterTheme.blue),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          widget.message,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: isDarkMode ? Colors.white : Colors.black,
+                          ),
                         ),
                       ),
-                    ),
-                    GestureDetector(
-                      onTap: widget.onDismiss,
-                      child: Icon(Icons.close, size: 18, color: Theme.of(context).hintColor),
-                    ),
-                  ],
+                      // Visual cue for dismissal
+                      Container(
+                        width: 4, 
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).dividerColor,
+                          borderRadius: BorderRadius.circular(2)
+                        ),
+                      )
+                    ],
+                  ),
                 ),
               ),
             ),

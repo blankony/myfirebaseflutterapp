@@ -8,6 +8,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
 import 'profile_page.dart';
 import '../../services/prediction_service.dart';
+import '../../services/overlay_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -39,7 +40,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   String? _searchSuggestion;
   Timer? _debounce;
   
-  // State for Trending
   bool _showAllTrending = false;
 
   @override
@@ -51,17 +51,15 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   @override
   void didUpdateWidget(SearchPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Reset tab ke "Posts" (index 0) saat mulai searching
     if (widget.isSearching && !oldWidget.isSearching) {
       _tabController.index = 0;
     }
     
-    // JIKA SEARCH DIMATIKAN (DARI HOME), BERSIHKAN TEXT
     if (oldWidget.isSearching && !widget.isSearching) {
       _searchController.clear();
       _searchText = '';
       _searchSuggestion = null;
-      FocusScope.of(context).unfocus(); // Tutup keyboard
+      FocusScope.of(context).unfocus(); 
     }
   }
 
@@ -110,7 +108,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       _searchSuggestion = null;
     });
     
-    // Tutup search bar jika di-clear
     if (widget.isSearching) {
       widget.onSearchPressed();
     }
@@ -131,12 +128,10 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     FocusScope.of(context).unfocus();
   }
 
-  // Get suggested users based on mutual connections or random
   Future<List<DocumentSnapshot>> _getSuggestedUsers(String? currentUserId) async {
     if (currentUserId == null) return [];
 
     try {
-      // Get current user's data
       final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
       if (!currentUserDoc.exists) return [];
 
@@ -145,7 +140,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
 
       Set<String> suggestedUserIds = {};
       
-      // If user follows people, get friends of friends
       if (following.isNotEmpty) {
         for (String followedUserId in following) {
           final followedUserDoc = await _firestore.collection('users').doc(followedUserId).get();
@@ -153,7 +147,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             final followedUserData = followedUserDoc.data() as Map<String, dynamic>;
             final List<dynamic> theirFollowing = followedUserData['following'] ?? [];
             
-            // Add their friends (excluding current user and already following)
             for (String potentialFriend in theirFollowing) {
               if (potentialFriend != currentUserId && !following.contains(potentialFriend)) {
                 suggestedUserIds.add(potentialFriend);
@@ -163,7 +156,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         }
       }
 
-      // If we have suggestions from mutual connections, fetch them
       if (suggestedUserIds.isNotEmpty) {
         List<DocumentSnapshot> suggestions = [];
         for (String userId in suggestedUserIds.take(5)) {
@@ -175,7 +167,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         return suggestions;
       }
 
-      // Otherwise, return random users
       final allUsersSnapshot = await _firestore.collection('users').limit(20).get();
       final randomUsers = allUsersSnapshot.docs
           .where((doc) => doc.id != currentUserId && !following.contains(doc.id))
@@ -185,7 +176,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       return randomUsers.take(5).toList();
 
     } catch (e) {
-      print('Error getting suggested users: $e');
       return [];
     }
   }
@@ -205,12 +195,9 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         ? (topAnchor + currentSearchBarHeight) 
         : topAnchor;
 
-    // Handle back button to close search bar
     return WillPopScope(
       onWillPop: () async {
         if (widget.isSearching) {
-          // Jika sedang searching, back button akan menutup search bar
-          // dan membersihkan input
           setState(() {
             _searchController.clear();
             _searchText = '';
@@ -223,7 +210,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       },
       child: Stack(
         children: [
-          // 1. MAIN CONTENT
           Positioned.fill(
             child: Padding(
               padding: EdgeInsets.only(top: contentTopPadding),
@@ -233,7 +219,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             ),
           ),
 
-          // 2. SEARCH BAR OVERLAY
           Positioned(
             top: topAnchor,
             left: 0,
@@ -332,7 +317,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- TRENDING SECTION ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Row(
@@ -445,7 +429,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
 
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
 
-            // --- DISCOVER SECTION ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
@@ -509,8 +492,12 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                             child: Center(
                               child: OutlinedButton(
                                 onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('More posts coming soon!')),
+                                  OverlayService().showTopNotification(
+                                    context, 
+                                    "More posts coming soon!", 
+                                    Icons.construction, 
+                                    (){},
+                                    color: TwitterTheme.blue
                                   );
                                 },
                                 style: OutlinedButton.styleFrom(
@@ -534,7 +521,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
 
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
 
-            // --- PEOPLE YOU MIGHT KNOW ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
@@ -763,7 +749,15 @@ class _UserSearchTileState extends State<_UserSearchTile> {
       await batch.commit();
     } catch (e) {
       _checkFollowStatus();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e')));
+      if (mounted) {
+        OverlayService().showTopNotification(
+          context, 
+          "Action failed: $e", 
+          Icons.error, 
+          (){},
+          color: Colors.red
+        );
+      }
     }
   }
 
@@ -779,7 +773,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     final List<dynamic> followingList = widget.userData['following'] ?? [];
     final bool followsMe = widget.currentUserId != null && followingList.contains(widget.currentUserId);
 
-    // Avatar Data
     final int iconId = widget.userData['avatarIconId'] ?? 0;
     final String? colorHex = widget.userData['avatarHex'];
     final String? profileImageUrl = widget.userData['profileImageUrl'];

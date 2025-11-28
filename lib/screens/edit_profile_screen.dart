@@ -9,7 +9,8 @@ import '../main.dart';
 import 'change_password_screen.dart'; 
 import '../services/cloudinary_service.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../data/pnj_data.dart'; // Ensure this file exists from previous steps
+import '../../data/pnj_data.dart'; 
+import '../services/overlay_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -36,7 +37,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _bannerImageUrl;
   File? _selectedBannerFile; 
 
-  // Department & Prodi State
   String? _selectedDepartment;
   Map<String, String>? _selectedProdi;
 
@@ -65,11 +65,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _selectedIconId = -1; 
           }
 
-          // Load Department Info
           _selectedDepartment = data['department'];
           final savedProdiName = data['studyProgram'];
           
-          // Restore Prodi selection if department matches
           if (_selectedDepartment != null && savedProdiName != null) {
             final prodis = PnjData.departments[_selectedDepartment];
             if (prodis != null) {
@@ -80,7 +78,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             }
           }
 
-          // Auto-detect if not set
           if (_selectedDepartment == null) {
             _tryAutoDetectDepartment();
           }
@@ -93,7 +90,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final email = _user?.email;
     if (email == null) return;
     
-    // Regex to find .codeYear in email (e.g., name.te23@stu.pnj.ac.id)
     final RegExp regex = RegExp(r'\.([a-z]+)\d+@');
     final match = regex.firstMatch(email);
     
@@ -104,11 +100,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         if (detectedDept != null && PnjData.departments.containsKey(detectedDept)) {
           setState(() {
             _selectedDepartment = detectedDept;
-            _selectedProdi = null; // Reset prodi as we can't strictly determine it
+            _selectedProdi = null; 
           });
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Auto-detected department: $detectedDept"))
+            // Replaced SnackBar
+            OverlayService().showTopNotification(
+              context, 
+              "Auto-detected department: $detectedDept", 
+              Icons.auto_awesome, 
+              (){}
             );
           }
         }
@@ -131,15 +131,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
   
-  // Dedicated Cropper Function with Aggressive Memory Optimization
   Future<File?> _cropImage({required XFile imageFile, required bool isAvatar}) async {
     try {
       final dynamic cropped = await ImageCropper().cropImage(
         sourcePath: imageFile.path,
-        compressQuality: 60, // Low quality to prevent OOM crashes
-        maxWidth: 800,       // Limit resolution
+        compressQuality: 60, 
+        maxWidth: 800,       
         maxHeight: 800,
-        // Force 1:1 for Avatar, 3:1 for Banner
         aspectRatio: isAvatar 
             ? CropAspectRatio(ratioX: 1, ratioY: 1) 
             : CropAspectRatio(ratioX: 3, ratioY: 1),
@@ -160,7 +158,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
       
       if (cropped != null) {
-        // Handle different version return types
         if (cropped is File) return cropped;
         try { return File((cropped as dynamic).path); } catch (_) {}
       }
@@ -175,7 +172,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     FocusScope.of(context).unfocus();
     final picker = ImagePicker();
     
-    // Aggressive memory optimization for Picker
     final pickedFile = await picker.pickImage(
       source: ImageSource.gallery, 
       imageQuality: 70,
@@ -191,11 +187,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _selectedImageFile = processedFile;
             _selectedIconId = -1; 
             _profileImageUrl = null; 
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Profile picture selected. Tap Save to apply.")));
+            // Replaced SnackBar
+            OverlayService().showTopNotification(context, "Profile picture selected", Icons.image, (){});
           } else {
             _selectedBannerFile = processedFile;
             _bannerImageUrl = null;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Banner selected. Tap Save to apply.")));
+            // Replaced SnackBar
+            OverlayService().showTopNotification(context, "Banner selected", Icons.image, (){});
           }
         });
       }
@@ -206,7 +204,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     FocusScope.of(context).unfocus();
 
     if (_user == null || _nameController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Name cannot be empty.')));
+      OverlayService().showTopNotification(context, "Name cannot be empty", Icons.warning, (){}, color: Colors.orange);
       return;
     }
     setState(() { _isLoading = true; });
@@ -214,21 +212,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     String? finalImageUrl = _profileImageUrl;
     String? finalBannerUrl = _bannerImageUrl;
 
-    // Upload Avatar
     if (_selectedImageFile != null) {
       final uploadUrl = await _cloudinaryService.uploadImage(_selectedImageFile!);
       if (uploadUrl == null) {
-        if (mounted) { setState(() { _isLoading = false; }); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload profile image.'))); }
+        if (mounted) { 
+          setState(() { _isLoading = false; }); 
+          OverlayService().showTopNotification(context, "Failed to upload avatar", Icons.error, (){}, color: Colors.red);
+        }
         return;
       }
       finalImageUrl = "$uploadUrl?v=${DateTime.now().millisecondsSinceEpoch}";
     }
     
-    // Upload Banner
     if (_selectedBannerFile != null) {
       final uploadUrl = await _cloudinaryService.uploadImage(_selectedBannerFile!);
       if (uploadUrl == null) {
-        if (mounted) { setState(() { _isLoading = false; }); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upload banner image.'))); }
+        if (mounted) { 
+          setState(() { _isLoading = false; }); 
+          OverlayService().showTopNotification(context, "Failed to upload banner", Icons.error, (){}, color: Colors.red);
+        }
         return;
       }
       finalBannerUrl = "$uploadUrl?v=${DateTime.now().millisecondsSinceEpoch}";
@@ -237,7 +239,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final int finalIconId = finalImageUrl != null ? -1 : _selectedIconId;
 
     try {
-      // Prepare Data
       final Map<String, dynamic> userUpdateData = {
         'name': _nameController.text.trim(),
         'bio': _bioController.text.trim(),
@@ -247,19 +248,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         'bannerImageUrl': finalBannerUrl, 
       };
 
-      // Add Department info if selected
       if (_selectedDepartment != null) {
         userUpdateData['department'] = _selectedDepartment;
       }
       if (_selectedProdi != null) {
         userUpdateData['studyProgram'] = _selectedProdi!['name'];
-        userUpdateData['departmentCode'] = _selectedProdi!['code']; // Important for the Badge
+        userUpdateData['departmentCode'] = _selectedProdi!['code']; 
       }
 
-      // 1. Update Main User Doc
       await _firestore.collection('users').doc(_user!.uid).update(userUpdateData);
 
-      // 2. Update Denormalized Data (in chunks)
       await _updateDenormalizedData(
         _user!.uid, 
         _nameController.text.trim(), 
@@ -269,13 +267,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ); 
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Profile updated successfully!')));
-        // Pass true to signal success to previous screen
+        // Replaced SnackBar with Heads-up
+        OverlayService().showTopNotification(
+          context, 
+          "Profile updated successfully!", 
+          Icons.check_circle, 
+          (){}, 
+          color: Colors.green
+        );
         Navigator.of(context).pop(true); 
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
+        OverlayService().showTopNotification(context, "Update failed: $e", Icons.error, (){}, color: Colors.red);
       }
     } finally {
       if (mounted) {
@@ -383,14 +387,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         body: SingleChildScrollView(
           child: Column(
             children: [
-              // --- MODERN HEADER SECTION ---
               SizedBox(
                 height: 180, 
                 child: Stack(
                   clipBehavior: Clip.none,
                   alignment: Alignment.topCenter,
                   children: [
-                    // Banner
                     GestureDetector(
                       onTap: () => _pickImage(isAvatar: false),
                       child: Container(
@@ -433,7 +435,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                       ),
 
-                    // Avatar
                     Positioned(
                       bottom: 0, left: 20,
                       child: GestureDetector(
@@ -512,7 +513,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     
                     SizedBox(height: 30),
 
-                    // --- ACADEMIC INFO SECTION (Added back) ---
                     Text("Academic Info", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                     SizedBox(height: 16),
                     
@@ -565,7 +565,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
                     SizedBox(height: 30),
                     
-                    // --- AVATAR PRESETS ---
                     if (!isCustomImageSet) ...[
                       Divider(),
                       Padding(

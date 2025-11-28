@@ -2,7 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../main.dart';
-import '../../auth_gate.dart'; // To navigate home (which is wrapped in AuthGate)
+import '../../auth_gate.dart'; 
+import '../../services/overlay_service.dart'; // REQUIRED
 
 class SetupVerificationScreen extends StatefulWidget {
   const SetupVerificationScreen({super.key});
@@ -42,19 +43,42 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
       if (user != null && !user.emailVerified) {
         await user.sendEmailVerification();
         setState(() { _isEmailSent = true; });
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Verification email sent!")));
+        if (mounted) {
+          OverlayService().showTopNotification(
+            context, 
+            "Verification email sent!", 
+            Icons.mark_email_read, 
+            (){},
+            color: Colors.green
+          );
+        }
       } else {
-         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Already verified or user not found.")));
+         if (mounted) {
+           OverlayService().showTopNotification(
+             context, 
+             "Already verified or user not found.", 
+             Icons.info, 
+             (){},
+             color: TwitterTheme.blue
+           );
+         }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) {
+        OverlayService().showTopNotification(
+          context, 
+          "Error: $e", 
+          Icons.error, 
+          (){},
+          color: Colors.red
+        );
+      }
     } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
   }
 
   void _finishSetup() {
-    // Navigate to the main app (AuthGate handles the routing to HomeDashboard)
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const AuthGate()),
       (route) => false,

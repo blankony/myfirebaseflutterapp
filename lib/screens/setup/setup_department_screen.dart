@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../main.dart';
 import '../../data/pnj_data.dart';
 import 'setup_verification_screen.dart';
+import '../../services/overlay_service.dart'; // REQUIRED
 
 class SetupDepartmentScreen extends StatefulWidget {
   const SetupDepartmentScreen({super.key});
@@ -18,7 +19,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
   late Animation<double> _fadeAnimation;
 
   String? _selectedDepartment;
-  Map<String, String>? _selectedProdi; // Contains 'name' and 'code'
+  Map<String, String>? _selectedProdi; 
   bool _isLoading = false;
 
   @override
@@ -42,7 +43,13 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
 
   Future<void> _saveAndNext() async {
     if (_selectedDepartment == null || _selectedProdi == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Please select your department and study program.")));
+      OverlayService().showTopNotification(
+        context, 
+        "Please select your department and study program.", 
+        Icons.warning_amber_rounded, 
+        (){},
+        color: Colors.orange
+      );
       return;
     }
 
@@ -51,11 +58,10 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
     if (user == null) return;
 
     try {
-      // Save full department info + short code for the badge
       await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
         'department': _selectedDepartment,
         'studyProgram': _selectedProdi!['name'],
-        'departmentCode': _selectedProdi!['code'], // e.g., "TE-BM"
+        'departmentCode': _selectedProdi!['code'], 
       });
 
       if (mounted) {
@@ -69,7 +75,15 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) {
+        OverlayService().showTopNotification(
+          context, 
+          "Error: $e", 
+          Icons.error, 
+          (){},
+          color: Colors.red
+        );
+      }
     } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
@@ -119,7 +133,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                   onChanged: (val) {
                     setState(() {
                       _selectedDepartment = val;
-                      _selectedProdi = null; // Reset prodi when dept changes
+                      _selectedProdi = null; 
                     });
                   },
                 ),
@@ -134,7 +148,6 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                     fillColor: theme.cardColor,
                   ),
                   value: _selectedProdi,
-                  // Disable if no department selected
                   items: _selectedDepartment == null 
                     ? [] 
                     : PnjData.departments[_selectedDepartment]!.map((Map<String, String> prodi) {
@@ -153,7 +166,6 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
 
                 Spacer(),
 
-                // Next Button
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(

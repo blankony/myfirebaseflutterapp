@@ -24,7 +24,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   late Stream<QuerySnapshot> _postsStream;
-  String _refreshKey = ''; // Key to force rebuild on refresh
+  String _refreshKey = ''; 
   
   final List<String> _trendingKeywords = ['tech', 'flutter', 'coding', 'project', 'seminar'];
   final List<String> _personalKeywords = ['selamat pagi', 'morning', 'halo', 'hello', 'semangat'];
@@ -47,8 +47,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     await Future.delayed(Duration(seconds: 1));
     if (mounted) {
       setState(() {
-        // Change the key to force the ListView to rebuild entirely
-        // This clears any "KeepAlive" states in children that might hold old video controllers
         _refreshKey = DateTime.now().toString();
       });
     }
@@ -147,7 +145,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   edgeOffset: refreshIndicatorOffset,
                   child: docs.isNotEmpty
                       ? ListView.builder(
-                          // FIX: Use a composite key that changes on refresh
                           key: PageStorageKey('home_list_${widget.isRecommended ? 'rec' : 'recents'}$_refreshKey'),
                           controller: widget.scrollController,
                           physics: const AlwaysScrollableScrollPhysics(),
@@ -163,6 +160,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                                   postId: doc.id,
                                   postData: data,
                                   isOwner: data['userId'] == currentUserId,
+                                  heroContextId: widget.isRecommended ? 'home_recommended' : 'home_recent',
                                 ),
                               ],
                             );
