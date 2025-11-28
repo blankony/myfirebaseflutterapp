@@ -49,6 +49,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   bool _isReposted = false;
   int _repostCount = 0;
   
+  // Video Player State
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
   bool _isPlaying = false;
@@ -56,6 +57,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   bool _isExternalController = false; 
   double _currentVolume = 1.0;
   
+  // Seekbar State
   Duration _currentPosition = Duration.zero;
   Duration _totalDuration = Duration.zero;
   bool _isDraggingSlider = false;
@@ -88,6 +90,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
 
   void _initVideo() {
     if (widget.videoController != null) {
+      // REUSE EXISTING CONTROLLER
       _videoController = widget.videoController;
       _isExternalController = true;
       _isVideoInitialized = true;
@@ -95,11 +98,13 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       _totalDuration = _videoController!.value.duration;
       _videoController!.addListener(_videoListener);
       
+      // Auto play if not playing
       if (!_isPlaying) {
         _videoController!.play();
         _isPlaying = true;
       }
     } else {
+      // INIT NEW CONTROLLER (Fallback)
       _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.imageUrl))
         ..initialize().then((_) {
           setState(() {
@@ -167,6 +172,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
     _menuController.dispose();
     _videoController?.removeListener(_videoListener);
     
+    // CRITICAL: Only dispose if we created it. 
+    // If passed from parent, parent handles disposal.
     if (!_isExternalController) {
       _videoController?.dispose();
     }
@@ -300,262 +307,276 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      // FIX: Transparent background allows seeing the previous screen when swiping
+      backgroundColor: Colors.transparent,
       extendBodyBehindAppBar: true,
-      // FIX: Wrap body in Dismissible to allow swipe-to-close
+      
+      // FIX: Use Dismissible with confirmDismiss to prevent "still in tree" error
       body: Dismissible(
-        key: Key('media_dismiss'),
+        key: const Key('media_viewer_dismiss'),
         direction: DismissDirection.vertical,
-        onDismissed: (direction) => Navigator.of(context).pop(),
-        child: GestureDetector(
-          onTap: _isVideo ? _togglePlayPause : _toggleOverlays,
-          child: Stack(
-            fit: StackFit.expand,
-            alignment: Alignment.center,
-            children: [
-              // 1. CONTENT
-              if (_isVideo)
-                _isVideoInitialized 
-                    ? Hero(
-                        tag: widget.heroTag,
-                        child: Center(
-                          child: AspectRatio(
-                            aspectRatio: _videoController!.value.aspectRatio,
-                            child: VideoPlayer(_videoController!),
+        dismissThresholds: const {
+          DismissDirection.vertical: 0.2,
+        },
+        confirmDismiss: (direction) async {
+          Navigator.of(context).pop();
+          return false; // Prevent internal dismissal, let Navigator handle it
+        },
+        child: Container(
+          // Background is attached to the content so it slides WITH the image
+          color: Colors.black,
+          width: MediaQuery.of(context).size.width,
+          height: MediaQuery.of(context).size.height,
+          child: GestureDetector(
+            onTap: _isVideo ? _togglePlayPause : _toggleOverlays,
+            child: Stack(
+              fit: StackFit.expand, 
+              alignment: Alignment.center,
+              children: [
+                // 1. CONTENT
+                if (_isVideo)
+                  _isVideoInitialized 
+                      ? Hero(
+                          tag: widget.heroTag,
+                          child: Center(
+                            child: AspectRatio(
+                              aspectRatio: _videoController!.value.aspectRatio,
+                              child: VideoPlayer(_videoController!),
+                            ),
                           ),
-                        ),
-                      )
-                    : Center(child: CircularProgressIndicator(color: Colors.white))
-              else
-                PhotoView(
-                  imageProvider: CachedNetworkImageProvider(widget.imageUrl),
-                  backgroundDecoration: BoxDecoration(color: Colors.black),
-                  initialScale: PhotoViewComputedScale.contained,
-                  minScale: PhotoViewComputedScale.contained,
-                  maxScale: PhotoViewComputedScale.covered * 2.5,
-                  heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
-                ),
-
-              // 2. BUFFERING
-              if (_isVideo && _isBuffering && _isPlaying)
-                Center(
-                  child: Container(
-                    padding: EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle
-                    ),
-                    child: CircularProgressIndicator(color: Colors.white),
+                        )
+                      : Center(child: CircularProgressIndicator(color: Colors.white))
+                else
+                  PhotoView(
+                    imageProvider: CachedNetworkImageProvider(widget.imageUrl),
+                    backgroundDecoration: BoxDecoration(color: Colors.transparent), // Transparent so container black shows
+                    initialScale: PhotoViewComputedScale.contained,
+                    minScale: PhotoViewComputedScale.contained,
+                    maxScale: PhotoViewComputedScale.covered * 2.5,
+                    heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
                   ),
-                ),
 
-              // 3. CENTER PLAY BUTTON
-              if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
-                 Center(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black45,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2)
-                    ),
-                    padding: EdgeInsets.all(20),
-                    child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 50),
-                  ),
-                ),
-
-              // 4. TOP BAR
-              AnimatedOpacity(
-                opacity: _showOverlays ? 1.0 : 0.0,
-                duration: Duration(milliseconds: 200),
-                child: Positioned(
-                  top: 0, left: 0, right: 0,
-                  child: Container(
-                    height: 100,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.black.withOpacity(0.8), Colors.transparent],
-                      ),
-                    ),
-                    child: SafeArea(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          IconButton(
-                            icon: Icon(Icons.arrow_back, color: Colors.white),
-                            onPressed: () => Navigator.of(context).pop(),
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.more_vert, color: Colors.white),
-                            onPressed: _openMenu,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // 5. MENU
-              if (_isMenuOpen)
-                Positioned(
-                  top: 50, right: 10,
-                  child: SlideTransition(
-                    position: _menuAnimation,
+                // 2. BUFFERING
+                if (_isVideo && _isBuffering && _isPlaying)
+                  Center(
                     child: Container(
-                      width: 200,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF15202B),
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ListTile(
-                            leading: Icon(Icons.save_alt, color: Colors.white),
-                            title: Text('Save to Device', style: TextStyle(color: Colors.white)),
-                            onTap: _downloadMedia,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-
-              // 6. VIDEO CONTROLS
-              if (_isVideo && _isVideoInitialized)
-                AnimatedPositioned(
-                  duration: Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                  bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -150, 
-                  left: 16,
-                  right: 16,
-                  child: AnimatedOpacity(
-                    opacity: _showOverlays ? 1.0 : 0.0,
-                    duration: Duration(milliseconds: 200),
-                    child: Container(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.black54,
-                        borderRadius: BorderRadius.circular(16),
+                        shape: BoxShape.circle
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Text(_formatDuration(_currentPosition), style: TextStyle(color: Colors.white, fontSize: 12)),
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                                    overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
-                                    trackHeight: 2,
-                                    thumbColor: TwitterTheme.blue,
-                                    activeTrackColor: TwitterTheme.blue,
-                                    inactiveTrackColor: Colors.white24,
-                                  ),
-                                  child: Slider(
-                                    value: _currentPosition.inMilliseconds.toDouble().clamp(0.0, _totalDuration.inMilliseconds.toDouble()),
-                                    min: 0.0,
-                                    max: _totalDuration.inMilliseconds.toDouble(),
-                                    activeColor: TwitterTheme.blue,
-                                    inactiveColor: Colors.white24,
-                                    onChangeStart: _onSeekStart,
-                                    onChanged: _onSeekChanged,
-                                    onChangeEnd: _onSeekEnd,
-                                  ),
-                                ),
-                              ),
-                              Text(_formatDuration(_totalDuration), style: TextStyle(color: Colors.white, fontSize: 12)),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
-                                onPressed: _togglePlayPause,
-                                padding: EdgeInsets.zero,
-                                constraints: BoxConstraints(),
-                              ),
-                              SizedBox(width: 8),
-                              Icon(_currentVolume == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 20),
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                                    trackHeight: 2,
-                                    overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
-                                  ),
-                                  child: Slider(
-                                    value: _currentVolume,
-                                    min: 0.0,
-                                    max: 1.0,
-                                    activeColor: Colors.white,
-                                    inactiveColor: Colors.white24,
-                                    onChanged: (val) {
-                                      setState(() => _currentVolume = val);
-                                      _videoController?.setVolume(val);
-                                      _resetHideTimer();
-                                    },
-                                  ),
-                                ),
-                              ),
-                              PopupMenuButton<double>(
-                                initialValue: _videoController?.value.playbackSpeed ?? 1.0,
-                                onSelected: _changeSpeed,
-                                itemBuilder: (context) => [
-                                  PopupMenuItem(value: 0.5, child: Text("0.5x")),
-                                  PopupMenuItem(value: 1.0, child: Text("1.0x")),
-                                  PopupMenuItem(value: 1.5, child: Text("1.5x")),
-                                  PopupMenuItem(value: 2.0, child: Text("2.0x")),
-                                ],
-                                child: Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(4)),
-                                  child: Text("${_videoController?.value.playbackSpeed}x", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                            ],
-                          ),
-                        ],
+                      child: CircularProgressIndicator(color: Colors.white),
+                    ),
+                  ),
+
+                // 3. CENTER PLAY BUTTON
+                if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
+                   Center(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2)
+                      ),
+                      padding: EdgeInsets.all(20),
+                      child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 50),
+                    ),
+                  ),
+
+                // 4. TOP BAR
+                AnimatedOpacity(
+                  opacity: _showOverlays ? 1.0 : 0.0,
+                  duration: Duration(milliseconds: 200),
+                  child: Positioned(
+                    top: 0, left: 0, right: 0,
+                    child: Container(
+                      height: 100,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+                        ),
+                      ),
+                      child: SafeArea(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            IconButton(
+                              icon: Icon(Icons.arrow_back, color: Colors.white),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.more_vert, color: Colors.white),
+                              onPressed: _openMenu,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-              // 7. BOTTOM ACTION BAR
-              if (_showOverlays && _isPostContent)
-                Positioned(
-                  bottom: 0, left: 0, right: 0,
-                  child: Container(
-                    padding: EdgeInsets.only(bottom: 20, top: 20, left: 16, right: 16),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [Colors.black.withOpacity(0.9), Colors.transparent],
-                      ),
-                    ),
-                    child: SafeArea(
-                      top: false,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _buildActionIcon(Icons.chat_bubble_outline, widget.postData?['commentCount']?.toString() ?? "0", () => Navigator.pop(context)),
-                          _buildActionIcon(Icons.repeat, _repostCount.toString(), _toggleRepost, color: _isReposted ? Colors.green : null),
-                          _buildActionIcon(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _toggleLike, color: _isLiked ? Colors.pink : null),
-                          _buildActionIcon(Icons.share, "", _shareImage),
-                        ],
+                // 5. MENU
+                if (_isMenuOpen)
+                  Positioned(
+                    top: 50, right: 10,
+                    child: SlideTransition(
+                      position: _menuAnimation,
+                      child: Container(
+                        width: 200,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF15202B),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ListTile(
+                              leading: Icon(Icons.save_alt, color: Colors.white),
+                              title: Text('Save to Device', style: TextStyle(color: Colors.white)),
+                              onTap: _downloadMedia,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+
+                // 6. VIDEO CONTROLS
+                if (_isVideo && _isVideoInitialized)
+                  AnimatedPositioned(
+                    duration: Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                    bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -150, 
+                    left: 16,
+                    right: 16,
+                    child: AnimatedOpacity(
+                      opacity: _showOverlays ? 1.0 : 0.0,
+                      duration: Duration(milliseconds: 200),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                Text(_formatDuration(_currentPosition), style: TextStyle(color: Colors.white, fontSize: 12)),
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                      overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
+                                      trackHeight: 2,
+                                      thumbColor: TwitterTheme.blue,
+                                      activeTrackColor: TwitterTheme.blue,
+                                      inactiveTrackColor: Colors.white24,
+                                    ),
+                                    child: Slider(
+                                      value: _currentPosition.inMilliseconds.toDouble().clamp(0.0, _totalDuration.inMilliseconds.toDouble()),
+                                      min: 0.0,
+                                      max: _totalDuration.inMilliseconds.toDouble(),
+                                      activeColor: TwitterTheme.blue,
+                                      inactiveColor: Colors.white24,
+                                      onChangeStart: _onSeekStart,
+                                      onChanged: _onSeekChanged,
+                                      onChangeEnd: _onSeekEnd,
+                                    ),
+                                  ),
+                                ),
+                                Text(_formatDuration(_totalDuration), style: TextStyle(color: Colors.white, fontSize: 12)),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                                  onPressed: _togglePlayPause,
+                                  padding: EdgeInsets.zero,
+                                  constraints: BoxConstraints(),
+                                ),
+                                SizedBox(width: 8),
+                                Icon(_currentVolume == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 20),
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                      trackHeight: 2,
+                                      overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+                                    ),
+                                    child: Slider(
+                                      value: _currentVolume,
+                                      min: 0.0,
+                                      max: 1.0,
+                                      activeColor: Colors.white,
+                                      inactiveColor: Colors.white24,
+                                      onChanged: (val) {
+                                        setState(() => _currentVolume = val);
+                                        _videoController?.setVolume(val);
+                                        _resetHideTimer();
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                PopupMenuButton<double>(
+                                  initialValue: _videoController?.value.playbackSpeed ?? 1.0,
+                                  onSelected: _changeSpeed,
+                                  itemBuilder: (context) => [
+                                    PopupMenuItem(value: 0.5, child: Text("0.5x")),
+                                    PopupMenuItem(value: 1.0, child: Text("1.0x")),
+                                    PopupMenuItem(value: 1.5, child: Text("1.5x")),
+                                    PopupMenuItem(value: 2.0, child: Text("2.0x")),
+                                  ],
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(4)),
+                                    child: Text("${_videoController?.value.playbackSpeed}x", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 7. BOTTOM ACTION BAR
+                if (_showOverlays && _isPostContent)
+                  Positioned(
+                    bottom: 0, left: 0, right: 0,
+                    child: Container(
+                      padding: EdgeInsets.only(bottom: 20, top: 20, left: 16, right: 16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black.withOpacity(0.9), Colors.transparent],
+                        ),
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _buildActionIcon(Icons.chat_bubble_outline, widget.postData?['commentCount']?.toString() ?? "0", () => Navigator.pop(context)),
+                            _buildActionIcon(Icons.repeat, _repostCount.toString(), _toggleRepost, color: _isReposted ? Colors.green : null),
+                            _buildActionIcon(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _toggleLike, color: _isLiked ? Colors.pink : null),
+                            _buildActionIcon(Icons.share, "", _shareImage),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
