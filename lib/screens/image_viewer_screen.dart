@@ -1,4 +1,5 @@
 // ignore_for_file: prefer_const_constructors, use_build_context_synchronously
+import 'dart:async'; // REQUIRED for Timer
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
@@ -7,9 +8,10 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:gal/gal.dart';
-import 'package:path_provider/path_provider.dart'; // IMPORT WAJIB
-import 'package:path/path.dart' as p;             // IMPORT WAJIB
+import 'package:path_provider/path_provider.dart'; 
+import 'package:path/path.dart' as p;
+import 'package:video_player/video_player.dart'; 
+import 'package:intl/intl.dart'; 
 import '../main.dart';
 
 class ImageViewerScreen extends StatefulWidget {
@@ -34,6 +36,8 @@ class ImageViewerScreen extends StatefulWidget {
 
 class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTickerProviderStateMixin {
   bool _showOverlays = true;
+  Timer? _hideTimer; // Timer for auto-hiding controls
+
   late AnimationController _menuController;
   late Animation<Offset> _menuAnimation;
   bool _isMenuOpen = false;
@@ -42,9 +46,16 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   int _likeCount = 0;
   bool _isReposted = false;
   int _repostCount = 0;
-  bool _isSaving = false; 
+  
+  // Video Player State
+  VideoPlayerController? _videoController;
+  bool _isVideoInitialized = false;
+  bool _isPlaying = false;
+  bool _isBuffering = false; // State for buffering feedback
+  double _currentVolume = 1.0;
 
   bool get _isPostContent => widget.postId != null;
+  bool get _isVideo => widget.mediaType == 'video';
 
   @override
   void initState() {
@@ -61,11 +72,45 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       parent: _menuController,
       curve: Curves.easeOutQuart,
     ));
+
+    if (_isVideo) {
+      _initVideo();
+    }
+    
+    // Auto-hide controls initially
+    _resetHideTimer();
+  }
+
+  void _initVideo() {
+    // STREAMING: No caching for playback
+    _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.imageUrl))
+      ..initialize().then((_) {
+        setState(() {
+          _isVideoInitialized = true;
+          _isPlaying = true;
+        });
+        _videoController!.play();
+        _videoController!.setLooping(true);
+        _videoController!.addListener(_videoListener); // Add listener for buffering
+      });
+  }
+
+  void _videoListener() {
+    if (_videoController == null || !mounted) return;
+    final bool isBuffering = _videoController!.value.isBuffering;
+    if (isBuffering != _isBuffering) {
+      setState(() {
+        _isBuffering = isBuffering;
+      });
+    }
   }
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     _menuController.dispose();
+    _videoController?.removeListener(_videoListener);
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -85,13 +130,29 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   }
 
   void _toggleOverlays() {
-    if (_isMenuOpen) {
-      _closeMenu();
+    setState(() {
+      _showOverlays = !_showOverlays;
+    });
+    
+    if (_showOverlays) {
+      _resetHideTimer();
     } else {
-      setState(() {
-        _showOverlays = !_showOverlays;
-      });
+      _hideTimer?.cancel();
+      _closeMenu();
     }
+  }
+
+  void _resetHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted && _isPlaying) { // Only auto-hide if playing
+        setState(() {
+          _showOverlays = false;
+          _isMenuOpen = false; // Also close menu if open
+        });
+        _menuController.reverse();
+      }
+    });
   }
 
   void _openMenu() {
@@ -99,14 +160,39 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       _isMenuOpen = true;
     });
     _menuController.forward();
+    _resetHideTimer(); // Keep controls visible while menu interacting
   }
 
   void _closeMenu() {
     _menuController.reverse().then((_) {
-      setState(() {
-        _isMenuOpen = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isMenuOpen = false;
+        });
+      }
     });
+  }
+
+  void _togglePlayPause() {
+    if (_videoController == null || !_isVideoInitialized) return;
+    setState(() {
+      if (_videoController!.value.isPlaying) {
+        _videoController!.pause();
+        _isPlaying = false;
+        _showOverlays = true; // Always show controls when paused
+        _hideTimer?.cancel(); // Cancel auto-hide
+      } else {
+        _videoController!.play();
+        _isPlaying = true;
+        _resetHideTimer(); // Restart auto-hide logic
+      }
+    });
+  }
+
+  void _changeSpeed(double speed) {
+    _videoController?.setPlaybackSpeed(speed);
+    Navigator.pop(context); // Close popup
+    _resetHideTimer();
   }
 
   Future<void> _toggleLike() async {
@@ -136,73 +222,21 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   Future<void> _shareImage() async {
     try {
       final file = await DefaultCacheManager().getSingleFile(widget.imageUrl);
-      await Share.shareXFiles([XFile(file.path)], text: 'Check out this image from Sapa PNJ!');
+      await Share.shareXFiles([XFile(file.path)], text: 'Check out this media from Sapa PNJ!');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load image.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to share.')));
     }
   }
 
-  // --- FUNGSI SAVE BARU MENGGUNAKAN GAL ---
-  Future<void> _saveImage() async {
+  // --- DOWNLOAD LOGIC ---
+  Future<void> _downloadMedia() async {
     _closeMenu();
-    setState(() { _isSaving = true; });
-
-    try {
-      print("--- MULAI PROSES SAVE KE PICTURES ---");
-
-      // 1. Download Gambar ke Cache
-      final File cacheFile = await DefaultCacheManager().getSingleFile(widget.imageUrl);
-      
-      // 2. Tentukan Ekstensi File (Penting agar terbaca di Galeri)
-      String extension = p.extension(widget.imageUrl);
-      if (extension.isEmpty || extension.length > 5) { 
-        extension = '.jpg'; 
-      }
-      
-      // 3. Buat Nama File Baru yang Bersih di Folder Sementara
-      final Directory tempDir = await getTemporaryDirectory();
-      final String newFileName = "SapaPNJ_${DateTime.now().millisecondsSinceEpoch}$extension";
-      final File newFile = await cacheFile.copy('${tempDir.path}/$newFileName');
-      
-      print("   - File siap disimpan: ${newFile.path}");
-
-      // 4. Simpan menggunakan Gal
-      await Gal.putImage(newFile.path, album: null); 
-      
-      print("   - BERHASIL DISIMPAN KE PICTURES");
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(children: const [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 8),
-              Expanded(child: Text('Saved to "Pictures" folder!', style: TextStyle(color: Colors.white))),
-            ]),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } on GalException catch (e) {
-      print("❌ GAL ERROR: Type: ${e.type}, Message: $e");
-      if (mounted) {
-        String msg = "Gagal menyimpan.";
-        if (e.type == GalExceptionType.accessDenied) msg = "Izin penyimpanan ditolak.";
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg), backgroundColor: Colors.red),
-        );
-      }
-    } catch (e) {
-      print("❌ GENERAL ERROR: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() { _isSaving = false; });
-    }
+    final OverlayState overlayState = Overlay.of(context);
+    _DownloadManager.startDownloadSequence(
+      overlayState: overlayState,
+      url: widget.imageUrl,
+      isImage: !_isVideo,
+    );
   }
 
   @override
@@ -211,76 +245,94 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
       body: GestureDetector(
-        onTap: _toggleOverlays,
+        onTap: _toggleOverlays, // Tapping anywhere toggles UI visibility
         child: Stack(
+          fit: StackFit.expand,
+          alignment: Alignment.center,
           children: [
-            // 1. THE IMAGE
-            Center(
-              child: widget.mediaType == 'video'
-                  ? Text('Video Placeholder', style: TextStyle(color: Colors.white))
-                  : PhotoView(
-                      imageProvider: CachedNetworkImageProvider(widget.imageUrl),
-                      backgroundDecoration: BoxDecoration(color: Colors.black),
-                      initialScale: PhotoViewComputedScale.contained,
-                      minScale: PhotoViewComputedScale.contained,
-                      maxScale: PhotoViewComputedScale.covered * 2.5,
-                      heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
-                    ),
-            ),
+            // 1. CONTENT
+            if (_isVideo)
+              _isVideoInitialized 
+                  ? Center(
+                      child: AspectRatio(
+                        aspectRatio: _videoController!.value.aspectRatio,
+                        child: VideoPlayer(_videoController!),
+                      ),
+                    )
+                  : Center(child: CircularProgressIndicator(color: Colors.white))
+            else
+              PhotoView(
+                imageProvider: CachedNetworkImageProvider(widget.imageUrl),
+                backgroundDecoration: BoxDecoration(color: Colors.black),
+                initialScale: PhotoViewComputedScale.contained,
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 2.5,
+                heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
+              ),
 
-            // Loading Indicator saat menyimpan
-            if (_isSaving)
+            // 2. BUFFERING INDICATOR (Shows when stalled but playing)
+            if (_isVideo && _isBuffering && _isPlaying)
               Center(
                 child: Container(
-                  padding: EdgeInsets.all(20),
+                  padding: EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: Colors.black54,
-                    borderRadius: BorderRadius.circular(10)
+                    shape: BoxShape.circle
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      CircularProgressIndicator(color: Colors.white),
-                      SizedBox(height: 10),
-                      Text("Saving...", style: TextStyle(color: Colors.white))
-                    ],
-                  ),
+                  child: CircularProgressIndicator(color: Colors.white),
                 ),
               ),
 
-            // 2. Top Bar Overlay
+            // 3. CENTER PLAY BUTTON (Only visible if paused explicitly)
+            if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
+               Center(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2)
+                  ),
+                  padding: EdgeInsets.all(20),
+                  child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 50),
+                ),
+              ),
+
+            // 4. TOP BAR
             AnimatedOpacity(
               opacity: _showOverlays ? 1.0 : 0.0,
               duration: Duration(milliseconds: 200),
-              child: Container(
-                height: 100,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+              child: Positioned(
+                top: 0, left: 0, right: 0,
+                child: Container(
+                  height: 100,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black.withOpacity(0.8), Colors.transparent],
+                    ),
                   ),
-                ),
-                child: SafeArea(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      IconButton(
-                        icon: Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.more_vert, color: Colors.white),
-                        onPressed: _openMenu,
-                      ),
-                    ],
+                  child: SafeArea(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        IconButton(
+                          icon: Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.more_vert, color: Colors.white),
+                          onPressed: _openMenu,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
 
-            // 3. Menu (Save Image)
+            // 5. MENU (Save)
             if (_isMenuOpen)
               Positioned(
                 top: 50, right: 10,
@@ -299,7 +351,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                         ListTile(
                           leading: Icon(Icons.save_alt, color: Colors.white),
                           title: Text('Save to Device', style: TextStyle(color: Colors.white)),
-                          onTap: _saveImage,
+                          onTap: _downloadMedia,
                         ),
                       ],
                     ),
@@ -307,7 +359,93 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                 ),
               ),
 
-            // 4. Bottom Action Bar (Hanya jika ini adalah postingan)
+            // 6. VIDEO CONTROLS (Bottom) - Only for Video
+            if (_isVideo && _isVideoInitialized)
+              AnimatedPositioned(
+                duration: Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -100, // Move up/down
+                left: 16,
+                right: 16,
+                child: AnimatedOpacity(
+                  opacity: _showOverlays ? 1.0 : 0.0,
+                  duration: Duration(milliseconds: 200),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Row(
+                      children: [
+                        // Play/Pause
+                        IconButton(
+                          icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                          onPressed: _togglePlayPause,
+                          constraints: BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                        ),
+                        SizedBox(width: 8),
+                        
+                        // Volume Icon
+                        Icon(
+                          _currentVolume == 0 ? Icons.volume_off : Icons.volume_up, 
+                          color: Colors.white, size: 20
+                        ),
+                        
+                        // Volume Slider
+                        Expanded(
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                              trackHeight: 2,
+                              overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+                            ),
+                            child: Slider(
+                              value: _currentVolume,
+                              min: 0.0,
+                              max: 1.0,
+                              activeColor: TwitterTheme.blue,
+                              inactiveColor: Colors.white24,
+                              onChanged: (val) {
+                                setState(() => _currentVolume = val);
+                                _videoController?.setVolume(val);
+                                _resetHideTimer();
+                              },
+                            ),
+                          ),
+                        ),
+                        
+                        // Speed Control
+                        PopupMenuButton<double>(
+                          initialValue: _videoController?.value.playbackSpeed ?? 1.0,
+                          onSelected: _changeSpeed,
+                          itemBuilder: (context) => [
+                            PopupMenuItem(value: 0.5, child: Text("0.5x")),
+                            PopupMenuItem(value: 1.0, child: Text("1.0x")),
+                            PopupMenuItem(value: 1.5, child: Text("1.5x")),
+                            PopupMenuItem(value: 2.0, child: Text("2.0x")),
+                          ],
+                          child: Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.white54),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              "${_videoController?.value.playbackSpeed}x",
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+            // 7. Bottom Action Bar (Likes/Comments) - Always at bottom if post content
             if (_showOverlays && _isPostContent)
               Positioned(
                 bottom: 0, left: 0, right: 0,
@@ -352,6 +490,242 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
           ]
         ],
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------- DOWNLOAD MANAGER & OVERLAY -------------------------
+// ---------------------------------------------------------------------------
+
+class _DownloadManager {
+  static void startDownloadSequence({
+    required OverlayState overlayState,
+    required String url,
+    required bool isImage,
+  }) {
+    final GlobalKey<_DownloadStatusOverlayState> overlayKey = GlobalKey();
+    late OverlayEntry overlayEntry;
+
+    overlayEntry = OverlayEntry(
+      builder: (context) => _DownloadStatusOverlay(
+        key: overlayKey,
+        onDismissRequest: () {
+          overlayKey.currentState?.dismissToIcon();
+        },
+      ),
+    );
+
+    overlayState.insert(overlayEntry);
+
+    _processDownload(
+      url: url,
+      isImage: isImage,
+      onSuccess: () {
+        overlayKey.currentState?.handleSuccess();
+        Future.delayed(Duration(seconds: 7), () {
+           if (overlayEntry.mounted) overlayEntry.remove();
+        });
+      },
+      onFailure: (error) {
+        overlayKey.currentState?.handleFailure();
+        Future.delayed(Duration(seconds: 4), () {
+          if (overlayEntry.mounted) overlayEntry.remove();
+        });
+      },
+    );
+  }
+
+  static Future<void> _processDownload({
+    required String url,
+    required bool isImage,
+    required VoidCallback onSuccess,
+    required Function(dynamic) onFailure,
+  }) async {
+    try {
+      // 1. Download file to cache first
+      final File cacheFile = await DefaultCacheManager().getSingleFile(url);
+      
+      // 2. Generate Filename: SapaPNJ_ddMMyy.ext
+      final String dateStr = DateFormat('ddMMyy').format(DateTime.now());
+      final String ext = p.extension(url).isEmpty ? (isImage ? '.jpg' : '.mp4') : p.extension(url);
+      final String fileName = "SapaPNJ_$dateStr$ext";
+
+      // 3. Determine Path (Manual IO)
+      String basePath;
+      if (isImage) {
+        basePath = '/storage/emulated/0/Pictures/SapaPNJ';
+      } else {
+        basePath = '/storage/emulated/0/Download/SapaPNJ';
+      }
+
+      final Directory dir = Directory(basePath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
+      final String savePath = '$basePath/$fileName';
+      await cacheFile.copy(savePath);
+
+      onSuccess();
+    } catch (e) {
+      print("Download Error: $e");
+      onFailure(e);
+    }
+  }
+}
+
+class _DownloadStatusOverlay extends StatefulWidget {
+  final VoidCallback onDismissRequest;
+  const _DownloadStatusOverlay({super.key, required this.onDismissRequest});
+
+  @override
+  State<_DownloadStatusOverlay> createState() => _DownloadStatusOverlayState();
+}
+
+class _DownloadStatusOverlayState extends State<_DownloadStatusOverlay> {
+  bool _isCardVisible = true;
+  bool _isMiniVisible = false;
+  bool _isSuccess = false;
+  bool _isError = false;
+  String _message = "Downloading media...";
+  Timer? _autoDismissTimer;
+
+  double get _targetTop => MediaQuery.of(context).padding.top + 10;
+  double get _targetRight => 12.0;
+  double get _miniRight => 60.0; 
+
+  @override
+  void dispose() {
+    _autoDismissTimer?.cancel();
+    super.dispose();
+  }
+
+  void dismissToIcon() {
+    setState(() => _isCardVisible = false);
+    Future.delayed(Duration(milliseconds: 400), () {
+      if (mounted) setState(() => _isMiniVisible = true);
+    });
+  }
+
+  void _expandToCard() {
+    setState(() => _isMiniVisible = false);
+    Future.delayed(Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() => _isCardVisible = true);
+        _autoDismissTimer?.cancel();
+        _autoDismissTimer = Timer(Duration(seconds: 2), dismissToIcon);
+      }
+    });
+  }
+
+  void handleSuccess() {
+    setState(() { _isSuccess = true; _message = "Download Complete"; });
+    if (_isMiniVisible) {
+      Future.delayed(Duration(seconds: 5), () {
+        if (mounted) setState(() => _isMiniVisible = false);
+      });
+    } else if (_isCardVisible) {
+      Future.delayed(Duration(seconds: 5), () {
+        if (mounted) setState(() => _isCardVisible = false);
+      });
+    }
+  }
+
+  void handleFailure() {
+    setState(() { _isError = true; _message = "Download Failed"; });
+    if (!_isCardVisible) setState(() => _isCardVisible = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        // Mini Loader
+        AnimatedPositioned(
+          duration: Duration(milliseconds: 400),
+          curve: Curves.easeOutQuart,
+          top: _targetTop,
+          right: _isMiniVisible ? _miniRight : _targetRight,
+          child: AnimatedOpacity(
+            duration: Duration(milliseconds: 300),
+            opacity: _isMiniVisible ? 1.0 : 0.0,
+            child: GestureDetector(
+              onTap: _expandToCard,
+              child: Material(
+                elevation: 4,
+                shape: CircleBorder(),
+                color: _isSuccess ? Colors.green : TwitterTheme.white,
+                child: Container(
+                  width: 36, height: 36, padding: EdgeInsets.all(8),
+                  child: _isSuccess 
+                    ? Icon(Icons.check, size: 20, color: Colors.white)
+                    : CircularProgressIndicator(strokeWidth: 3, color: TwitterTheme.blue),
+                ),
+              ),
+            ),
+          ),
+        ),
+        
+        // Card
+        AnimatedPositioned(
+          duration: Duration(milliseconds: 500),
+          curve: Curves.easeInOutBack,
+          top: _isCardVisible ? MediaQuery.of(context).padding.top + 10 : _targetTop,
+          left: _isCardVisible ? 16 : MediaQuery.of(context).size.width - 50,
+          right: _isCardVisible ? 16 : _targetRight,
+          child: AnimatedOpacity(
+            duration: Duration(milliseconds: 300),
+            opacity: _isCardVisible ? 1.0 : 0.0,
+            child: Transform.scale(
+              scale: _isCardVisible ? 1.0 : 0.1,
+              child: Material(
+                elevation: 8,
+                borderRadius: BorderRadius.circular(12),
+                color: Theme.of(context).brightness == Brightness.dark ? TwitterTheme.darkGrey : Colors.white,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          if (_isSuccess)
+                            Icon(Icons.check_circle, color: TwitterTheme.blue)
+                          else if (_isError)
+                            Icon(Icons.error, color: Colors.red)
+                          else
+                            SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _message,
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          if (!_isSuccess && !_isError)
+                            GestureDetector(
+                              onTap: widget.onDismissRequest,
+                              child: Padding(padding: const EdgeInsets.all(4.0), child: Icon(Icons.keyboard_arrow_up, color: Colors.grey)),
+                            ),
+                        ],
+                      ),
+                      if (!_isSuccess && !_isError)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: LinearProgressIndicator(
+                            backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                            valueColor: AlwaysStoppedAnimation(TwitterTheme.blue),
+                          ),
+                        )
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

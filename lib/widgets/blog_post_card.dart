@@ -11,8 +11,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../main.dart';
 import 'package:flutter/services.dart'; 
 import 'package:cached_network_image/cached_network_image.dart'; 
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+import 'package:video_player/video_player.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -25,23 +24,86 @@ class _VideoPlayerWidget extends StatefulWidget {
   State<_VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
 }
 
-class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> {
+class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKeepAliveClientMixin {
+  late VideoPlayerController _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        // Seek to 10s or end of video to create a "thumbnail"
+        final duration = _controller.value.duration;
+        final targetPosition = duration.inSeconds > 10 
+            ? Duration(seconds: 10) 
+            : duration; 
+        
+        _controller.seekTo(targetPosition).then((_) {
+           if (mounted) setState(() => _isInitialized = true);
+        });
+        _controller.setVolume(0); // Mute thumbnail
+        _controller.pause(); // Ensure it doesn't auto play
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  // 1. KeepAlive prevents reloading when scrolling
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for KeepAlive
+
     return Container(
       color: Colors.black,
       height: 200,
       width: double.infinity,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-            SizedBox(height: 8),
-            Text("Tap to play video", style: TextStyle(color: Colors.white)),
-          ],
-        ),
-      ),
+      // 3. Logic to separate Loading vs Ready state
+      child: _isInitialized 
+        ? Stack(
+            fit: StackFit.expand,
+            alignment: Alignment.center,
+            children: [
+              // 2. Fix Black Edges: Use FittedBox with BoxFit.cover
+              FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller.value.size.width,
+                  height: _controller.value.size.height,
+                  child: VideoPlayer(_controller),
+                ),
+              ),
+
+              // Darken Overlay
+              Container(
+                color: Colors.black.withOpacity(0.4),
+              ),
+
+              // Play Button (Only shows when initialized)
+              Center(
+                child: Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
+                ),
+              ),
+            ],
+          )
+        : Center(
+            // Show ONLY loading when not ready
+            child: CircularProgressIndicator(color: TwitterTheme.blue),
+          ),
     );
   }
 }
@@ -89,7 +151,7 @@ class _PostMediaPreview extends StatelessWidget {
           mediaType: type ?? mediaType,
           postData: postData, 
           postId: postId,
-          heroTag: heroTag,
+          heroTag: heroTag, 
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -178,7 +240,7 @@ class BlogPostCard extends StatefulWidget {
   final bool isOwner;
   final bool isClickable; 
   final bool isDetailView;
-  final String heroContextId;
+  final String heroContextId; 
 
   const BlogPostCard({
     super.key,
@@ -271,7 +333,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }); 
 
     try {
-      // Deterministic ID: like_{postId}_{senderId}
       final notificationId = 'like_${widget.postId}_${currentUser.uid}';
       final notificationRef = _firestore
           .collection('users')
@@ -282,7 +343,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       if (_isLiked) {
         await docRef.update({'likes.${currentUser.uid}': true});
         
-        // Only send notification if liking someone else's post
         if (widget.postData['userId'] != currentUser.uid) {
           notificationRef.set({
             'type': 'like',
@@ -296,13 +356,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       } else {
         await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
         
-        // Remove notification on unlike
         if (widget.postData['userId'] != currentUser.uid) {
           notificationRef.delete();
         }
       }
     } catch (e) {
-      _syncState(); // Revert on error
+      _syncState(); 
     }
   }
 
@@ -321,7 +380,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     });
 
     try {
-      // Deterministic ID: repost_{postId}_{senderId}
       final notificationId = 'repost_${widget.postId}_${currentUser.uid}';
       final notificationRef = _firestore
           .collection('users')
