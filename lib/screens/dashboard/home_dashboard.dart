@@ -523,7 +523,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 }
 
-// ... (Class helper lain seperti _NotificationBlurPopup, _AnimatedRoute, _AppBarAvatar tetap sama)
 class _NotificationBlurPopup extends StatefulWidget {
   @override
   State<_NotificationBlurPopup> createState() => _NotificationBlurPopupState();
@@ -669,17 +668,20 @@ class _NotificationTile extends StatelessWidget {
 
   void _navigateToNotification(BuildContext context) {
     final String type = notificationData['type'];
+    final String? postId = notificationData['postId']; // Get post ID safely
+
     Navigator.of(context).pop(); 
 
     if (type == 'follow') {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ProfilePage(userId: notificationData['senderId'], includeScaffold: true), 
       ));
-    } else if (type == 'like' || type == 'repost' || type == 'comment') {
+    } else if ((type == 'like' || type == 'repost' || type == 'comment') && postId != null) {
       Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => PostDetailScreen(postId: notificationData['postId']),
+        builder: (_) => PostDetailScreen(postId: postId),
       ));
     }
+    // 'upload_complete' does nothing on tap or could go to profile
   }
 
   String _formatTimestamp(Timestamp? timestamp) {
@@ -689,6 +691,7 @@ class _NotificationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final String type = notificationData['type'];
     final String senderId = notificationData['senderId'];
     final Timestamp? timestamp = notificationData['timestamp'];
@@ -713,11 +716,58 @@ class _NotificationTile extends StatelessWidget {
         iconData = Icons.chat_bubble;
         iconColor = Colors.grey; 
         break;
+      case 'upload_complete':
+        iconData = Icons.check_circle;
+        iconColor = Colors.green;
+        break;
       default:
         iconData = Icons.notifications;
         iconColor = Colors.grey;
     }
 
+    // --- HANDLE SYSTEM NOTIFICATIONS (FIX FOR BLANK NOTIFICATIONS) ---
+    if (senderId == 'system') {
+      String title = 'Notification';
+      String subtitle = notificationData['postTextSnippet'] ?? '';
+      
+      if (type == 'upload_complete') {
+        title = "Post Uploaded";
+      }
+
+      return ListTile(
+        leading: Stack(
+          children: [
+            CircleAvatar(
+              backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+              child: Icon(Icons.cloud_upload, color: TwitterTheme.blue),
+            ),
+            Positioned(
+              bottom: 0, right: 0,
+              child: Container(
+                padding: EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: iconColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: theme.scaffoldBackgroundColor, width: 2)
+                ),
+                child: Icon(iconData, size: 12, color: Colors.white),
+              ),
+            )
+          ],
+        ),
+        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        subtitle: Text(
+          subtitle.isNotEmpty ? '$subtitle\n${_formatTimestamp(timestamp)}' : _formatTimestamp(timestamp),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12),
+        ),
+        isThreeLine: subtitle.isNotEmpty,
+        onTap: () => _navigateToNotification(context),
+      );
+    }
+
+    // --- HANDLE USER NOTIFICATIONS ---
     return FutureBuilder<DocumentSnapshot>(
       future: _getSenderData(senderId),
       builder: (context, userSnapshot) {
