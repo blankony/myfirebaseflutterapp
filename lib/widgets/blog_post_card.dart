@@ -16,106 +16,53 @@ import 'package:video_player/video_player.dart';
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-class _VideoPlayerWidget extends StatefulWidget {
-  final String videoUrl;
-  const _VideoPlayerWidget({required this.videoUrl});
-
-  @override
-  State<_VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
-}
-
-class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKeepAliveClientMixin {
-  late VideoPlayerController _controller;
-  bool _isInitialized = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _initController();
-  }
-
-  // FIX: Detects if the widget is reused for a DIFFERENT video URL
-  @override
-  void didUpdateWidget(_VideoPlayerWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.videoUrl != widget.videoUrl) {
-      // URL changed, dispose old controller and re-init
-      _controller.dispose();
-      setState(() => _isInitialized = false);
-      _initController();
-    }
-  }
-
-  void _initController() {
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        // Seek to 10s or end of video to create a "thumbnail"
-        final duration = _controller.value.duration;
-        final targetPosition = duration.inSeconds > 10 
-            ? Duration(seconds: 10) 
-            : duration; 
-        
-        _controller.seekTo(targetPosition).then((_) {
-           if (mounted) setState(() => _isInitialized = true);
-        });
-        _controller.setVolume(0); // Mute thumbnail
-        _controller.pause(); // Ensure it doesn't auto play
-      }).catchError((error) {
-        debugPrint("Video initialization error: $error");
-      });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  bool get wantKeepAlive => true;
+// --- DUMB WIDGET: Just renders the controller it is given ---
+class _VideoPlayerWidget extends StatelessWidget {
+  final VideoPlayerController controller;
+  
+  const _VideoPlayerWidget({required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); 
+    if (!controller.value.isInitialized) {
+      return Container(
+        color: Colors.black,
+        height: 200,
+        width: double.infinity,
+        child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
+      );
+    }
 
     return Container(
       color: Colors.black,
       height: 200,
       width: double.infinity,
-      child: _isInitialized 
-        ? Stack(
-            fit: StackFit.expand,
-            alignment: Alignment.center,
-            children: [
-              FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: _controller.value.size.width,
-                  height: _controller.value.size.height,
-                  child: VideoPlayer(_controller),
-                ),
-              ),
-
-              Container(
-                color: Colors.black.withOpacity(0.4),
-              ),
-
-              Center(
-                child: Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
-                ),
-              ),
-            ],
-          )
-        : Center(
-            child: CircularProgressIndicator(color: TwitterTheme.blue),
+      child: Stack(
+        fit: StackFit.expand,
+        alignment: Alignment.center,
+        children: [
+          FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: controller.value.size.width,
+              height: controller.value.size.height,
+              child: VideoPlayer(controller),
+            ),
           ),
+          Container(color: Colors.black.withOpacity(0.4)),
+          Center(
+            child: Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -127,6 +74,7 @@ class _PostMediaPreview extends StatelessWidget {
   final Map<String, dynamic> postData; 
   final String postId; 
   final String heroContextId; 
+  final VideoPlayerController? videoController; 
 
   const _PostMediaPreview({
     required this.mediaUrl,
@@ -135,6 +83,7 @@ class _PostMediaPreview extends StatelessWidget {
     required this.postData, 
     required this.postId, 
     required this.heroContextId,
+    this.videoController,
   });
 
   String? _getVideoId(String url) {
@@ -164,6 +113,7 @@ class _PostMediaPreview extends StatelessWidget {
           postData: postData, 
           postId: postId,
           heroTag: heroTag, 
+          videoController: videoController,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -185,8 +135,8 @@ class _PostMediaPreview extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           child: GestureDetector(
             onTap: () => _navigateToViewer(context, type: mediaType),
-            child: mediaType == 'video' 
-                ? _VideoPlayerWidget(videoUrl: mediaUrl)
+            child: (mediaType == 'video' && videoController != null)
+                ? _VideoPlayerWidget(controller: videoController!)
                 : Hero( 
                     tag: heroTag,
                     transitionOnUserGestures: true,
@@ -253,6 +203,8 @@ class BlogPostCard extends StatefulWidget {
   final bool isClickable; 
   final bool isDetailView;
   final String heroContextId; 
+  final VideoPlayerController? preloadedController; 
+  final bool isPinned; // NEW: Pin Status
 
   const BlogPostCard({
     super.key,
@@ -262,13 +214,15 @@ class BlogPostCard extends StatefulWidget {
     this.isClickable = true,
     this.isDetailView = false,
     this.heroContextId = 'feed', 
+    this.preloadedController,
+    this.isPinned = false, // Default false
   });
 
   @override
   State<BlogPostCard> createState() => _BlogPostCardState();
 }
 
-class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMixin {
+class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   final TextEditingController _editController = TextEditingController();
   late AnimationController _likeController;
   late Animation<double> _likeAnimation;
@@ -283,10 +237,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   int _likeCount = 0;
   int _repostCount = 0;
 
+  VideoPlayerController? _videoController;
+  bool _isVideoOwner = false; 
+
   @override
   void initState() {
     super.initState();
     _syncState();
+    _initVideoController();
     
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
@@ -298,11 +256,42 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
   }
 
+  void _initVideoController() {
+    final mediaUrl = widget.postData['mediaUrl'];
+    final mediaType = widget.postData['mediaType'];
+
+    if (mediaType == 'video' && mediaUrl != null) {
+      if (widget.preloadedController != null) {
+        _videoController = widget.preloadedController;
+        _isVideoOwner = false;
+      } else {
+        _videoController = VideoPlayerController.networkUrl(Uri.parse(mediaUrl))
+          ..initialize().then((_) {
+            final duration = _videoController!.value.duration;
+            final targetPosition = duration.inSeconds > 10 ? Duration(seconds: 10) : duration;
+            _videoController!.seekTo(targetPosition).then((_) {
+               if(mounted) setState((){}); 
+            });
+            _videoController!.setVolume(0);
+            _videoController!.pause();
+          });
+        _isVideoOwner = true;
+      }
+    }
+  }
+
   @override
   void didUpdateWidget(covariant BlogPostCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.postData != widget.postData) {
       _syncState();
+      
+      if (oldWidget.postData['mediaUrl'] != widget.postData['mediaUrl']) {
+        if (_isVideoOwner) {
+          _videoController?.dispose();
+        }
+        _initVideoController();
+      }
     }
   }
 
@@ -327,103 +316,60 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _shareController.dispose();
     _repostController.dispose();
     _editController.dispose();
+    
+    if (_isVideoOwner) {
+      _videoController?.dispose();
+    }
     super.dispose();
   }
 
   void _toggleLike() async {
     final currentUser = _auth.currentUser;
     if (currentUser == null) return;
-    
     _likeController.forward().then((_) => _likeController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-    
     final docRef = _firestore.collection('posts').doc(widget.postId);
-    
-    setState(() { 
-      _isLiked = !_isLiked; 
-      if (_isLiked) _likeCount++; else _likeCount--;
-    }); 
-
+    setState(() { _isLiked = !_isLiked; if (_isLiked) _likeCount++; else _likeCount--; }); 
     try {
       final notificationId = 'like_${widget.postId}_${currentUser.uid}';
-      final notificationRef = _firestore
-          .collection('users')
-          .doc(widget.postData['userId'])
-          .collection('notifications')
-          .doc(notificationId);
-
+      final notificationRef = _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').doc(notificationId);
       if (_isLiked) {
         await docRef.update({'likes.${currentUser.uid}': true});
         if (widget.postData['userId'] != currentUser.uid) {
-          notificationRef.set({
-            'type': 'like',
-            'senderId': currentUser.uid,
-            'postId': widget.postId,
-            'postTextSnippet': widget.postData['text'],
-            'timestamp': FieldValue.serverTimestamp(),
-            'isRead': false,
-          });
+          notificationRef.set({'type': 'like','senderId': currentUser.uid,'postId': widget.postId,'postTextSnippet': widget.postData['text'],'timestamp': FieldValue.serverTimestamp(),'isRead': false,});
         }
       } else {
         await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
-        if (widget.postData['userId'] != currentUser.uid) {
-          notificationRef.delete();
-        }
+        if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
       }
-    } catch (e) {
-      _syncState(); 
-    }
+    } catch (e) { _syncState(); }
   }
 
   void _toggleRepost() async {
     final currentUser = _auth.currentUser;
     if (currentUser == null) return;
-
     _repostController.forward().then((_) => _repostController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-
     final docRef = _firestore.collection('posts').doc(widget.postId);
-
-    setState(() {
-      _isReposted = !_isReposted;
-      if (_isReposted) _repostCount++; else _repostCount--;
-    });
-
+    setState(() { _isReposted = !_isReposted; if (_isReposted) _repostCount++; else _repostCount--; });
     try {
       final notificationId = 'repost_${widget.postId}_${currentUser.uid}';
-      final notificationRef = _firestore
-          .collection('users')
-          .doc(widget.postData['userId'])
-          .collection('notifications')
-          .doc(notificationId);
-
+      final notificationRef = _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').doc(notificationId);
       if (_isReposted) {
         await docRef.update({'repostedBy': FieldValue.arrayUnion([currentUser.uid])});
         if (widget.postData['userId'] != currentUser.uid) {
-          notificationRef.set({
-            'type': 'repost',
-            'senderId': currentUser.uid,
-            'postId': widget.postId,
-            'postTextSnippet': widget.postData['text'],
-            'timestamp': FieldValue.serverTimestamp(),
-            'isRead': false,
-          });
+          notificationRef.set({'type': 'repost','senderId': currentUser.uid,'postId': widget.postId,'postTextSnippet': widget.postData['text'],'timestamp': FieldValue.serverTimestamp(),'isRead': false,});
         }
       } else {
         await docRef.update({'repostedBy': FieldValue.arrayRemove([currentUser.uid])});
-        if (widget.postData['userId'] != currentUser.uid) {
-          notificationRef.delete();
-        }
+        if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
       }
-    } catch (e) {
-      _syncState();
-    }
+    } catch (e) { _syncState(); }
   }
 
   void _sharePost() {
     _shareController.forward().then((_) => _shareController.reverse());
     setState(() { _isSharing = true; });
-    
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) setState(() { _isSharing = false; });
       Share.share('Check out this post by ${widget.postData['userName']}: "${widget.postData['text']}"');
@@ -442,7 +388,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         ],
       ),
     ) ?? false;
-
     if (confirm) {
       try {
         await _firestore.collection('posts').doc(widget.postId).delete();
@@ -450,6 +395,30 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       } catch (e) {
         if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to delete: $e")));
       }
+    }
+  }
+
+  // --- NEW: Toggle Pin Function ---
+  Future<void> _togglePin() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    try {
+      if (widget.isPinned) {
+        // Unpin: Remove field
+        await _firestore.collection('users').doc(user.uid).update({
+          'pinnedPostId': FieldValue.delete(),
+        });
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post unpinned.")));
+      } else {
+        // Pin: Set field
+        await _firestore.collection('users').doc(user.uid).update({
+          'pinnedPostId': widget.postId,
+        });
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post pinned to profile.")));
+      }
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to pin: $e")));
     }
   }
 
@@ -473,7 +442,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         PostDetailScreen(
           postId: widget.postId,
           initialPostData: widget.postData, 
-          heroContextId: widget.heroContextId, 
+          heroContextId: widget.heroContextId,
+          preloadedController: _videoController,
         ),
       ),
     );
@@ -482,7 +452,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   void _navigateToUserProfile() {
     final postUserId = widget.postData['userId'];
     if (postUserId == null) return;
-
     if (widget.isOwner) {
       final scaffold = Scaffold.maybeOf(context);
       if (scaffold != null && scaffold.hasDrawer) {
@@ -491,7 +460,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         return;
       }
     }
-    
     Navigator.of(context).push(
       _createSlideLeftRoute(
         ProfilePage(userId: postUserId, includeScaffold: true), 
@@ -545,28 +513,22 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Uploading media...",
-            style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
-          ),
+          Text("Uploading media...", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
           SizedBox(height: 4),
-          LinearProgressIndicator(
-            value: null, 
-            backgroundColor: Theme.of(context).dividerColor,
-            valueColor: AlwaysStoppedAnimation<Color>(TwitterTheme.blue),
-          ),
+          LinearProgressIndicator(value: null, backgroundColor: Theme.of(context).dividerColor, valueColor: AlwaysStoppedAnimation<Color>(TwitterTheme.blue)),
           SizedBox(height: 4),
-          Text(
-            'Processing...',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          Text('Processing...', style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );
   }
 
   @override
+  bool get wantKeepAlive => true; 
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
     final text = widget.postData['text'] ?? '';
     final mediaUrl = widget.postData['mediaUrl'];
@@ -592,50 +554,72 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           color: theme.cardColor,
         ),
         padding: const EdgeInsets.all(16.0), 
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildAvatar(context),
-            SizedBox(width: 12),
-            
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildPostHeader(context),
-                  
-                  if (text.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4.0),
-                      child: Text(
-                        text,
-                        style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
-                        maxLines: widget.isDetailView ? null : 10,
-                        overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
-                      ),
+            // --- PINNED HEADER ---
+            if (widget.isPinned)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
+                child: Row(
+                  children: [
+                    Icon(Icons.push_pin, size: 14, color: theme.hintColor),
+                    SizedBox(width: 4),
+                    Text(
+                      "Pinned Post", 
+                      style: TextStyle(
+                        fontSize: 12, 
+                        fontWeight: FontWeight.bold,
+                        color: theme.hintColor
+                      )
                     ),
-                  
-                  if (isUploading)
-                    _buildUploadStatus(uploadProgress)
-                  else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12.0),
-                      child: _PostMediaPreview(
-                        mediaUrl: mediaUrl ?? '',
-                        mediaType: mediaType,
-                        text: text,
-                        postData: widget.postData, 
-                        postId: widget.postId, 
-                        heroContextId: widget.heroContextId, 
-                      ),
-                    ),
-                  
-                  if (widget.isDetailView && !isUploading)
-                    _buildDetailActionRow()
-                  else if (!isUploading)
-                    _buildFeedActionRow(commentCount),
-                ],
+                  ],
+                ),
               ),
+
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildAvatar(context),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildPostHeader(context),
+                      if (text.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Text(
+                            text,
+                            style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
+                            maxLines: widget.isDetailView ? null : 10,
+                            overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+                          ),
+                        ),
+                      if (isUploading)
+                        _buildUploadStatus(uploadProgress)
+                      else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12.0),
+                          child: _PostMediaPreview(
+                            mediaUrl: mediaUrl ?? '',
+                            mediaType: mediaType,
+                            text: text,
+                            postData: widget.postData, 
+                            postId: widget.postId, 
+                            heroContextId: widget.heroContextId, 
+                            videoController: _videoController, 
+                          ),
+                        ),
+                      if (widget.isDetailView && !isUploading)
+                        _buildDetailActionRow()
+                      else if (!isUploading)
+                        _buildFeedActionRow(commentCount),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -645,14 +629,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   Widget _buildAvatar(BuildContext context) {
     final String authorId = widget.postData['userId'];
-    
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(authorId).snapshots(),
       builder: (context, snapshot) {
         int iconId = 0;
         String? colorHex;
         String? profileImageUrl;
-        
         if (snapshot.hasData && snapshot.data != null && snapshot.data!.exists) {
           final userData = snapshot.data!.data() as Map<String, dynamic>;
           iconId = userData['avatarIconId'] ?? 0;
@@ -663,20 +645,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
            colorHex = widget.postData['avatarHex'];
            profileImageUrl = widget.postData['profileImageUrl'];
         }
-
         final Color avatarBgColor = AvatarHelper.getColor(colorHex);
-
         return GestureDetector(
            onTap: _navigateToUserProfile,
           child: CircleAvatar(
             radius: 24,
             backgroundColor: profileImageUrl != null ? Colors.transparent : avatarBgColor,
-            backgroundImage: profileImageUrl != null
-                ? CachedNetworkImageProvider(profileImageUrl)
-                : null,
-            child: profileImageUrl == null
-                ? Icon(AvatarHelper.getIcon(iconId), size: 26, color: Colors.white)
-                : null,
+            backgroundImage: profileImageUrl != null ? CachedNetworkImageProvider(profileImageUrl) : null,
+            child: profileImageUrl == null ? Icon(AvatarHelper.getIcon(iconId), size: 26, color: Colors.white) : null,
           ),
         );
       },
@@ -687,35 +663,23 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final timeAgo = _formatTimestamp(widget.postData['timestamp'] as Timestamp?);
     final String userName = widget.postData['userName'] ?? 'User';
     final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Flexible(
-              child: Text(
-                userName,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            Flexible(child: Text(userName, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
             Row(
               children: [
                 SizedBox(width: 4),
                 Text("· $timeAgo", style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12)),
-                if (widget.isOwner)
-                  _buildOptionsButton(),
+                if (widget.isOwner) _buildOptionsButton(),
               ],
             ),
           ],
         ),
-        Text(
-          handle,
-          style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13),
-          overflow: TextOverflow.ellipsis,
-        ),
+        Text(handle, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13), overflow: TextOverflow.ellipsis),
       ],
     );
   }
@@ -727,48 +691,25 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       elevation: 4,
       color: Theme.of(context).cardColor,
       onSelected: (value) {
-        if (value == 'edit') {
-          _showEditDialog();
-        } else if (value == 'delete') {
-          _deletePost();
-        } else if (value == 'pin') {
-           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Post pinned to profile (Demo)")));
-           }
-        }
+        if (value == 'edit') _showEditDialog();
+        else if (value == 'delete') _deletePost();
+        else if (value == 'pin') _togglePin(); // Updated action
       },
       itemBuilder: (context) => [
+        PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
+        // Conditional Pin Text
         PopupMenuItem(
-          value: 'edit',
+          value: 'pin', 
           child: Row(
             children: [
-              Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color),
-              SizedBox(width: 12),
-              Text("Edit Post"),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'pin',
-          child: Row(
-            children: [
-              Icon(Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color),
-              SizedBox(width: 12),
-              Text("Pin to Profile"),
-            ],
-          ),
+              Icon(widget.isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
+              SizedBox(width: 12), 
+              Text(widget.isPinned ? "Unpin from Profile" : "Pin to Profile")
+            ]
+          )
         ),
         PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'delete',
-          child: Row(
-            children: [
-              Icon(Icons.delete_outline, size: 20, color: Colors.red),
-              SizedBox(width: 12),
-              Text("Delete Post", style: TextStyle(color: Colors.red)),
-            ],
-          ),
-        ),
+        PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post", style: TextStyle(color: Colors.red))])),
       ],
     );
   }
@@ -805,12 +746,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Widget _buildActionButton(IconData icon, String? text, Color? color, VoidCallback onTap, [Animation<double>? animation]) {
     final theme = Theme.of(context);
     final iconColor = color ?? theme.textTheme.bodySmall?.color ?? Colors.grey;
-    
     Widget iconWidget = Icon(icon, size: 20, color: iconColor);
-    if (animation != null) {
-      iconWidget = ScaleTransition(scale: animation, child: iconWidget);
-    }
-
+    if (animation != null) iconWidget = ScaleTransition(scale: animation, child: iconWidget);
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -818,11 +755,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         child: Row(
           children: [
             iconWidget, 
-            if (text != null && text != "0" && text.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 6.0),
-                child: Text(text, style: TextStyle(color: iconColor, fontSize: 13)),
-              ),
+            if (text != null && text != "0" && text.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 6.0), child: Text(text, style: TextStyle(color: iconColor, fontSize: 13))),
           ],
         ),
       ),

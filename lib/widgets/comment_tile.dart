@@ -20,7 +20,7 @@ class CommentTile extends StatefulWidget {
   final String postId; 
   final bool isOwner;
   final bool showPostContext; 
-  final String heroContextId; // 1. PARAMETER BARU
+  final String heroContextId; 
 
   const CommentTile({
     super.key,
@@ -29,7 +29,7 @@ class CommentTile extends StatefulWidget {
     required this.postId,
     required this.isOwner,
     this.showPostContext = false, 
-    this.heroContextId = 'comment', // Default value
+    this.heroContextId = 'comment', 
   });
 
   @override
@@ -39,7 +39,6 @@ class CommentTile extends StatefulWidget {
 class _CommentTileState extends State<CommentTile> with SingleTickerProviderStateMixin {
   final TextEditingController _editController = TextEditingController();
   
-  // Stats State
   late bool _isLiked;
   late int _likeCount;
   late bool _isReposted; 
@@ -138,7 +137,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
     final String text = widget.commentData['text'] ?? '';
     final String? mediaUrl = widget.commentData['mediaUrl'];
     final String userName = widget.commentData['userName'] ?? 'User';
-    
     final String shareText = 'Replying to post: "$text" - by $userName';
 
     try {
@@ -265,7 +263,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
   }
 
   void _openMediaViewer(String url, String? type) {
-    // 2. GUNAKAN CONTEXT ID DI SINI
     final String heroTag = '${widget.heroContextId}_${widget.commentId}_$url';
 
     Navigator.of(context).push(
@@ -352,6 +349,7 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
       onTap: _navigateToOriginalPost,
       child: Container(
         color: theme.cardColor,
+        // Removed bottom padding to make line connect better
         padding: EdgeInsets.fromLTRB(12, 12, 16, 0), 
         child: IntrinsicHeight(
           child: Row(
@@ -437,24 +435,27 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                 color: Colors.transparent,
                 child: Stack(
                   children: [
-                    Positioned(
-                      top: 0,
-                      bottom: 0,
-                      left: 20, 
-                      child: Container(
-                        width: 2,
-                        color: theme.dividerColor, 
+                    if (isThreaded)
+                      Positioned(
+                        top: 0,
+                        bottom: 0, // Extend all the way down
+                        left: 20, 
+                        child: Container(
+                          width: 2,
+                          color: theme.dividerColor, 
+                        ),
                       ),
-                    ),
-                    Positioned(
-                      top: 24, 
-                      left: 20, 
-                      width: 16, 
-                      child: Container(
-                        height: 2,
-                        color: theme.dividerColor,
+                    // Curve connector
+                    if (isThreaded)
+                      Positioned(
+                        top: 24, 
+                        left: 20, 
+                        width: 16, 
+                        child: Container(
+                          height: 2,
+                          color: theme.dividerColor,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -501,7 +502,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                       if (text.isNotEmpty)
                         Text(text, style: theme.textTheme.bodyLarge),
                         
-                      // --- MEDIA DISPLAY IN REPLY ---
                       if (mediaUrl != null && mediaUrl.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
@@ -519,7 +519,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                                 child: mediaType == 'video'
                                     ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 40))
                                     : Hero(
-                                        // 3. GUNAKAN TAG DENGAN CONTEXT ID
                                         tag: '${widget.heroContextId}_${widget.commentId}_$mediaUrl',
                                         child: CachedNetworkImage(
                                           imageUrl: mediaUrl,
@@ -533,7 +532,6 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                           ),
                         ),
                       
-                      // Actions Row
                       Padding(
                         padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
                         child: Row(
@@ -585,12 +583,10 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
   }) {
     final theme = Theme.of(context);
     final iconColor = color ?? theme.hintColor;
-    
     Widget iconWidget = Icon(icon, size: 18, color: iconColor);
     if (animation != null) {
       iconWidget = ScaleTransition(scale: animation, child: iconWidget);
     }
-
     return InkWell(
       onTap: onTap,
       child: Row(
