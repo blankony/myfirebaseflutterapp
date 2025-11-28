@@ -52,7 +52,7 @@ class _PostMediaPreview extends StatelessWidget {
   final String text;
   final Map<String, dynamic> postData; 
   final String postId; 
-  final String heroContextId; // PARAMETER BARU
+  final String heroContextId; 
 
   const _PostMediaPreview({
     required this.mediaUrl,
@@ -60,7 +60,7 @@ class _PostMediaPreview extends StatelessWidget {
     required this.text,
     required this.postData, 
     required this.postId, 
-    required this.heroContextId, // WAJIB DIISI
+    required this.heroContextId,
   });
 
   String? _getVideoId(String url) {
@@ -78,8 +78,6 @@ class _PostMediaPreview extends StatelessWidget {
   }
 
   void _navigateToViewer(BuildContext context, {String? url, String? type}) {
-     // BUAT TAG UNIK DENGAN CONTEXT ID
-     // Format: contextId_postId_url
      final String heroTag = '${heroContextId}_${postId}_${url ?? mediaUrl}';
 
      Navigator.of(context).push(
@@ -91,7 +89,7 @@ class _PostMediaPreview extends StatelessWidget {
           mediaType: type ?? mediaType,
           postData: postData, 
           postId: postId,
-          heroTag: heroTag, // KIRIM TAG UNIK INI
+          heroTag: heroTag,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -105,7 +103,6 @@ class _PostMediaPreview extends StatelessWidget {
     final theme = Theme.of(context);
     
     if (mediaUrl.isNotEmpty) {
-      // GUNAKAN TAG YANG SAMA DI SINI
       final String heroTag = '${heroContextId}_${postId}_$mediaUrl';
 
       return AspectRatio( 
@@ -181,7 +178,7 @@ class BlogPostCard extends StatefulWidget {
   final bool isOwner;
   final bool isClickable; 
   final bool isDetailView;
-  final String heroContextId; // PARAMETER BARU DI SINI
+  final String heroContextId;
 
   const BlogPostCard({
     super.key,
@@ -190,7 +187,7 @@ class BlogPostCard extends StatefulWidget {
     required this.isOwner,
     this.isClickable = true,
     this.isDetailView = false,
-    this.heroContextId = 'feed', // Default value agar tidak error di tempat lain
+    this.heroContextId = 'feed', 
   });
 
   @override
@@ -274,10 +271,20 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }); 
 
     try {
+      // Deterministic ID: like_{postId}_{senderId}
+      final notificationId = 'like_${widget.postId}_${currentUser.uid}';
+      final notificationRef = _firestore
+          .collection('users')
+          .doc(widget.postData['userId'])
+          .collection('notifications')
+          .doc(notificationId);
+
       if (_isLiked) {
         await docRef.update({'likes.${currentUser.uid}': true});
+        
+        // Only send notification if liking someone else's post
         if (widget.postData['userId'] != currentUser.uid) {
-          _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').add({
+          notificationRef.set({
             'type': 'like',
             'senderId': currentUser.uid,
             'postId': widget.postId,
@@ -288,6 +295,11 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
       } else {
         await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
+        
+        // Remove notification on unlike
+        if (widget.postData['userId'] != currentUser.uid) {
+          notificationRef.delete();
+        }
       }
     } catch (e) {
       _syncState(); // Revert on error
@@ -309,10 +321,19 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     });
 
     try {
+      // Deterministic ID: repost_{postId}_{senderId}
+      final notificationId = 'repost_${widget.postId}_${currentUser.uid}';
+      final notificationRef = _firestore
+          .collection('users')
+          .doc(widget.postData['userId'])
+          .collection('notifications')
+          .doc(notificationId);
+
       if (_isReposted) {
         await docRef.update({'repostedBy': FieldValue.arrayUnion([currentUser.uid])});
+        
         if (widget.postData['userId'] != currentUser.uid) {
-          _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').add({
+          notificationRef.set({
             'type': 'repost',
             'senderId': currentUser.uid,
             'postId': widget.postId,
@@ -323,6 +344,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
       } else {
         await docRef.update({'repostedBy': FieldValue.arrayRemove([currentUser.uid])});
+        
+        if (widget.postData['userId'] != currentUser.uid) {
+          notificationRef.delete();
+        }
       }
     } catch (e) {
       _syncState();
@@ -500,7 +525,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
           color: theme.cardColor,
         ),
-        // UPDATED: Padding increased from 12.0 to 16.0 for consistent UI alignment
         padding: const EdgeInsets.all(16.0), 
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -536,7 +560,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                         text: text,
                         postData: widget.postData, 
                         postId: widget.postId, 
-                        heroContextId: widget.heroContextId, // PASSING PARAMETER
+                        heroContextId: widget.heroContextId, 
                       ),
                     ),
                   

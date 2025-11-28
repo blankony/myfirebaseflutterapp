@@ -10,7 +10,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
-import '../image_viewer_screen.dart'; // IMPORT PENTING INI
+import '../image_viewer_screen.dart'; 
 import 'settings_page.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -67,7 +67,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
-  // --- FUNGSI BARU: Buka Gambar Full Screen ---
   void _openFullImage(BuildContext context, String url, String heroTag) {
     Navigator.of(context).push(
       PageRouteBuilder(
@@ -76,7 +75,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         pageBuilder: (_, __, ___) => ImageViewerScreen(
           imageUrl: url,
           heroTag: heroTag,
-          mediaType: 'image', // Default image
+          mediaType: 'image', 
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -91,12 +90,23 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       final batch = _firestore.batch();
       final myDocRef = _firestore.collection('users').doc(_user!.uid);
       final targetDocRef = _firestore.collection('users').doc(_userId);
+      
       batch.update(myDocRef, {'following': FieldValue.arrayUnion([_userId])});
       batch.update(targetDocRef, {'followers': FieldValue.arrayUnion([_user!.uid])});
+      
       await batch.commit();
-      _firestore.collection('users').doc(_userId).collection('notifications').add({
-        'type': 'follow', 'senderId': _user!.uid, 'timestamp': FieldValue.serverTimestamp(), 'isRead': false,
-      });
+      
+      // Notification Logic: Use Deterministic ID to prevent spam
+      final notificationId = 'follow_${_user!.uid}';
+      _firestore.collection('users').doc(_userId).collection('notifications')
+        .doc(notificationId)
+        .set({
+          'type': 'follow', 
+          'senderId': _user!.uid, 
+          'timestamp': FieldValue.serverTimestamp(), 
+          'isRead': false,
+        });
+
     } catch (e) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to follow: $e'))); }
   }
 
@@ -106,9 +116,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       final batch = _firestore.batch();
       final myDocRef = _firestore.collection('users').doc(_user!.uid);
       final targetDocRef = _firestore.collection('users').doc(_userId);
+      
       batch.update(myDocRef, {'following': FieldValue.arrayRemove([_userId])});
       batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([_user!.uid])});
+      
       await batch.commit();
+
+      // Remove the notification on unfollow
+      final notificationId = 'follow_${_user!.uid}';
+      _firestore.collection('users').doc(_userId).collection('notifications')
+        .doc(notificationId)
+        .delete();
+
     } catch (e) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to unfollow: $e'))); }
   }
 

@@ -61,16 +61,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     try {
       await batch.commit();
 
-      _firestore
-          .collection('users')
-          .doc(widget.userId)
-          .collection('notifications')
-          .add({
-        'type': 'follow',
-        'senderId': _currentUser!.uid,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-      });
+      // Notification Logic: Use Deterministic ID
+      final notificationId = 'follow_${_currentUser!.uid}';
+      _firestore.collection('users').doc(widget.userId).collection('notifications')
+        .doc(notificationId)
+        .set({
+          'type': 'follow',
+          'senderId': _currentUser!.uid,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
 
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to follow: $e')));
@@ -94,6 +94,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     
     try {
       await batch.commit();
+
+      // Remove notification
+      final notificationId = 'follow_${_currentUser!.uid}';
+      _firestore.collection('users').doc(widget.userId).collection('notifications')
+        .doc(notificationId)
+        .delete();
+
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to unfollow: $e')));
     }
@@ -127,10 +134,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
           ),
           body: RefreshIndicator(
             onRefresh: () async {
-              // Simulate a network request
               await Future.delayed(Duration(seconds: 2));
-              // In a real app, you would re-fetch the user data here.
-              // For demonstration, we can just rebuild the state.
               setState(() {});
             },
             child: NestedScrollView(
