@@ -16,7 +16,7 @@ import '../edit_profile_screen.dart';
 import '../image_viewer_screen.dart'; 
 import 'settings_page.dart'; 
 import '../../services/overlay_service.dart';
-import '../../services/cloudinary_service.dart'; // Ensure this is imported
+import '../../services/cloudinary_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -46,7 +46,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _isScrolled = false;
   bool _isBioExpanded = false;
   int _targetTabIndex = 0;
-  bool _isUploading = false;
+  // _isUploading variable is removed as we use OverlayEntry for visual state now
 
   @override
   void initState() {
@@ -91,7 +91,54 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- NEW: Image Picker & Upload Logic ---
+  // --- NEW: Custom Upload Overlay Helper ---
+  // Fungsi ini membuat tampilan loading yang sama persis dengan post upload
+  OverlayEntry _showUploadingOverlay() {
+    OverlayEntry entry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 10,
+        left: 16,
+        right: 16,
+        child: Material(
+          elevation: 8,
+          borderRadius: BorderRadius.circular(12),
+          color: Theme.of(context).cardColor,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 20, 
+                      height: 20, 
+                      child: CircularProgressIndicator(strokeWidth: 2, color: TwitterTheme.blue)
+                    ),
+                    SizedBox(width: 12),
+                    Text(
+                      "Uploading media...", 
+                      style: TextStyle(fontWeight: FontWeight.bold)
+                    ),
+                  ],
+                ),
+                SizedBox(height: 10),
+                LinearProgressIndicator(
+                  backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                  valueColor: AlwaysStoppedAnimation(TwitterTheme.blue),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    Overlay.of(context).insert(entry);
+    return entry;
+  }
+
+  // --- MODIFIED: Image Picker & Upload Logic ---
   Future<void> _pickAndUploadImage({required bool isBanner}) async {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(
@@ -125,15 +172,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
     if (croppedFile == null) return;
 
-    setState(() => _isUploading = true);
-    
-    if (mounted) {
-       OverlayService().showTopNotification(context, "Uploading...", Icons.cloud_upload, (){}, color: TwitterTheme.blue);
-    }
+    // 1. Tampilkan Overlay Loading (Ganti dari SnackBar)
+    final OverlayEntry loadingOverlay = _showUploadingOverlay();
 
     try {
       // Upload to Cloudinary
       final String? downloadUrl = await _cloudinaryService.uploadImage(File(croppedFile.path));
+
+      // 2. Hapus Overlay Loading
+      loadingOverlay.remove();
 
       if (downloadUrl != null) {
         // Update Firestore
@@ -147,20 +194,34 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
         await _firestore.collection('users').doc(_userId).update(updateData);
         
-        // Note: For Avatar updates, you should ideally also run the Batch Update 
-        // logic (from EditProfileScreen) to update past posts. 
-        // For simplicity in this direct view, we just update the profile.
-
+        // 3. Tampilkan Notifikasi Sukses
         if (mounted) {
-          OverlayService().showTopNotification(context, "Updated successfully!", Icons.check_circle, (){}, color: Colors.green);
+          OverlayService().showTopNotification(
+            context, 
+            "Updated successfully!", 
+            Icons.check_circle, 
+            (){}, 
+            color: Colors.green
+          );
         }
+      } else {
+        throw Exception("Upload returned null");
       }
     } catch (e) {
+      // Pastikan overlay dihapus jika error
+      try {
+        loadingOverlay.remove(); 
+      } catch(_) {} 
+
       if (mounted) {
-        OverlayService().showTopNotification(context, "Upload failed", Icons.error, (){}, color: Colors.red);
+        OverlayService().showTopNotification(
+          context, 
+          "Upload failed", 
+          Icons.error, 
+          (){}, 
+          color: Colors.red
+        );
       }
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
     }
   }
 
@@ -484,10 +545,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               GestureDetector(
                 onTap: () {
                   if (isMyProfile) {
-                    // Tap to Edit Banner (Direct)
                     _pickAndUploadImage(isBanner: true);
                   } else if (bannerImageUrl != null && bannerImageUrl.isNotEmpty) {
-                    // Tap to View Banner (Others)
                     _openFullImage(context, bannerImageUrl, bannerTag);
                   }
                 },
@@ -507,7 +566,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             placeholder: (context, url) => Container(color: TwitterTheme.darkGrey), 
                             errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey)
                           ),
-                        // Add an edit icon overlay if it's my profile
                         if (isMyProfile)
                           Center(
                             child: Container(
@@ -533,10 +591,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   onTap: () {
                     final String? profileUrl = data['profileImageUrl'];
                     if (isMyProfile) {
-                      // Show Options Bottom Sheet
                       _showProfileOptions(context, profileUrl, avatarTag);
                     } else if (profileUrl != null && profileUrl.isNotEmpty) {
-                      // Just View
                       _openFullImage(context, profileUrl, avatarTag);
                     }
                   },
@@ -697,6 +753,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             }
 
             return ListView.separated(
+              // Removed Key here to rely on RefreshIndicator parent state update
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: docs.length,
