@@ -57,6 +57,7 @@ dependencies:
   gal: ^2.3.0  
   permission_handler: ^11.3.0  
   device_info_plus: ^10.1.0    
+  video_compress: ^3.1.4
 
 dev_dependencies:
   flutter_test:

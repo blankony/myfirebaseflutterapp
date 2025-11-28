@@ -1,5 +1,5 @@
 // ignore_for_file: prefer_const_constructors, use_build_context_synchronously
-import 'dart:async'; // REQUIRED for Timer
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
@@ -20,6 +20,7 @@ class ImageViewerScreen extends StatefulWidget {
   final Map<String, dynamic>? postData;
   final String? postId; 
   final String heroTag;
+  final VideoPlayerController? videoController; 
 
   const ImageViewerScreen({
     super.key,
@@ -28,6 +29,7 @@ class ImageViewerScreen extends StatefulWidget {
     this.mediaType,
     this.postData,
     this.postId,
+    this.videoController,
   });
 
   @override
@@ -36,7 +38,7 @@ class ImageViewerScreen extends StatefulWidget {
 
 class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTickerProviderStateMixin {
   bool _showOverlays = true;
-  Timer? _hideTimer; // Timer for auto-hiding controls
+  Timer? _hideTimer; 
 
   late AnimationController _menuController;
   late Animation<Offset> _menuAnimation;
@@ -51,8 +53,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
   bool _isPlaying = false;
-  bool _isBuffering = false; // State for buffering feedback
+  bool _isBuffering = false;
+  bool _isExternalController = false; 
   double _currentVolume = 1.0;
+  
+  // Seekbar State
+  Duration _currentPosition = Duration.zero;
+  Duration _totalDuration = Duration.zero;
+  bool _isDraggingSlider = false;
 
   bool get _isPostContent => widget.postId != null;
   bool get _isVideo => widget.mediaType == 'video';
@@ -77,32 +85,85 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       _initVideo();
     }
     
-    // Auto-hide controls initially
     _resetHideTimer();
   }
 
   void _initVideo() {
-    // STREAMING: No caching for playback
-    _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.imageUrl))
-      ..initialize().then((_) {
-        setState(() {
-          _isVideoInitialized = true;
-          _isPlaying = true;
-        });
+    if (widget.videoController != null) {
+      // REUSE EXISTING CONTROLLER
+      _videoController = widget.videoController;
+      _isExternalController = true;
+      _isVideoInitialized = true;
+      _isPlaying = _videoController!.value.isPlaying;
+      _totalDuration = _videoController!.value.duration;
+      _videoController!.addListener(_videoListener);
+      
+      // Auto play if not playing
+      if (!_isPlaying) {
         _videoController!.play();
-        _videoController!.setLooping(true);
-        _videoController!.addListener(_videoListener); // Add listener for buffering
-      });
+        _isPlaying = true;
+      }
+    } else {
+      // INIT NEW CONTROLLER (Fallback)
+      _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.imageUrl))
+        ..initialize().then((_) {
+          setState(() {
+            _isVideoInitialized = true;
+            _isPlaying = true;
+            _totalDuration = _videoController!.value.duration;
+          });
+          _videoController!.play();
+          _videoController!.setLooping(true);
+          _videoController!.addListener(_videoListener);
+        });
+    }
   }
 
   void _videoListener() {
     if (_videoController == null || !mounted) return;
+    
     final bool isBuffering = _videoController!.value.isBuffering;
     if (isBuffering != _isBuffering) {
       setState(() {
         _isBuffering = isBuffering;
       });
     }
+
+    if (!_isDraggingSlider) {
+      setState(() {
+        _currentPosition = _videoController!.value.position;
+        if (_videoController!.value.duration != Duration.zero) {
+           _totalDuration = _videoController!.value.duration;
+        }
+      });
+    }
+  }
+
+  void _onSeekStart(double value) {
+    _isDraggingSlider = true;
+    _hideTimer?.cancel();
+  }
+
+  void _onSeekChanged(double value) {
+    setState(() {
+      _currentPosition = Duration(milliseconds: value.toInt());
+    });
+  }
+
+  void _onSeekEnd(double value) {
+    _videoController?.seekTo(Duration(milliseconds: value.toInt()));
+    _isDraggingSlider = false;
+    _resetHideTimer();
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    if (duration.inHours > 0) {
+      return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
+    }
+    return "$twoDigitMinutes:$twoDigitSeconds";
   }
 
   @override
@@ -110,7 +171,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
     _hideTimer?.cancel();
     _menuController.dispose();
     _videoController?.removeListener(_videoListener);
-    _videoController?.dispose();
+    
+    if (!_isExternalController) {
+      _videoController?.dispose();
+    }
     super.dispose();
   }
 
@@ -145,10 +209,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   void _resetHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _isPlaying) { // Only auto-hide if playing
+      if (mounted && _isPlaying && !_isDraggingSlider) { 
         setState(() {
           _showOverlays = false;
-          _isMenuOpen = false; // Also close menu if open
+          _isMenuOpen = false; 
         });
         _menuController.reverse();
       }
@@ -160,7 +224,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       _isMenuOpen = true;
     });
     _menuController.forward();
-    _resetHideTimer(); // Keep controls visible while menu interacting
+    _resetHideTimer(); 
   }
 
   void _closeMenu() {
@@ -179,19 +243,19 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       if (_videoController!.value.isPlaying) {
         _videoController!.pause();
         _isPlaying = false;
-        _showOverlays = true; // Always show controls when paused
-        _hideTimer?.cancel(); // Cancel auto-hide
+        _showOverlays = true; 
+        _hideTimer?.cancel(); 
       } else {
         _videoController!.play();
         _isPlaying = true;
-        _resetHideTimer(); // Restart auto-hide logic
+        _resetHideTimer(); 
       }
     });
   }
 
   void _changeSpeed(double speed) {
     _videoController?.setPlaybackSpeed(speed);
-    Navigator.pop(context); // Close popup
+    Navigator.pop(context); 
     _resetHideTimer();
   }
 
@@ -228,7 +292,6 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
     }
   }
 
-  // --- DOWNLOAD LOGIC ---
   Future<void> _downloadMedia() async {
     _closeMenu();
     final OverlayState overlayState = Overlay.of(context);
@@ -245,7 +308,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
       body: GestureDetector(
-        onTap: _toggleOverlays, // Tapping anywhere toggles UI visibility
+        onTap: _isVideo ? _togglePlayPause : _toggleOverlays,
         child: Stack(
           fit: StackFit.expand,
           alignment: Alignment.center,
@@ -270,7 +333,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                 heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
               ),
 
-            // 2. BUFFERING INDICATOR (Shows when stalled but playing)
+            // 2. BUFFERING
             if (_isVideo && _isBuffering && _isPlaying)
               Center(
                 child: Container(
@@ -283,7 +346,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                 ),
               ),
 
-            // 3. CENTER PLAY BUTTON (Only visible if paused explicitly)
+            // 3. CENTER PLAY BUTTON
             if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
                Center(
                 child: Container(
@@ -332,7 +395,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
               ),
             ),
 
-            // 5. MENU (Save)
+            // 5. MENU
             if (_isMenuOpen)
               Positioned(
                 top: 50, right: 10,
@@ -359,12 +422,12 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                 ),
               ),
 
-            // 6. VIDEO CONTROLS (Bottom) - Only for Video
+            // 6. VIDEO CONTROLS
             if (_isVideo && _isVideoInitialized)
               AnimatedPositioned(
                 duration: Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
-                bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -100, // Move up/down
+                bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -150, 
                 left: 16,
                 right: 16,
                 child: AnimatedOpacity(
@@ -374,78 +437,97 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.black54,
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Row(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Play/Pause
-                        IconButton(
-                          icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
-                          onPressed: _togglePlayPause,
-                          constraints: BoxConstraints(),
-                          padding: EdgeInsets.zero,
-                        ),
-                        SizedBox(width: 8),
-                        
-                        // Volume Icon
-                        Icon(
-                          _currentVolume == 0 ? Icons.volume_off : Icons.volume_up, 
-                          color: Colors.white, size: 20
-                        ),
-                        
-                        // Volume Slider
-                        Expanded(
-                          child: SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                              trackHeight: 2,
-                              overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+                        // TIME & SLIDER
+                        Row(
+                          children: [
+                            Text(_formatDuration(_currentPosition), style: TextStyle(color: Colors.white, fontSize: 12)),
+                            Expanded(
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                  overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
+                                  trackHeight: 2,
+                                  thumbColor: TwitterTheme.blue,
+                                  activeTrackColor: TwitterTheme.blue,
+                                  inactiveTrackColor: Colors.white24, // FIXED: Use inactiveColor in Slider directly if needed, but Theme handles it generally
+                                ),
+                                child: Slider(
+                                  value: _currentPosition.inMilliseconds.toDouble().clamp(0.0, _totalDuration.inMilliseconds.toDouble()),
+                                  min: 0.0,
+                                  max: _totalDuration.inMilliseconds.toDouble(),
+                                  activeColor: TwitterTheme.blue,
+                                  inactiveColor: Colors.white24, // FIXED PARAMETER NAME
+                                  onChangeStart: _onSeekStart,
+                                  onChanged: _onSeekChanged,
+                                  onChangeEnd: _onSeekEnd,
+                                ),
+                              ),
                             ),
-                            child: Slider(
-                              value: _currentVolume,
-                              min: 0.0,
-                              max: 1.0,
-                              activeColor: TwitterTheme.blue,
-                              inactiveColor: Colors.white24,
-                              onChanged: (val) {
-                                setState(() => _currentVolume = val);
-                                _videoController?.setVolume(val);
-                                _resetHideTimer();
-                              },
-                            ),
-                          ),
-                        ),
-                        
-                        // Speed Control
-                        PopupMenuButton<double>(
-                          initialValue: _videoController?.value.playbackSpeed ?? 1.0,
-                          onSelected: _changeSpeed,
-                          itemBuilder: (context) => [
-                            PopupMenuItem(value: 0.5, child: Text("0.5x")),
-                            PopupMenuItem(value: 1.0, child: Text("1.0x")),
-                            PopupMenuItem(value: 1.5, child: Text("1.5x")),
-                            PopupMenuItem(value: 2.0, child: Text("2.0x")),
+                            Text(_formatDuration(_totalDuration), style: TextStyle(color: Colors.white, fontSize: 12)),
                           ],
-                          child: Container(
-                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.white54),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              "${_videoController?.value.playbackSpeed}x",
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                          ),
                         ),
-                        SizedBox(width: 8),
+                        // CONTROLS
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                              onPressed: _togglePlayPause,
+                              padding: EdgeInsets.zero,
+                              constraints: BoxConstraints(),
+                            ),
+                            SizedBox(width: 8),
+                            Icon(_currentVolume == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 20),
+                            Expanded(
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                  trackHeight: 2,
+                                  overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+                                ),
+                                child: Slider(
+                                  value: _currentVolume,
+                                  min: 0.0,
+                                  max: 1.0,
+                                  activeColor: Colors.white,
+                                  inactiveColor: Colors.white24, // FIXED PARAMETER NAME
+                                  onChanged: (val) {
+                                    setState(() => _currentVolume = val);
+                                    _videoController?.setVolume(val);
+                                    _resetHideTimer();
+                                  },
+                                ),
+                              ),
+                            ),
+                            PopupMenuButton<double>(
+                              initialValue: _videoController?.value.playbackSpeed ?? 1.0,
+                              onSelected: _changeSpeed,
+                              itemBuilder: (context) => [
+                                PopupMenuItem(value: 0.5, child: Text("0.5x")),
+                                PopupMenuItem(value: 1.0, child: Text("1.0x")),
+                                PopupMenuItem(value: 1.5, child: Text("1.5x")),
+                                PopupMenuItem(value: 2.0, child: Text("2.0x")),
+                              ],
+                              child: Container(
+                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(4)),
+                                child: Text("${_videoController?.value.playbackSpeed}x", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                          ],
+                        ),
                       ],
                     ),
                   ),
                 ),
               ),
 
-            // 7. Bottom Action Bar (Likes/Comments) - Always at bottom if post content
+            // 7. BOTTOM ACTION BAR
             if (_showOverlays && _isPostContent)
               Positioned(
                 bottom: 0, left: 0, right: 0,
@@ -494,10 +576,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------- DOWNLOAD MANAGER & OVERLAY -------------------------
-// ---------------------------------------------------------------------------
-
+// ... (Download Manager logic remains unchanged)
 class _DownloadManager {
   static void startDownloadSequence({
     required OverlayState overlayState,
@@ -543,15 +622,11 @@ class _DownloadManager {
     required Function(dynamic) onFailure,
   }) async {
     try {
-      // 1. Download file to cache first
       final File cacheFile = await DefaultCacheManager().getSingleFile(url);
-      
-      // 2. Generate Filename: SapaPNJ_ddMMyy.ext
       final String dateStr = DateFormat('ddMMyy').format(DateTime.now());
       final String ext = p.extension(url).isEmpty ? (isImage ? '.jpg' : '.mp4') : p.extension(url);
       final String fileName = "SapaPNJ_$dateStr$ext";
 
-      // 3. Determine Path (Manual IO)
       String basePath;
       if (isImage) {
         basePath = '/storage/emulated/0/Pictures/SapaPNJ';
@@ -641,7 +716,6 @@ class _DownloadStatusOverlayState extends State<_DownloadStatusOverlay> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Mini Loader
         AnimatedPositioned(
           duration: Duration(milliseconds: 400),
           curve: Curves.easeOutQuart,
@@ -667,7 +741,6 @@ class _DownloadStatusOverlayState extends State<_DownloadStatusOverlay> {
           ),
         ),
         
-        // Card
         AnimatedPositioned(
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOutBack,

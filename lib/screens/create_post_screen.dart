@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_editor_plus/image_editor_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_compress/video_compress.dart'; // REQUIRED: Add to pubspec.yaml
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
@@ -437,6 +438,9 @@ class _BackgroundUploader {
       avatarIconId: avatarIconId,
       avatarHex: avatarHex,
       profileImageUrl: profileImageUrl,
+      onProgress: (status) {
+        overlayKey.currentState?.updateStatus(status);
+      },
       onSuccess: () {
         // Handle success animation
         overlayKey.currentState?.handleSuccess();
@@ -468,22 +472,46 @@ class _BackgroundUploader {
     required int avatarIconId,
     required String avatarHex,
     required String? profileImageUrl,
+    required Function(String) onProgress,
     required VoidCallback onSuccess,
     required Function(dynamic) onFailure,
   }) async {
     try {
       String? finalMediaUrl = existingMediaUrl;
+      File? fileToUpload = mediaFile;
 
-      // 1. Upload Media
-      if (mediaFile != null) {
-        finalMediaUrl = await _cloudinaryService.uploadMedia(mediaFile);
+      // 1. COMPRESSION (If Video)
+      if (mediaType == 'video' && fileToUpload != null) {
+        onProgress("Processing..."); // Update UI to Processing
+        
+        try {
+          final MediaInfo? info = await VideoCompress.compressVideo(
+            fileToUpload.path,
+            quality: VideoQuality.MediumQuality, // ~50% reduction or optimized bitrate
+            deleteOrigin: false,
+          );
+          
+          if (info != null && info.file != null) {
+            fileToUpload = info.file!;
+          }
+        } catch (e) {
+          print("Compression failed, using original: $e");
+          // Proceed with original if compression fails
+        }
+      }
+
+      // 2. Upload Media
+      if (fileToUpload != null) {
+        onProgress("Uploading..."); // Update UI to Uploading
+        finalMediaUrl = await _cloudinaryService.uploadMedia(fileToUpload);
+        
         if (finalMediaUrl == null) {
           onFailure("Media upload failed.");
           return;
         }
       }
 
-      // 2. Write to Firestore
+      // 3. Write to Firestore
       if (isEditing && postId != null) {
         await _firestore.collection('posts').doc(postId).update({
           'text': text,
@@ -511,7 +539,7 @@ class _BackgroundUploader {
         });
       }
 
-      // 3. Add Notification
+      // 4. Add Notification
       await _firestore.collection('users').doc(uid).collection('notifications').add({
         'type': 'upload_complete',
         'senderId': 'system', 
@@ -521,9 +549,14 @@ class _BackgroundUploader {
         'isRead': false,
       });
 
-      // 4. Cleanup
+      // 5. Cleanup
+      // Clear original trimming temp file
       if (mediaFile != null && mediaFile.existsSync()) {
         try { mediaFile.deleteSync(); } catch (_) {}
+      }
+      // Clear compression cache
+      if (mediaType == 'video') {
+        await VideoCompress.deleteAllCache();
       }
 
       onSuccess();
@@ -552,14 +585,12 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isSuccess = false;
   bool _isError = false;
   String _message = "Uploading media...";
+  String _statusText = "Uploading..."; // Short text for mini view
   Timer? _autoDismissTimer;
 
   // Coordinate Constants (Approximate to standard AppBar actions)
-  // Bell Icon Target: ~Top 10 (inside safe area), Right 12
   double get _targetTop => MediaQuery.of(context).padding.top + 10;
   double get _targetRight => 12.0;
-
-  // Slide Out Position: ~Left of Bell
   double get _miniRight => 60.0; 
 
   @override
@@ -574,6 +605,14 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   }
 
   // --- PUBLIC METHODS (Controlled by Manager) ---
+
+  void updateStatus(String status) {
+    if (!mounted) return;
+    setState(() {
+      _message = "$status media..."; // Expanded message
+      _statusText = status;          // Mini message
+    });
+  }
 
   void dismissToIcon() {
     setState(() {
@@ -613,19 +652,18 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
     setState(() {
       _isSuccess = true;
       _message = "Posted";
+      _statusText = "Done";
     });
 
     if (_isMiniVisible) {
-      // If mini, turn into checkmark, wait 5s, then merge back
       Future.delayed(Duration(seconds: 5), () {
         if (mounted) {
           setState(() {
-            _isMiniVisible = false; // Slides back to bell
+            _isMiniVisible = false;
           });
         }
       });
     } else if (_isCardVisible) {
-      // If card, show success, then wait 5s
       Future.delayed(Duration(seconds: 5), () {
         if (mounted) {
           setState(() {
@@ -633,8 +671,6 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
           });
         }
       });
-    } else {
-      // If hidden/transitioning, just ensure cleanup happens
     }
   }
 
@@ -642,6 +678,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
     setState(() {
       _isError = true;
       _message = "Failed";
+      _statusText = "Error";
     });
     // Force show card for error
     if (!_isCardVisible) {
@@ -651,20 +688,18 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. The Main Card (Heads-up)
-    // When visible: Top Center. When dismissed: Flies to Bell Icon.
     Widget buildCard() {
       return AnimatedPositioned(
         duration: Duration(milliseconds: 500),
         curve: Curves.easeInOutBack,
         top: _isCardVisible ? MediaQuery.of(context).padding.top + 10 : _targetTop,
-        left: _isCardVisible ? 16 : MediaQuery.of(context).size.width - 50, // Move towards right
-        right: _isCardVisible ? 16 : _targetRight, // Move towards bell
+        left: _isCardVisible ? 16 : MediaQuery.of(context).size.width - 50, 
+        right: _isCardVisible ? 16 : _targetRight, 
         child: AnimatedOpacity(
           duration: Duration(milliseconds: 300),
           opacity: _isCardVisible ? 1.0 : 0.0,
           child: Transform.scale(
-            scale: _isCardVisible ? 1.0 : 0.1, // Shrink effect
+            scale: _isCardVisible ? 1.0 : 0.1, 
             child: _UploadCard(
               isSuccess: _isSuccess,
               isError: _isError,
@@ -676,14 +711,12 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
       );
     }
 
-    // 2. The Mini Loader (Slide Out)
-    // Starts at Bell position (hidden), slides left to _miniRight.
     Widget buildMiniLoader() {
       return AnimatedPositioned(
         duration: Duration(milliseconds: 400),
         curve: Curves.easeOutQuart,
-        top: _targetTop, // Aligned with notification icon
-        right: _isMiniVisible ? _miniRight : _targetRight, // Slides out
+        top: _targetTop, 
+        right: _isMiniVisible ? _miniRight : _targetRight, 
         child: AnimatedOpacity(
           duration: Duration(milliseconds: 300),
           opacity: _isMiniVisible ? 1.0 : 0.0,
@@ -709,7 +742,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
 
     return Stack(
       children: [
-        buildMiniLoader(), // Render mini first (behind card conceptually)
+        buildMiniLoader(), 
         buildCard(),
       ],
     );

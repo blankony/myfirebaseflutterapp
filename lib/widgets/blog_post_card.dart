@@ -31,6 +31,22 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKe
   @override
   void initState() {
     super.initState();
+    _initController();
+  }
+
+  // FIX: Detects if the widget is reused for a DIFFERENT video URL
+  @override
+  void didUpdateWidget(_VideoPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoUrl != widget.videoUrl) {
+      // URL changed, dispose old controller and re-init
+      _controller.dispose();
+      setState(() => _isInitialized = false);
+      _initController();
+    }
+  }
+
+  void _initController() {
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
       ..initialize().then((_) {
         // Seek to 10s or end of video to create a "thumbnail"
@@ -44,6 +60,8 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKe
         });
         _controller.setVolume(0); // Mute thumbnail
         _controller.pause(); // Ensure it doesn't auto play
+      }).catchError((error) {
+        debugPrint("Video initialization error: $error");
       });
   }
 
@@ -53,25 +71,22 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKe
     super.dispose();
   }
 
-  // 1. KeepAlive prevents reloading when scrolling
   @override
   bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for KeepAlive
+    super.build(context); 
 
     return Container(
       color: Colors.black,
       height: 200,
       width: double.infinity,
-      // 3. Logic to separate Loading vs Ready state
       child: _isInitialized 
         ? Stack(
             fit: StackFit.expand,
             alignment: Alignment.center,
             children: [
-              // 2. Fix Black Edges: Use FittedBox with BoxFit.cover
               FittedBox(
                 fit: BoxFit.cover,
                 child: SizedBox(
@@ -81,12 +96,10 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKe
                 ),
               ),
 
-              // Darken Overlay
               Container(
                 color: Colors.black.withOpacity(0.4),
               ),
 
-              // Play Button (Only shows when initialized)
               Center(
                 child: Container(
                   padding: EdgeInsets.all(12),
@@ -101,7 +114,6 @@ class _VideoPlayerWidgetState extends State<_VideoPlayerWidget> with AutomaticKe
             ],
           )
         : Center(
-            // Show ONLY loading when not ready
             child: CircularProgressIndicator(color: TwitterTheme.blue),
           ),
     );
@@ -342,7 +354,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
       if (_isLiked) {
         await docRef.update({'likes.${currentUser.uid}': true});
-        
         if (widget.postData['userId'] != currentUser.uid) {
           notificationRef.set({
             'type': 'like',
@@ -355,7 +366,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
       } else {
         await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
-        
         if (widget.postData['userId'] != currentUser.uid) {
           notificationRef.delete();
         }
@@ -389,7 +399,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
       if (_isReposted) {
         await docRef.update({'repostedBy': FieldValue.arrayUnion([currentUser.uid])});
-        
         if (widget.postData['userId'] != currentUser.uid) {
           notificationRef.set({
             'type': 'repost',
@@ -402,7 +411,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
       } else {
         await docRef.update({'repostedBy': FieldValue.arrayRemove([currentUser.uid])});
-        
         if (widget.postData['userId'] != currentUser.uid) {
           notificationRef.delete();
         }
