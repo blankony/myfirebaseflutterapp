@@ -1,4 +1,5 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:io'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,6 +7,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart'; 
 import 'package:cached_network_image/cached_network_image.dart'; 
+import 'package:image_picker/image_picker.dart'; 
+import 'package:image_cropper/image_cropper.dart'; 
 import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../main.dart';
@@ -13,9 +16,11 @@ import '../edit_profile_screen.dart';
 import '../image_viewer_screen.dart'; 
 import 'settings_page.dart'; 
 import '../../services/overlay_service.dart';
+import '../../services/cloudinary_service.dart'; // Ensure this is imported
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+final CloudinaryService _cloudinaryService = CloudinaryService();
 
 class ProfilePage extends StatefulWidget {
   final String? userId;
@@ -41,6 +46,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _isScrolled = false;
   bool _isBioExpanded = false;
   int _targetTabIndex = 0;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -82,6 +88,119 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           return FadeTransition(opacity: animation, child: child);
         }
       ),
+    );
+  }
+
+  // --- NEW: Image Picker & Upload Logic ---
+  Future<void> _pickAndUploadImage({required bool isBanner}) async {
+    final picker = ImagePicker();
+    final XFile? pickedFile = await picker.pickImage(
+      source: ImageSource.gallery, 
+      imageQuality: 70
+    );
+
+    if (pickedFile == null) return;
+
+    // Crop Image
+    final croppedFile = await ImageCropper().cropImage(
+      sourcePath: pickedFile.path,
+      compressQuality: 70,
+      aspectRatio: isBanner 
+          ? CropAspectRatio(ratioX: 3, ratioY: 1) // Banner Ratio
+          : CropAspectRatio(ratioX: 1, ratioY: 1), // Avatar Ratio
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: isBanner ? 'Crop Banner' : 'Crop Avatar',
+          toolbarColor: TwitterTheme.blue,
+          toolbarWidgetColor: Colors.white,
+          initAspectRatio: isBanner ? CropAspectRatioPreset.ratio3x2 : CropAspectRatioPreset.square,
+          lockAspectRatio: true,
+        ),
+        IOSUiSettings(
+          title: isBanner ? 'Crop Banner' : 'Crop Avatar',
+          aspectRatioLockEnabled: true,
+        ),
+      ],
+    );
+
+    if (croppedFile == null) return;
+
+    setState(() => _isUploading = true);
+    
+    if (mounted) {
+       OverlayService().showTopNotification(context, "Uploading...", Icons.cloud_upload, (){}, color: TwitterTheme.blue);
+    }
+
+    try {
+      // Upload to Cloudinary
+      final String? downloadUrl = await _cloudinaryService.uploadImage(File(croppedFile.path));
+
+      if (downloadUrl != null) {
+        // Update Firestore
+        final Map<String, dynamic> updateData = {};
+        if (isBanner) {
+          updateData['bannerImageUrl'] = downloadUrl;
+        } else {
+          updateData['profileImageUrl'] = downloadUrl;
+          updateData['avatarIconId'] = -1; // Reset icon ID if setting custom image
+        }
+
+        await _firestore.collection('users').doc(_userId).update(updateData);
+        
+        // Note: For Avatar updates, you should ideally also run the Batch Update 
+        // logic (from EditProfileScreen) to update past posts. 
+        // For simplicity in this direct view, we just update the profile.
+
+        if (mounted) {
+          OverlayService().showTopNotification(context, "Updated successfully!", Icons.check_circle, (){}, color: Colors.green);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        OverlayService().showTopNotification(context, "Upload failed", Icons.error, (){}, color: Colors.red);
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
+  // --- NEW: Profile Options Bottom Sheet ---
+  void _showProfileOptions(BuildContext context, String? currentImageUrl, String heroTag) {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 10),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              SizedBox(height: 20),
+              
+              if (currentImageUrl != null && currentImageUrl.isNotEmpty)
+                ListTile(
+                  leading: Icon(Icons.visibility_outlined, color: TwitterTheme.blue),
+                  title: Text("View Photo"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openFullImage(context, currentImageUrl, heroTag);
+                  },
+                ),
+              
+              ListTile(
+                leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
+                title: Text("Change Photo"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndUploadImage(isBanner: false);
+                },
+              ),
+              SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -174,7 +293,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return 'Joined $formattedDate';
   }
 
-  // --- REFRESH ACTION ---
   Future<void> _handleRefresh() async {
     await Future.delayed(Duration(seconds: 1));
     if (mounted) setState(() {});
@@ -312,7 +430,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         },
         body: TabBarView(
           controller: _tabController,
-          // ENABLE SWIPING: Removed NeverScrollablePhysics
           physics: null, 
           children: [
             _buildMyPosts(_userId),
@@ -333,7 +450,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return content;
   }
 
-  // ... (Helper methods remain same: _buildUnifiedProfileHeader, _buildDepartmentBadge, etc.)
+  // MODIFIED: Updated Header with Interactive Tap Logic
   Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name';
@@ -363,9 +480,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: Stack(
             clipBehavior: Clip.none,
             children: [
+              // --- BANNER IMAGE ---
               GestureDetector(
                 onTap: () {
-                  if (bannerImageUrl != null && bannerImageUrl.isNotEmpty) {
+                  if (isMyProfile) {
+                    // Tap to Edit Banner (Direct)
+                    _pickAndUploadImage(isBanner: true);
+                  } else if (bannerImageUrl != null && bannerImageUrl.isNotEmpty) {
+                    // Tap to View Banner (Others)
                     _openFullImage(context, bannerImageUrl, bannerTag);
                   }
                 },
@@ -375,32 +497,78 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     height: bannerHeight,
                     width: double.infinity,
                     decoration: BoxDecoration(color: TwitterTheme.darkGrey),
-                    child: bannerImageUrl != null && bannerImageUrl.isNotEmpty
-                      ? CachedNetworkImage(imageUrl: bannerImageUrl, fit: BoxFit.cover, placeholder: (context, url) => Container(color: TwitterTheme.darkGrey), errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey))
-                      : null,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (bannerImageUrl != null && bannerImageUrl.isNotEmpty)
+                          CachedNetworkImage(
+                            imageUrl: bannerImageUrl, 
+                            fit: BoxFit.cover, 
+                            placeholder: (context, url) => Container(color: TwitterTheme.darkGrey), 
+                            errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey)
+                          ),
+                        // Add an edit icon overlay if it's my profile
+                        if (isMyProfile)
+                          Center(
+                            child: Container(
+                              padding: EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black38,
+                                shape: BoxShape.circle
+                              ),
+                              child: Icon(Icons.camera_alt, color: Colors.white, size: 24),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
+              
+              // --- PROFILE AVATAR ---
               Positioned(
                 top: bannerHeight - avatarRadius,
                 left: 16,
                 child: GestureDetector(
                   onTap: () {
                     final String? profileUrl = data['profileImageUrl'];
-                    if (profileUrl != null && profileUrl.isNotEmpty) {
+                    if (isMyProfile) {
+                      // Show Options Bottom Sheet
+                      _showProfileOptions(context, profileUrl, avatarTag);
+                    } else if (profileUrl != null && profileUrl.isNotEmpty) {
+                      // Just View
                       _openFullImage(context, profileUrl, avatarTag);
                     }
                   },
-                  child: Hero(
-                    tag: avatarTag,
-                    child: CircleAvatar(
-                      radius: avatarRadius + 4,
-                      backgroundColor: theme.scaffoldBackgroundColor,
-                      child: _buildAvatarImage(data),
-                    ),
+                  child: Stack(
+                    children: [
+                      Hero(
+                        tag: avatarTag,
+                        child: CircleAvatar(
+                          radius: avatarRadius + 4,
+                          backgroundColor: theme.scaffoldBackgroundColor,
+                          child: _buildAvatarImage(data),
+                        ),
+                      ),
+                      if (isMyProfile)
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            padding: EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: TwitterTheme.blue,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: theme.scaffoldBackgroundColor, width: 2)
+                            ),
+                            child: Icon(Icons.camera_alt, size: 14, color: Colors.white),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
+              
               Positioned(
                 top: bannerHeight + 16,
                 right: 16,
@@ -431,6 +599,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ],
           ),
         ),
+        
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Column(
@@ -528,7 +697,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             }
 
             return ListView.separated(
-              // Removed Key here to rely on RefreshIndicator parent state update
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: docs.length,
@@ -658,6 +826,5 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(color: Theme.of(context).scaffoldBackgroundColor, child: _tabBar);
   }
-  // FIXED: Return TRUE to ensure colors update on theme change
   @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => true;
 }
