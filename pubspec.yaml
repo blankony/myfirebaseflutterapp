@@ -60,8 +60,16 @@ dependencies:
   video_compress: ^3.1.4
 
 dev_dependencies:
+  flutter_launcher_icons: "^0.13.1"
   flutter_test:
     sdk: flutter
+
+# Add for custom app icon
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "images/app_icon.png"
+# Run "dart run flutter_launcher_icons" to generate icons
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
