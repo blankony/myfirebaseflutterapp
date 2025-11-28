@@ -3,7 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cached_network_image/cached_network_image.dart'; // IMPORTED
+import 'package:cached_network_image/cached_network_image.dart'; 
+import 'package:shared_preferences/shared_preferences.dart'; // REQUIRED
 import '../main.dart';
 import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
@@ -41,19 +42,17 @@ class _SidePanelState extends State<SidePanel> {
     if (didConfirm) {
       await _auth.signOut();
       if (context.mounted) {
-        // Pop back to the first route (AuthGate -> WelcomeScreen)
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     }
   }
 
-  // Helper for the "Fly In From Bottom" Page Transition
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(0.0, 1.0); // Start from bottom
-        const end = Offset.zero;        // End at center
+        const begin = Offset(0.0, 1.0); 
+        const end = Offset.zero;      
         const curve = Curves.easeInOutQuart;
 
         var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
@@ -70,7 +69,6 @@ class _SidePanelState extends State<SidePanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDarkMode = theme.brightness == Brightness.dark;
 
     return Drawer(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -82,11 +80,10 @@ class _SidePanelState extends State<SidePanel> {
           String name = "User";
           String handle = "@user";
           
-          // Avatar Defaults
           int iconId = 0;
           String? colorHex;
           String? profileImageUrl; 
-          String? bannerImageUrl; // NEW
+          String? bannerImageUrl; 
 
           if (snapshot.hasData && snapshot.data!.exists) {
             final data = snapshot.data!.data() as Map<String, dynamic>;
@@ -94,16 +91,14 @@ class _SidePanelState extends State<SidePanel> {
             final email = data['email'] ?? "";
             handle = email.isNotEmpty ? "@${email.split('@')[0]}" : "@user";
             
-            // Get Avatar & Banner Info
             iconId = data['avatarIconId'] ?? 0;
             colorHex = data['avatarHex'];
             profileImageUrl = data['profileImageUrl'];
-            bannerImageUrl = data['bannerImageUrl']; // NEW
+            bannerImageUrl = data['bannerImageUrl']; 
           }
 
-          // Universal Avatar Display
           Widget avatarWidget = CircleAvatar(
-            radius: 28, // Slightly larger for drawer header
+            radius: 28, 
             backgroundColor: profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(colorHex),
             backgroundImage: profileImageUrl != null ? CachedNetworkImageProvider(profileImageUrl) : null,
             child: profileImageUrl == null ?
@@ -114,13 +109,11 @@ class _SidePanelState extends State<SidePanel> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- CUSTOM HEADER WITH BANNER BACKGROUND ---
               SizedBox(
-                height: 220, // Height for header area
+                height: 220, 
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // 1. Background Image (Banner)
                     if (bannerImageUrl != null && bannerImageUrl.isNotEmpty)
                       CachedNetworkImage(
                         imageUrl: bannerImageUrl,
@@ -133,7 +126,6 @@ class _SidePanelState extends State<SidePanel> {
                         decoration: BoxDecoration(
                           color: theme.primaryColor.withOpacity(0.1),
                         ),
-                        // Fallback decorative blobs if no banner
                         child: Stack(
                           children: [
                             Positioned(
@@ -147,7 +139,6 @@ class _SidePanelState extends State<SidePanel> {
                         ),
                       ),
 
-                    // 2. Gradient Overlay (For text readability)
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -161,7 +152,6 @@ class _SidePanelState extends State<SidePanel> {
                       ),
                     ),
 
-                    // 3. Content (Close Button, Avatar, Text)
                     SafeArea(
                       bottom: false,
                       child: Padding(
@@ -169,19 +159,17 @@ class _SidePanelState extends State<SidePanel> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Close Button Row
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
                                 IconButton(
-                                  icon: Icon(Icons.close, color: Colors.white), // Always white due to overlay
+                                  icon: Icon(Icons.close, color: Colors.white), 
                                   onPressed: () => Navigator.pop(context),
                                 ),
                               ],
                             ),
                             Spacer(),
                             
-                            // Clickable Profile Area
                             InkWell(
                               onTap: () {
                                 Navigator.pop(context);
@@ -192,7 +180,7 @@ class _SidePanelState extends State<SidePanel> {
                                   Container(
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      border: Border.all(color: Colors.white, width: 2), // White border makes it pop
+                                      border: Border.all(color: Colors.white, width: 2), 
                                     ),
                                     child: avatarWidget,
                                   ),
@@ -206,7 +194,7 @@ class _SidePanelState extends State<SidePanel> {
                                           name, 
                                           style: theme.textTheme.titleLarge?.copyWith(
                                             fontWeight: FontWeight.bold, 
-                                            color: Colors.white // Always white on banner
+                                            color: Colors.white 
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                           maxLines: 1,
@@ -214,7 +202,7 @@ class _SidePanelState extends State<SidePanel> {
                                         Text(
                                           handle, 
                                           style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: Colors.white70 // Light grey on banner
+                                            color: Colors.white70 
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                           maxLines: 1,
@@ -249,7 +237,6 @@ class _SidePanelState extends State<SidePanel> {
               Divider(height: 1),
               Padding(padding: EdgeInsets.all(8), child: Column(children: [
                  _ThemeSwitchTile(),
-                 // --- LOGOUT BUTTON ---
                  ListTile(
                   leading: Icon(Icons.logout, color: Colors.red), 
                   title: Text('Logout', style: TextStyle(color: Colors.red)), 
@@ -276,6 +263,10 @@ class _ThemeSwitchTileState extends State<_ThemeSwitchTile> {
   }
   
   void _handleChange(bool value) async {
+    // SAVE TO PREFS
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_dark_mode', value);
+
     setState(() {
       _isDark = value;
     });
@@ -288,15 +279,14 @@ class _ThemeSwitchTileState extends State<_ThemeSwitchTile> {
     final theme = Theme.of(context);
     final String subtitleText = _isDark ? 'Switch to Light' : 'Switch to Dark';
 
-    // Wrapped in InkWell or handled by ListTile's onTap to make the whole row clickable
     return ListTile(
-      onTap: () => _handleChange(!_isDark), // Toggle on row click
+      onTap: () => _handleChange(!_isDark), 
       leading: Icon(Icons.color_lens_outlined, color: theme.primaryColor), 
       title: Text('Theme'), 
       subtitle: Text(subtitleText), 
       trailing: Switch(
         value: _isDark, 
-        onChanged: _handleChange, // Toggle on switch click
+        onChanged: _handleChange, 
       ),
       contentPadding: EdgeInsets.symmetric(horizontal: 16),
     );

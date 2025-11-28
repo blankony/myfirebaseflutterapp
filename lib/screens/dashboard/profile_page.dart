@@ -135,9 +135,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _blockUser(String name) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Blocked $name. You will no longer see their posts.')),
-    );
+    OverlayService().showTopNotification(context, 'Blocked $name', Icons.block, (){});
   }
 
   Future<void> _signOut(BuildContext context) async {
@@ -178,9 +176,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   // --- REFRESH ACTION ---
   Future<void> _handleRefresh() async {
-    // 1. Wait briefly for visual effect
     await Future.delayed(Duration(seconds: 1));
-    // 2. Trigger rebuild to re-run FutureBuilders (fetching pinnedPostId)
     if (mounted) setState(() {});
   }
 
@@ -196,7 +192,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     Widget content = RefreshIndicator(
       onRefresh: _handleRefresh,
       color: TwitterTheme.blue,
-      edgeOffset: widget.includeScaffold ? 100 : 0, // Adjust offset if under AppBar
+      edgeOffset: widget.includeScaffold ? 100 : 0, 
       child: NestedScrollView(
         controller: _scrollController,
         key: PageStorageKey('profile_nested_scroll_$_userId'), 
@@ -316,7 +312,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         },
         body: TabBarView(
           controller: _tabController,
-          physics: NeverScrollableScrollPhysics(), 
+          // ENABLE SWIPING: Removed NeverScrollablePhysics
+          physics: null, 
           children: [
             _buildMyPosts(_userId),
             _buildMyReposts(_userId),
@@ -336,6 +333,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return content;
   }
 
+  // ... (Helper methods remain same: _buildUnifiedProfileHeader, _buildDepartmentBadge, etc.)
   Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name';
@@ -345,7 +343,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String? departmentCode = data['departmentCode']; 
     final String? departmentName = data['department'];
     final String? studyProgramName = data['studyProgram'];
-    
     final List<dynamic> following = data['following'] ?? [];
     final List<dynamic> followers = data['followers'] ?? [];
     final String? bannerImageUrl = data['bannerImageUrl']; 
@@ -353,11 +350,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     const double bannerHeight = 150.0;
     const double avatarRadius = 45.0;
     const double headerStackHeight = bannerHeight + 60.0;
-
     final bool isLongBio = bio.length > 100;
     final String displayBio = _isBioExpanded ? bio : (isLongBio ? bio.substring(0, 100) + '...' : bio);
-
-    // Hero Tags Unik
     final String bannerTag = 'profile_banner_${_userId}';
     final String avatarTag = 'profile_avatar_${_userId}';
 
@@ -369,7 +363,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // --- BANNER (MODIFIED) ---
               GestureDetector(
                 onTap: () {
                   if (bannerImageUrl != null && bannerImageUrl.isNotEmpty) {
@@ -381,22 +374,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   child: Container(
                     height: bannerHeight,
                     width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: TwitterTheme.darkGrey, 
-                    ),
+                    decoration: BoxDecoration(color: TwitterTheme.darkGrey),
                     child: bannerImageUrl != null && bannerImageUrl.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: bannerImageUrl,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(color: TwitterTheme.darkGrey),
-                          errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey),
-                        )
+                      ? CachedNetworkImage(imageUrl: bannerImageUrl, fit: BoxFit.cover, placeholder: (context, url) => Container(color: TwitterTheme.darkGrey), errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey))
                       : null,
                   ),
                 ),
               ),
-              
-              // --- AVATAR (MODIFIED) ---
               Positioned(
                 top: bannerHeight - avatarRadius,
                 left: 16,
@@ -417,7 +401,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   ),
                 ),
               ),
-
               Positioned(
                 top: bannerHeight + 16,
                 right: 16,
@@ -431,24 +414,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     isMyProfile
                         ? OutlinedButton(
                             onPressed: () async {
-                              final result = await Navigator.of(context).push(
-                                MaterialPageRoute(builder: (context) => EditProfileScreen()),
-                              );
-                              
-                              if (mounted) {
-                                if (result == true) {
-                                  _targetTabIndex = 0;
-                                  _tabController.animateTo(0); 
-                                }
+                              final result = await Navigator.of(context).push(MaterialPageRoute(builder: (context) => EditProfileScreen()));
+                              if (mounted && result == true) {
+                                _targetTabIndex = 0;
+                                _tabController.animateTo(0); 
                                 setState(() {});
                               }
                             },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: theme.textTheme.bodyLarge?.color,
-                              side: BorderSide(color: theme.dividerColor),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                              visualDensity: VisualDensity.compact,
-                            ),
+                            style: OutlinedButton.styleFrom(foregroundColor: theme.textTheme.bodyLarge?.color, side: BorderSide(color: theme.dividerColor), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), visualDensity: VisualDensity.compact),
                             child: Text("Edit Profile"),
                           )
                         : _buildFollowButton(followers),
@@ -458,7 +431,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             ],
           ),
         ),
-
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Column(
@@ -469,43 +441,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               SizedBox(height: 4),
               Text(nim, style: theme.textTheme.titleSmall),
               SizedBox(height: 8),
-              
-              Text(
-                displayBio.isEmpty ? "No bio set." : displayBio,
-                style: theme.textTheme.bodyLarge?.copyWith(fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal),
-              ),
+              Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge?.copyWith(fontStyle: bio.isEmpty ? FontStyle.italic : FontStyle.normal)),
               if (isLongBio)
                 GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _isBioExpanded = !_isBioExpanded;
-                    });
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 4.0),
-                    child: Text(
-                      _isBioExpanded ? "Show less" : "Read more",
-                      style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
-                    ),
-                  ),
+                  onTap: () => setState(() => _isBioExpanded = !_isBioExpanded),
+                  child: Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(_isBioExpanded ? "Show less" : "Read more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold))),
                 ),
-
               SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor),
-                  SizedBox(width: 8),
-                  Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall),
-                ],
-              ),
+              Row(children: [Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor), SizedBox(width: 8), Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall)]),
               SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildStatText(context, following.length, "Following"),
-                  SizedBox(width: 16),
-                  _buildStatText(context, followers.length, "Followers"),
-                ],
-              ),
+              Row(children: [_buildStatText(context, following.length, "Following"), SizedBox(width: 16), _buildStatText(context, followers.length, "Followers")]),
               SizedBox(height: 16),
             ],
           ),
@@ -515,82 +460,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _showBadgeInfo(BuildContext context, String dept, String prodi) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Academic Info"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            Text(dept, style: TextStyle(fontSize: 16)),
-            SizedBox(height: 16),
-            Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            Text(prodi, style: TextStyle(fontSize: 16)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("Close", style: TextStyle(color: TwitterTheme.blue)),
-          ),
-        ],
-      ),
-    );
+    showDialog(context: context, builder: (context) => AlertDialog(title: Text("Academic Info"), content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(dept, style: TextStyle(fontSize: 16)), SizedBox(height: 16), Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(prodi, style: TextStyle(fontSize: 16))]), actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("Close", style: TextStyle(color: TwitterTheme.blue)))]));
   }
 
   Widget _buildDepartmentBadge(String code, String? fullDeptName, String? fullProdiName) {
     final parts = code.split('-');
     if (parts.length < 2) return SizedBox.shrink();
-
-    final dept = parts[0]; 
-    final prodi = parts[1]; 
-    
-    Color deptColor;
-    if (dept.toUpperCase() == 'TE') {
-       deptColor = Color(0xFF00008B); 
-    } else if (dept.toUpperCase() == 'TS') {
-       deptColor = Color(0xFF5D4037); 
-    } else {
-       deptColor = Colors.primaries[dept.hashCode.abs() % Colors.primaries.length];
-    }
-    
-    Color prodiColor;
-    if (prodi.toUpperCase() == 'BM') {
-      prodiColor = Colors.orange; 
-    } else {
-      prodiColor = Colors.primaries[prodi.hashCode.abs() % Colors.primaries.length];
-    }
-
+    final dept = parts[0]; final prodi = parts[1]; 
+    Color deptColor = (dept.toUpperCase() == 'TE') ? Color(0xFF00008B) : (dept.toUpperCase() == 'TS' ? Color(0xFF5D4037) : Colors.primaries[dept.hashCode.abs() % Colors.primaries.length]);
+    Color prodiColor = (prodi.toUpperCase() == 'BM') ? Colors.orange : Colors.primaries[prodi.hashCode.abs() % Colors.primaries.length];
     return GestureDetector(
-      onTap: () {
-        if (fullDeptName != null && fullProdiName != null) {
-          _showBadgeInfo(context, fullDeptName, fullProdiName);
-        }
-      },
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: deptColor, 
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(dept, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-          ),
-          SizedBox(width: 4), 
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: prodiColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(prodi, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+      onTap: () { if (fullDeptName != null && fullProdiName != null) _showBadgeInfo(context, fullDeptName, fullProdiName); },
+      child: Row(mainAxisSize: MainAxisSize.min, children: [Container(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: deptColor, borderRadius: BorderRadius.circular(4)), child: Text(dept, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))), SizedBox(width: 4), Container(padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: prodiColor, borderRadius: BorderRadius.circular(4)), child: Text(prodi, style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))]),
     );
   }
 
@@ -599,52 +480,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String? colorHex = data['avatarHex'];
     final String? profileImageUrl = data['profileImageUrl']; 
     final Color bgColor = AvatarHelper.getColor(colorHex);
-    
     if (profileImageUrl != null && profileImageUrl.isNotEmpty) {
-      return CircleAvatar(
-        radius: 45,
-        backgroundColor: Colors.grey,
-        backgroundImage: CachedNetworkImageProvider(profileImageUrl), 
-      );
+      return CircleAvatar(radius: 45, backgroundColor: Colors.grey, backgroundImage: CachedNetworkImageProvider(profileImageUrl));
     }
-
-    return CircleAvatar(
-      radius: 45,
-      backgroundColor: bgColor,
-      child: Icon(
-        AvatarHelper.getIcon(iconId),
-        size: 50,
-        color: Colors.white,
-      ),
-    );
+    return CircleAvatar(radius: 45, backgroundColor: bgColor, child: Icon(AvatarHelper.getIcon(iconId), size: 50, color: Colors.white));
   }
 
   Widget _buildFollowButton(List<dynamic> followers) {
     final bool amIFollowing = followers.contains(_user?.uid);
     return amIFollowing
-      ? OutlinedButton(
-          onPressed: _unfollowUser,
-          child: Text("Unfollow"),
-        )
-      : ElevatedButton(
-          onPressed: _followUser,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: TwitterTheme.blue,
-            foregroundColor: Colors.white,
-          ),
-          child: Text("Follow"),
-        );
+      ? OutlinedButton(onPressed: _unfollowUser, child: Text("Unfollow"))
+      : ElevatedButton(onPressed: _followUser, style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white), child: Text("Follow"));
   }
 
   Widget _buildStatText(BuildContext context, int count, String label) {
     final theme = Theme.of(context);
-    return Row(
-      children: [
-        Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-        SizedBox(width: 4),
-        Text(label, style: theme.textTheme.titleSmall),
-      ],
-    );
+    return Row(children: [Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), SizedBox(width: 4), Text(label, style: theme.textTheme.titleSmall)]);
   }
 
   Widget _buildMyPosts(String userId) {
@@ -667,20 +518,21 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             final docs = snapshot.data?.docs ?? [];
             if (docs.isEmpty) return Center(child: Text('No posts yet.'));
 
+            // Sort Pinned to Top
             if (pinnedPostId != null) {
               final pinnedIndex = docs.indexWhere((doc) => doc.id == pinnedPostId);
               if (pinnedIndex != -1) {
                 final pinnedDoc = docs.removeAt(pinnedIndex);
-                docs.insert(0, pinnedDoc); // Move to top
+                docs.insert(0, pinnedDoc); 
               }
             }
 
-            return ListView.builder(
-              key: const PageStorageKey('profile_posts_list'),
-              padding: const EdgeInsets.only(bottom: 100), 
-              physics: const NeverScrollableScrollPhysics(),
+            return ListView.separated(
+              // Removed Key here to rely on RefreshIndicator parent state update
               shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
               itemCount: docs.length,
+              separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
               itemBuilder: (context, index) {
                 final doc = docs[index];
                 final data = doc.data() as Map<String, dynamic>;
@@ -710,16 +562,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         final docs = snapshot.data?.docs ?? [];
         if (docs.isEmpty) return Center(child: Text('No replies yet.'));
 
-        return ListView.builder(
-          key: const PageStorageKey('profile_replies_list'),
-          padding: const EdgeInsets.only(bottom: 100),
-          physics: const NeverScrollableScrollPhysics(),
+        return ListView.separated(
           shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: docs.length,
+          separatorBuilder: (context, index) => Divider(height: 1, thickness: 1),
           itemBuilder: (context, index) {
             final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
-            if (doc.reference.parent.parent == null) return SizedBox.shrink();
             final String originalPostId = doc.reference.parent.parent!.id;
 
             return CommentTile(
@@ -738,7 +588,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   Widget _buildMyReposts(String userId) {
     return CustomScrollView(
-      key: const PageStorageKey('profile_reposts_list'),
       physics: const NeverScrollableScrollPhysics(),
       slivers: [
         StreamBuilder<QuerySnapshot>(
@@ -774,14 +623,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                return SliverToBoxAdapter(child: SizedBox.shrink());
             }
             final docs = snapshot.data?.docs ?? [];
-            if (docs.isEmpty) return SliverToBoxAdapter(child: SizedBox.shrink());
-
             return SliverList(
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final doc = docs[index];
                   final data = doc.data() as Map<String, dynamic>;
-                  if (doc.reference.parent.parent == null) return SizedBox.shrink();
                   final String originalPostId = doc.reference.parent.parent!.id;
                   
                   return CommentTile(
@@ -812,5 +658,6 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(color: Theme.of(context).scaffoldBackgroundColor, child: _tabBar);
   }
-  @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
+  // FIXED: Return TRUE to ensure colors update on theme change
+  @override bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => true;
 }

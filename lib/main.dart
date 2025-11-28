@@ -1,7 +1,8 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // 1. Import Dotenv
+import 'package:flutter_dotenv/flutter_dotenv.dart'; 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart'; 
 import 'screens/splash_screen.dart'; 
 
@@ -16,7 +17,6 @@ class TwitterTheme {
   static const Color extraLightGrey = Color(0xFFE1E8ED);
   static const Color white = Color(0xFFFFFFFF);
 
-  // --- TEMA GELAP ---
   static ThemeData darkTheme = ThemeData(
     colorScheme: ColorScheme(
       brightness: Brightness.dark,
@@ -88,7 +88,6 @@ class TwitterTheme {
     ),
   );
 
-  // --- TEMA TERANG ---
   static ThemeData lightTheme = ThemeData(
     colorScheme: ColorScheme(
       brightness: Brightness.light,
@@ -161,9 +160,7 @@ class TwitterTheme {
   );
 }
 
-// ### UPDATED AVATAR HELPER ###
 class AvatarHelper {
-  // Returns one of 10 icons based on ID (0-9)
   static IconData getIcon(int id) {
     switch (id) {
       case 1: return Icons.face;
@@ -175,7 +172,7 @@ class AvatarHelper {
       case 7: return Icons.local_cafe;
       case 8: return Icons.menu_book;
       case 9: return Icons.computer;
-      default: return Icons.person; // 0 is Default
+      default: return Icons.person; 
     }
   }
 
@@ -188,34 +185,34 @@ class AvatarHelper {
     }
   }
 
-  // Presets for the picker - ensuring uniqueness
   static const List<Color> presetColors = [
-    Color(0xFF1DA1F2), // Blue
+    Color(0xFF1DA1F2), 
     Colors.redAccent,
     Colors.green,
     Colors.orange,
     Colors.purple,
     Colors.teal,
     Colors.pinkAccent,
-    Color(0xFF78909C), // Unique: Light Blue Grey
-    Color(0xFF8B4513), // Brown
-    Color(0xFF607D8B), // Dark Blue Grey
+    Color(0xFF78909C), 
+    Color(0xFF8B4513), 
+    Color(0xFF607D8B), 
   ];
 }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 2. Load Environment Variables (PENTING: Harus sebelum runApp)
   try {
     await dotenv.load(fileName: ".env");
   } catch (e) {
-    // Jika .env tidak ketemu (misal belum bikin file), print error tapi lanjut
-    // agar aplikasi tidak crash total (hanya fitur AI yg akan gagal)
     print("WARNING: Failed to load .env file: $e");
   }
 
-  // 3. Init Firebase
+  // LOAD THEME PERSISTENCE
+  final prefs = await SharedPreferences.getInstance();
+  final bool isDark = prefs.getBool('is_dark_mode') ?? false;
+  themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

@@ -161,6 +161,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
             },
             body: TabBarView(
               controller: _tabController,
+              physics: null, // ENABLE SWIPING
               children: [
                 _buildMyPosts(widget.userId),
                 _buildMyReposts(widget.userId), 
@@ -174,6 +175,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
     );
   }
 
+  // ... (Helpers: _buildProfileHeader, _buildProfileInfo, _buildStatText are same as ProfilePage but minimal modifications) ...
   Widget _buildProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile, bool amIFollowing) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'User';
@@ -248,7 +250,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
             final docs = snapshot.data?.docs ?? [];
             if (docs.isEmpty) return Center(child: Text('This user has no posts.'));
 
-            // Sort Pinned to Top
             if (pinnedPostId != null) {
               final pinnedIndex = docs.indexWhere((doc) => doc.id == pinnedPostId);
               if (pinnedIndex != -1) {
@@ -296,13 +297,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
             final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
             final String originalPostId = doc.reference.parent.parent!.id;
-            return CommentTile(
-              commentId: doc.id,
-              commentData: data,
-              postId: originalPostId, 
-              isOwner: data['userId'] == _auth.currentUser?.uid,
-              showPostContext: true, 
-            );
+            return CommentTile(commentId: doc.id, commentData: data, postId: originalPostId, isOwner: data['userId'] == _auth.currentUser?.uid, showPostContext: true);
           },
         );
       },

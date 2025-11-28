@@ -2,24 +2,25 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // REQUIRED
 import '../../main.dart'; 
 import 'about_page.dart'; 
 import '../edit_profile_screen.dart';
 import 'account_center_page.dart'; 
-import '../../services/notification_prefs_service.dart'; // IMPORTED
+import '../../services/notification_prefs_service.dart'; 
+import '../../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
   
-  // Helper for the "Fly In From Right" Page Transition
   Route _createSlideRightRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0); // Start from Right
-        const end = Offset.zero;        // End at Center
+        const begin = Offset(1.0, 0.0); 
+        const end = Offset.zero;        
         const curve = Curves.easeInOutQuart;
 
         var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
@@ -33,13 +34,11 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-
   void _goToAboutPage(BuildContext context) {
     Navigator.of(context).push(_createSlideRightRoute(AboutPage()));
   }
   
   void _goToAccountCenter(BuildContext context) {
-    // When opened from Settings, it should be Slide Right.
     Navigator.of(context).push(_createSlideRightRoute(AccountCenterPage()));
   }
 
@@ -86,7 +85,6 @@ class SettingsPage extends StatelessWidget {
             onTap: () => _goToAboutPage(context),
           ),
           
-          // Theme Switch
           _OptimizedThemeTile(),
 
           ValueListenableBuilder<bool>(
@@ -103,7 +101,6 @@ class SettingsPage extends StatelessWidget {
             },
           ),
           
-          // --- NEW NOTIFICATION SETTINGS START ---
           Divider(),
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -115,7 +112,6 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           
-          // Master Switch for All Notifications
           ValueListenableBuilder<bool>(
             valueListenable: notificationPrefs.allNotificationsEnabled,
             builder: (context, isEnabled, child) {
@@ -131,7 +127,6 @@ class SettingsPage extends StatelessWidget {
             },
           ),
 
-          // Heads-up (Overlay) Switch
           ValueListenableBuilder<bool>(
             valueListenable: notificationPrefs.allNotificationsEnabled,
             builder: (context, allEnabled, child) {
@@ -139,7 +134,6 @@ class SettingsPage extends StatelessWidget {
                 valueListenable: notificationPrefs.headsUpEnabled,
                 builder: (context, headsUpEnabled, child) {
                   return SwitchListTile(
-                    // Disable this switch if the master switch is off
                     onChanged: allEnabled ? (value) {
                        notificationPrefs.setHeadsUp(value);
                     } : null,
@@ -153,7 +147,6 @@ class SettingsPage extends StatelessWidget {
             },
           ),
 
-          // Clear History Button
           ListTile(
             leading: Icon(Icons.cleaning_services_outlined, color: Colors.red),
             title: Text('Clear Notification History', style: TextStyle(color: Colors.red)),
@@ -184,14 +177,13 @@ class SettingsPage extends StatelessWidget {
                   }
                   await batch.commit();
                   if (context.mounted) {
-                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("History cleared.")));
+                     OverlayService().showTopNotification(context, "History cleared", Icons.check_circle, (){});
                   }
                 }
               }
             },
           ),
           Divider(),
-          // --- NEW NOTIFICATION SETTINGS END ---
 
           _buildSettingsTile(
             context: context,
@@ -224,7 +216,6 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// ### NEW: Helper Widget for Settings Page (with dynamic subtitle) ###
 class _OptimizedThemeTile extends StatefulWidget {
   @override
   State<_OptimizedThemeTile> createState() => _OptimizedThemeTileState();
@@ -240,6 +231,10 @@ class _OptimizedThemeTileState extends State<_OptimizedThemeTile> {
   }
 
   void _handleChange(bool value) async {
+    // SAVE TO PREFS
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_dark_mode', value);
+
     setState(() {
       _isDark = value;
     });
