@@ -10,7 +10,7 @@ import 'change_password_screen.dart';
 import '../services/cloudinary_service.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/pnj_data.dart'; 
-import '../services/overlay_service.dart'; // REQUIRED
+import '../services/overlay_service.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -103,7 +103,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _selectedProdi = null; 
           });
           if (mounted) {
-            // Replaced SnackBar
             OverlayService().showTopNotification(
               context, 
               "Auto-detected department: $detectedDept", 
@@ -168,12 +167,50 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return null;
   }
 
-  Future<void> _pickImage({required bool isAvatar}) async {
+  // UPDATED: Selection Dialog for Camera/Gallery
+  void _showImageSourceSelection({required bool isAvatar}) {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              SizedBox(height: 16),
+              ListTile(
+                leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
+                title: Text("Camera"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(isAvatar: isAvatar, source: ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
+                title: Text("Gallery"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(isAvatar: isAvatar, source: ImageSource.gallery);
+                },
+              ),
+              SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // UPDATED: Accepts Source
+  Future<void> _pickImage({required bool isAvatar, required ImageSource source}) async {
     FocusScope.of(context).unfocus();
     final picker = ImagePicker();
     
     final pickedFile = await picker.pickImage(
-      source: ImageSource.gallery, 
+      source: source, 
       imageQuality: 70,
       maxWidth: 1000, 
       maxHeight: 1000
@@ -187,12 +224,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _selectedImageFile = processedFile;
             _selectedIconId = -1; 
             _profileImageUrl = null; 
-            // Replaced SnackBar
             OverlayService().showTopNotification(context, "Profile picture selected", Icons.image, (){});
           } else {
             _selectedBannerFile = processedFile;
             _bannerImageUrl = null;
-            // Replaced SnackBar
             OverlayService().showTopNotification(context, "Banner selected", Icons.image, (){});
           }
         });
@@ -267,7 +302,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ); 
 
       if (context.mounted) {
-        // Replaced SnackBar with Heads-up
         OverlayService().showTopNotification(
           context, 
           "Profile updated successfully!", 
@@ -394,7 +428,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   alignment: Alignment.topCenter,
                   children: [
                     GestureDetector(
-                      onTap: () => _pickImage(isAvatar: false),
+                      onTap: () => _showImageSourceSelection(isAvatar: false),
                       child: Container(
                         height: 140,
                         width: double.infinity,
@@ -438,7 +472,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     Positioned(
                       bottom: 0, left: 20,
                       child: GestureDetector(
-                        onTap: () => _pickImage(isAvatar: true),
+                        onTap: () => _showImageSourceSelection(isAvatar: true),
                         child: Stack(
                           children: [
                             Container(

@@ -45,9 +45,13 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   late final PageController _homePageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
+  // Persistent Scroll Controllers
   final ScrollController _scrollController = ScrollController();
   final ScrollController _recommendedScrollController = ScrollController();
   
+  // Cache the Home Widget to prevent rebuilds destroying scroll state
+  late Widget _persistentHomeTab;
+
   bool _isSearching = false;
   bool _hasRestoredState = false; 
 
@@ -67,6 +71,41 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     _tabController = TabController(length: 2, vsync: this);
     _pageController = PageController(initialPage: _selectedIndex);
     _homePageController = PageController(initialPage: _subTabIndex);
+
+    // Initialize the Persistent Home Widget ONCE
+    _persistentHomeTab = KeepAlivePage(
+      child: Column(
+        children: [
+          Expanded(
+            child: PageView(
+              controller: _homePageController,
+              allowImplicitScrolling: true, // Key for keeping both lists alive
+              onPageChanged: (index) {
+                _tabController.animateTo(index);
+                setState(() {
+                  _subTabIndex = index;
+                  PageStorage.of(context).writeState(context, _subTabIndex, identifier: 'home_sub_tab_index');
+                });
+              },
+              children: [
+                KeepAlivePage(
+                  child: HomePage(
+                    scrollController: _scrollController,
+                    isRecommended: false,
+                  ),
+                ),
+                KeepAlivePage(
+                  child: HomePage(
+                    scrollController: _recommendedScrollController,
+                    isRecommended: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
 
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) {
@@ -216,6 +255,26 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     });
   }
 
+  void _scrollToTop(ScrollController controller) {
+    if (controller.hasClients) {
+      controller.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 600),
+        curve: Curves.easeOutQuart,
+      );
+    }
+  }
+
+  void _onLogoTapped() {
+    if (_selectedIndex == 0) {
+      if (_subTabIndex == 0) {
+        _scrollToTop(_scrollController); 
+      } else if (_subTabIndex == 1) {
+        _scrollToTop(_recommendedScrollController);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _notificationSubscription?.cancel();
@@ -228,27 +287,24 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     super.dispose();
   }
 
-  // --- UPDATED: Click-outside-to-dismiss Logic ---
   void _showNotificationPopup() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54, // Ensure a dark background we can tap
+      barrierColor: Colors.black54, 
       useSafeArea: true,
       isDismissible: true,
       enableDrag: true,
       builder: (context) {
-        // Outer GestureDetector catches taps on the empty space
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => Navigator.of(context).pop(), // Close sheet
+          onTap: () => Navigator.of(context).pop(), 
           child: DraggableScrollableSheet(
-            initialChildSize: 0.75, // 75% height allows room to tap above
+            initialChildSize: 0.75, 
             minChildSize: 0.5,
             maxChildSize: 0.95,
             builder: (context, scrollController) {
-              // Inner GestureDetector consumes taps so they don't close the sheet
               return GestureDetector(
                 onTap: () {}, 
                 child: NotificationSheet(scrollController: scrollController),
@@ -336,39 +392,9 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   Widget build(BuildContext context) {
     super.build(context); 
 
+    // Use cached home tab + fresh instances for others
     final _widgetOptions = <Widget>[
-      KeepAlivePage(
-        child: Column(
-          children: [
-            Expanded(
-              child: PageView(
-                controller: _homePageController,
-                onPageChanged: (index) {
-                  _tabController.animateTo(index);
-                  setState(() {
-                    _subTabIndex = index;
-                    PageStorage.of(context).writeState(context, _subTabIndex, identifier: 'home_sub_tab_index');
-                  });
-                },
-                children: [
-                  KeepAlivePage(
-                    child: HomePage(
-                      scrollController: _scrollController,
-                      isRecommended: false,
-                    ),
-                  ),
-                  KeepAlivePage(
-                    child: HomePage(
-                      scrollController: _recommendedScrollController,
-                      isRecommended: true,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      _persistentHomeTab, // REUSE CACHED WIDGET HERE
       KeepAlivePage(child: AiAssistantPage()),
       KeepAlivePage(
         child: SearchPage(
@@ -420,12 +446,22 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                   child: _AppBarAvatar(),
                 ),
               ),
-              title: Image.asset('images/app_icon.png', height: 30),
+              title: GestureDetector(
+                onTap: _onLogoTapped,
+                child: Image.asset('images/app_icon.png', height: 30),
+              ),
               centerTitle: true,
               actions: _appBarActions(context),
               bottom: _selectedIndex == 0
                   ? TabBar(
                       controller: _tabController,
+                      // ONLY scroll if the tab is already active
+                      onTap: (index) {
+                        if (_tabController.index == index) {
+                          if (index == 0) _scrollToTop(_scrollController);
+                          if (index == 1) _scrollToTop(_recommendedScrollController);
+                        }
+                      },
                       tabs: [
                         Tab(text: 'Recent Posts'),
                         Tab(text: 'Recommended'),

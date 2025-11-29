@@ -132,11 +132,8 @@ class _PostMediaPreview extends StatelessWidget {
 
       return AspectRatio( 
         aspectRatio: 4 / 3,
-        // FIX: Moved GestureDetector OUTSIDE of ClipRRect and Hero
         child: GestureDetector(
           onTap: () => _navigateToViewer(context, type: mediaType),
-          // FIX: Hero is now the parent of ClipRRect. This ensures the clip 
-          // travels WITH the Hero animation, preventing "bursting" edges.
           child: Hero(
             tag: heroTag,
             transitionOnUserGestures: true,
@@ -209,6 +206,7 @@ class BlogPostCard extends StatefulWidget {
   final String heroContextId; 
   final VideoPlayerController? preloadedController; 
   final bool isPinned; 
+  final Function(String, bool)? onPinToggle;
 
   const BlogPostCard({
     super.key,
@@ -220,6 +218,7 @@ class BlogPostCard extends StatefulWidget {
     this.heroContextId = 'feed', 
     this.preloadedController,
     this.isPinned = false, 
+    this.onPinToggle,
   });
 
   @override
@@ -240,6 +239,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   bool _isSharing = false;
   int _likeCount = 0;
   int _repostCount = 0;
+  
+  late bool _localIsPinned;
 
   VideoPlayerController? _videoController;
   bool _isVideoOwner = false; 
@@ -247,6 +248,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   @override
   void initState() {
     super.initState();
+    _localIsPinned = widget.isPinned; // Initialize local state
     _syncState();
     _initVideoController();
     
@@ -296,6 +298,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
         _initVideoController();
       }
+    }
+    // Update local state if parent state changes (e.g. from firestore update)
+    if (oldWidget.isPinned != widget.isPinned) {
+      setState(() {
+        _localIsPinned = widget.isPinned;
+      });
     }
   }
 
@@ -406,19 +414,36 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final user = _auth.currentUser;
     if (user == null) return;
 
+    // 1. Optimistic Update (Visual)
+    final bool newPinState = !_localIsPinned;
+    setState(() {
+      _localIsPinned = newPinState; 
+    });
+
+    // Notify Parent (ProfilePage) Immediately
+    if (widget.onPinToggle != null) {
+      widget.onPinToggle!(widget.postId, newPinState);
+    }
+
     try {
-      if (widget.isPinned) {
+      if (!newPinState) { // Unpin
         await _firestore.collection('users').doc(user.uid).update({
           'pinnedPostId': FieldValue.delete(),
         });
         if(mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
-      } else {
+      } else { // Pin
         await _firestore.collection('users').doc(user.uid).update({
           'pinnedPostId': widget.postId,
         });
         if(mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
       }
     } catch (e) {
+      // Revert if failed
+      setState(() {
+        _localIsPinned = !newPinState;
+      });
+      // Revert Parent
+      if (widget.onPinToggle != null) widget.onPinToggle!(widget.postId, !newPinState);
       if(mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, (){}, color: Colors.red);
     }
   }
@@ -558,7 +583,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (widget.isPinned)
+            if (_localIsPinned)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
                 child: Row(
@@ -663,29 +688,51 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final timeAgo = _formatTimestamp(widget.postData['timestamp'] as Timestamp?);
     final String userName = widget.postData['userName'] ?? 'User';
     final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
+    final theme = Theme.of(context);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start, // Align Text & Dots to top
           children: [
-            Flexible(child: Text(userName, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+            Flexible(
+              child: Text(
+                userName, 
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
+                overflow: TextOverflow.ellipsis
+              )
+            ),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start, 
               children: [
                 SizedBox(width: 4),
-                Text("· $timeAgo", style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12)),
-                if (widget.isOwner) _buildOptionsButton(),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2.0),
+                  child: Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
+                ),
+                if (widget.isOwner) 
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4.0),
+                    child: SizedBox(
+                      width: 24,
+                      height: 24, 
+                      child: _buildOptionsButton(),
+                    ),
+                  ),
               ],
             ),
           ],
         ),
-        Text(handle, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13), overflow: TextOverflow.ellipsis),
+        Text(handle, style: TextStyle(color: theme.hintColor, fontSize: 13), overflow: TextOverflow.ellipsis),
       ],
     );
   }
 
   Widget _buildOptionsButton() {
     return PopupMenuButton<String>(
+      padding: EdgeInsets.zero, // REMOVE PADDING
       icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor, size: 18),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 4,
@@ -701,9 +748,9 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           value: 'pin', 
           child: Row(
             children: [
-              Icon(widget.isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
+              Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
               SizedBox(width: 12), 
-              Text(widget.isPinned ? "Unpin from Profile" : "Pin to Profile")
+              Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")
             ]
           )
         ),
