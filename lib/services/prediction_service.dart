@@ -1,159 +1,227 @@
-import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PredictionService {
-  late GenerativeModel _model;
-  final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+  // --- 1. PERSONALIZED KNOWLEDGE BASE (Markov Chain) ---
+  final Map<String, Map<String, int>> _userMarkovChain = {};
 
-  // --- NARROW AI DATABASE (Simple Local Dictionary) ---
-  final Map<String, List<String>> _postPhrases = {
+  final Map<String, List<String>> _globalPhraseDatabase = {
     'selamat': ['pagi', 'siang', 'malam', 'datang', 'jalan', 'ulang tahun'],
     'good': ['morning', 'night', 'luck', 'job', 'vibes', 'day'],
-    'info': ['terbaru', 'penting', 'akademik', 'lomba', 'beasiswa'],
+    'tomorrow': ['is monday', 'is friday', 'will be better'],
     'kuliah': ['umum', 'pengganti', 'libur', 'offline', 'online'],
-    'tugas': ['akhir', 'kelompok', 'proyek', 'harian'],
-    'mahasiswa': ['baru', 'berprestasi', 'pnj', 'teknik'],
-    'politeknik': ['negeri jakarta', 'negeri', 'kreatif'],
-    'seminar': ['nasional', 'internasional', 'proposal', 'hasil'],
-    'terima': ['kasih', 'kasih banyak', 'kasih sebelumnya'],
-    'mohon': ['bantuan', 'info', 'maaf', 'perhatian'],
-    'kampus': ['merdeka', 'biru', 'kita', 'pnj'],
-    'jurusan': ['teknik', 'akuntansi', 'administrasi', 'bisnis'],
-    'ukm': ['terbaru', 'latihan', 'pendaftaran'],
-    'dosen': ['pengampu', 'pembimbing', 'wali'],
-    'praktikum': ['lab', 'laporan', 'dikerjakan'],
+    'politeknik': ['negeri jakarta'],
+    'terima': ['kasih', 'kasih banyak'],
   };
 
-  final Map<String, List<String>> _searchPhrases = {
-    'user': ['profile', 'settings', 'account'],
-    'post': ['new', 'trending', 'latest'],
-    'sapa': ['pnj', 'kampus', 'mahasiswa'],
-    'teknik': ['informatika', 'mesin', 'elektro', 'sipil'],
-    'akuntansi': ['keuangan', 'manajemen'],
-    'admin': ['instrasi niaga', 'kantor'],
-  };
+  // --- 2. LEARNING ENGINE ---
+  void learnFromUserPosts(List<String> posts) {
+    _userMarkovChain.clear();
+    for (String post in posts) {
+      String cleanPost = post.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
+      List<String> words = cleanPost.split(RegExp(r'\s+'));
 
-  // Knowledge Base for Personalization (Department Keywords)
-  final Map<String, List<String>> _departmentKeywords = {
-    'Teknik Sipil': ['sipil', 'konstruksi', 'beton', 'jembatan', 'gedung', 'ts'],
-    'Teknik Mesin': ['mesin', 'energi', 'alat berat', 'manufaktur', 'tm'],
-    'Teknik Elektro': ['elektro', 'listrik', 'telekomunikasi', 'instrumentasi', 'te'],
-    'Teknik Informatika & Komputer': ['koding', 'coding', 'program', 'software', 'jaringan', 'tik', 'ti', 'komputer', 'app'],
-    'Akuntansi': ['akuntansi', 'keuangan', 'pajak', 'saham', 'ak'],
-    'Administrasi Niaga': ['bisnis', 'mice', 'event', 'kantor', 'an', 'administrasi'],
-    'Teknik Grafika & Penerbitan': ['desain', 'grafis', 'cetak', 'penerbitan', 'tgp', 'kreatif'],
-  };
-
-  PredictionService() {
-    if (_apiKey.isNotEmpty) {
-      _model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: _apiKey);
+      for (int i = 0; i < words.length - 1; i++) {
+        String current = words[i];
+        String next = words[i + 1];
+        if (!_userMarkovChain.containsKey(current)) {
+          _userMarkovChain[current] = {};
+        }
+        _userMarkovChain[current]![next] = (_userMarkovChain[current]![next] ?? 0) + 1;
+      }
     }
   }
 
-  // --- AUTOCOMPLETE / PREDICTION ---
-  Future<String?> getCompletion(String currentText, String contextType) async {
-    final text = currentText.trim().toLowerCase();
-    if (text.length < 3) return null;
+  // --- 3. PREDICTIVE TEXT (Recursive Sentence Generation) ---
+  Future<String?> getLocalPrediction(String currentText) async {
+    if (currentText.trim().isEmpty) return null;
 
-    // 1. Try Generative AI (if available)
-    try {
-      if (_apiKey.isNotEmpty) {
-        final response = await _model.generateContent([
-          Content.text(_buildPrompt(currentText, contextType))
-        ]).timeout(const Duration(seconds: 2));
+    final String text = currentText.toLowerCase();
+    final List<String> words = text.trim().split(RegExp(r'\s+'));
+    final String lastWord = words.last;
 
-        final aiResult = response.text?.trim();
-        if (aiResult != null && aiResult.isNotEmpty) {
-          return aiResult.replaceAll('"', '').replaceAll("'", "");
+    String? personalizedPrediction = _generateChain(lastWord);
+    
+    if (personalizedPrediction == null && _globalPhraseDatabase.containsKey(lastWord)) {
+      personalizedPrediction = _globalPhraseDatabase[lastWord]!.first;
+    } else if (personalizedPrediction == null) {
+      for (var key in _globalPhraseDatabase.keys) {
+        if (key.startsWith(lastWord) && key != lastWord) {
+          return key.substring(lastWord.length);
         }
       }
-    } catch (e) {
-      // Fallback to Narrow AI
     }
-
-    // 2. Narrow AI Fallback
-    return _getLocalPrediction(text, contextType);
+    return personalizedPrediction;
   }
 
-  String _buildPrompt(String text, String type) {
-    if (type == 'post') {
-      return """
-        Sebagai asisten PNJ, lengkapi kalimat postingan ini (max 5 kata) dengan tone mahasiswa:
-        '$text'
-      """;
+  String? _generateChain(String startWord) {
+    if (!_userMarkovChain.containsKey(startWord)) return null;
+
+    final StringBuffer prediction = StringBuffer();
+    String current = startWord;
+    int wordsAdded = 0;
+    const int maxPredictionLength = 5;
+
+    while (wordsAdded < maxPredictionLength) {
+      final nextCandidates = _userMarkovChain[current];
+      if (nextCandidates == null || nextCandidates.isEmpty) break;
+      String bestNext = nextCandidates.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+      prediction.write("$bestNext ");
+      current = bestNext;
+      wordsAdded++;
     }
-    return "Complete search query: '$text'";
+    return prediction.isEmpty ? null : prediction.toString().trim();
   }
 
-  String? _getLocalPrediction(String text, String contextType) {
-    final words = text.split(' ');
-    final lastWord = words.last;
-    final db = (contextType == 'search') ? _searchPhrases : _postPhrases;
-
-    if (db.containsKey(lastWord)) return db[lastWord]!.first;
-
-    for (var key in db.keys) {
-      if (key.startsWith(lastWord) && key != lastWord) {
-        final suffix = key.substring(lastWord.length);
-        final nextWords = db[key]?.first ?? ""; 
-        return "$suffix $nextWords".trim();
-      }
-    }
-    return null;
-  }
-
-  // --- TRENDING ENGINE (NARROW AI) ---
-  // Analyzes a list of posts to find "Buzzing" topics
+  // --- 4. TRENDING ALGORITHM (Document Frequency + Deduplication) ---
   List<Map<String, dynamic>> analyzeTrendingTopics(List<QueryDocumentSnapshot> posts) {
-    final Map<String, int> frequencyMap = {};
+    // Map Phrase -> Set of unique Post IDs (Document Frequency)
+    final Map<String, Set<String>> phraseDocMap = {};
+    
     final Set<String> stopWords = {
-      'THE', 'AND', 'IS', 'TO', 'IN', 'OF', 'FOR', 'WITH', 'ON', 'AT', 'THIS', 'THAT',
-      'DI', 'DAN', 'YANG', 'INI', 'ITU', 'AKU', 'KAMU', 'KE', 'DARI', 'ADA', 'DENGAN', 
-      'UNTUK', 'YG', 'GAK', 'YA', 'AJA', 'SI', 'SAYA', 'KITA', 'MEREKA', 'APA', 'KAPAN'
+      'the', 'and', 'is', 'to', 'in', 'of', 'for', 'on', 'at', 'this',
+      'di', 'dan', 'yang', 'ini', 'itu', 'ke', 'dari', 'ada', 'dengan', 
+      'untuk', 'yg', 'gak', 'ya', 'aja', 'si', 'saya', 'aku', 'bisa', 'mau',
+      'banget', 'sama', 'sudah', 'lagi', 'apa', 'kapan', 'dimana'
     };
 
     for (var doc in posts) {
       final data = doc.data() as Map<String, dynamic>;
-      final text = (data['text'] ?? '').toString();
+      final text = (data['text'] ?? '').toString().toLowerCase();
+      final postId = doc.id;
       
-      // 1. Hashtags (High Weight: +5)
-      final hashtagRegex = RegExp(r'\#[a-zA-Z0-9_]+');
-      final hashtags = hashtagRegex.allMatches(text).map((m) => m.group(0)!).toList();
-      for (var tag in hashtags) {
-        final normalized = tag.toUpperCase();
-        frequencyMap[normalized] = (frequencyMap[normalized] ?? 0) + 5;
-      }
+      // Clean: Keep alphanumeric, spaces, and hashtags
+      final cleanText = text.replaceAll(RegExp(r'[^\w\s#]'), '');
+      final words = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
 
-      // 2. Capitalized Keywords (Medium Weight: +1)
-      // Heuristic: Important nouns/names often capitalized (e.g., PNJ, BEM, Kantin)
-      final keywordRegex = RegExp(r'\b[A-Z][a-zA-Z0-9]+\b');
-      final words = keywordRegex.allMatches(text).map((m) => m.group(0)!).toList();
+      for (int i = 0; i < words.length; i++) {
+        // A. Hashtags (Always count)
+        if (words[i].startsWith('#')) {
+          phraseDocMap.putIfAbsent(words[i], () => {}).add(postId);
+        }
 
-      for (var word in words) {
-        final normalized = word.toUpperCase();
-        if (normalized.length > 2 && !stopWords.contains(normalized)) {
-          frequencyMap[normalized] = (frequencyMap[normalized] ?? 0) + 1;
+        // B. N-Grams (2 and 3 words)
+        // Only consider if not stop words
+        if (i < words.length - 1) {
+          if (!stopWords.contains(words[i]) && !stopWords.contains(words[i+1])) {
+             String bigram = "${words[i]} ${words[i+1]}";
+             phraseDocMap.putIfAbsent(bigram, () => {}).add(postId);
+          }
+        }
+        if (i < words.length - 2) {
+          // Allow middle stop words for sentences like "tomorrow is monday"
+          String trigram = "${words[i]} ${words[i+1]} ${words[i+2]}";
+          phraseDocMap.putIfAbsent(trigram, () => {}).add(postId);
         }
       }
     }
 
-    final sortedEntries = frequencyMap.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    // Convert to List and Filter Noise
+    var candidates = phraseDocMap.entries
+        .map((e) => {'tag': e.key, 'count': e.value.length})
+        // Filter: Must appear in at least 2 different posts (unless hashtag)
+        .where((e) => (e['count'] as int) > 1 || (e['tag'] as String).startsWith('#'))
+        .toList();
 
-    return sortedEntries.map((e) => {'tag': e.key, 'count': e.value}).toList();
+    // Sort: Primary by Count (Desc), Secondary by Length (Desc) 
+    // We prefer longer phrases if counts are equal
+    candidates.sort((a, b) {
+      int countCompare = (b['count'] as int).compareTo(a['count'] as int);
+      if (countCompare != 0) return countCompare;
+      return (b['tag'] as String).length.compareTo((a['tag'] as String).length);
+    });
+
+    // Deduplication (Subset Removal)
+    // If "Tomorrow is Monday" is accepted, ignore "is Monday"
+    final List<Map<String, dynamic>> finalTrends = [];
+    
+    for (var candidate in candidates) {
+      String tag = candidate['tag'] as String;
+      
+      // Check if this tag is a substring of any already accepted trend
+      bool isRedundant = false;
+      for (var accepted in finalTrends) {
+        String acceptedTag = accepted['tag'] as String;
+        if (acceptedTag.contains(tag)) {
+          isRedundant = true;
+          break;
+        }
+      }
+
+      if (!isRedundant) {
+        finalTrends.add(candidate);
+      }
+      
+      if (finalTrends.length >= 10) break;
+    }
+
+    return finalTrends;
   }
 
-  // --- PERSONALIZED RECOMMENDATION ENGINE (NARROW AI) ---
-  // Ranks posts based on user profile relevance and engagement
+  // --- 5. DISCOVER ALGORITHM (Exploration & Novelty) ---
+  // Prioritizes: Viral Content, Users NOT followed, Randomness
+  List<QueryDocumentSnapshot> getDiscoverRecommendations(
+    List<QueryDocumentSnapshot> allPosts, 
+    String currentUserId,
+    List<dynamic> followingList
+  ) {
+    List<Map<String, dynamic>> scoredPosts = [];
+
+    for (var doc in allPosts) {
+      final data = doc.data() as Map<String, dynamic>;
+      final authorId = data['userId'];
+      
+      // Filter 1: Strictly exclude own posts
+      if (authorId == currentUserId) continue;
+      
+      // Filter 2: Strictly exclude people I already follow (This is for discovery!)
+      if (followingList.contains(authorId)) continue;
+
+      double score = 0.0;
+
+      // Factor 1: Engagement (Viral Factor)
+      final int likes = (data['likes'] as Map?)?.length ?? 0;
+      final int comments = data['commentCount'] ?? 0;
+      score += (likes * 2.0) + (comments * 3.0); // Heavy weight on engagement
+
+      // Factor 2: Recency (Lower weight than Recommended, allow evergreen viral posts)
+      final Timestamp? ts = data['timestamp'];
+      if (ts != null) {
+        final hoursAgo = DateTime.now().difference(ts.toDate()).inHours;
+        if (hoursAgo < 24) score += 20; // Bonus for today's viral hits
+        else score += (100.0 / (hoursAgo + 5)); // Gentle decay
+      }
+
+      // Factor 3: Media Bonus (Visuals are better for discovery)
+      if (data['mediaUrl'] != null) score += 15.0;
+
+      scoredPosts.add({'doc': doc, 'score': score});
+    }
+
+    // Sort Descending
+    scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+    return scoredPosts.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
+  }
+
+  // --- 6. RECOMMENDED ALGORITHM (Relevance & Familiarity) ---
+  // Prioritizes: Friends, Interests, Recent
   List<QueryDocumentSnapshot> getPersonalizedRecommendations(
     List<QueryDocumentSnapshot> allPosts, 
     Map<String, dynamic> userProfile,
     String currentUserId
   ) {
     final userDept = userProfile['department'] as String?;
-    final userInterests = _departmentKeywords[userDept] ?? [];
     final following = List<String>.from(userProfile['following'] ?? []);
+    final Map<String, List<String>> deptKeywords = {
+      'Teknik Sipil': ['beton', 'gedung', 'konstruksi', 'sipil'],
+      'Teknik Mesin': ['mesin', 'energi', 'otomotif'],
+      'Teknik Elektro': ['elektro', 'listrik', 'iot'],
+      'Teknik Informatika & Komputer': ['coding', 'flutter', 'tik', 'komputer', 'program', 'bug'],
+      'Akuntansi': ['akuntansi', 'keuangan', 'saham'],
+      'Administrasi Niaga': ['bisnis', 'marketing', 'administrasi'],
+      'Teknik Grafika & Penerbitan': ['desain', 'grafis', 'media'],
+    };
+    final interests = deptKeywords[userDept] ?? [];
 
     List<Map<String, dynamic>> scoredPosts = [];
 
@@ -161,52 +229,33 @@ class PredictionService {
       final data = doc.data() as Map<String, dynamic>;
       final authorId = data['userId'];
       
-      // Filter: Skip own posts
       if (authorId == currentUserId) continue;
 
-      double score = 1.0; // Base score
+      double score = 0.0; 
 
-      // 1. Recency Decay (Newer is better)
-      final Timestamp? ts = data['timestamp'];
-      if (ts != null) {
-        final hoursAgo = DateTime.now().difference(ts.toDate()).inHours;
-        score += (50.0 / (hoursAgo + 5)); // Curve favors very recent posts
-      }
+      // 1. Social (+50) - Strong bias for friends
+      if (following.contains(authorId)) score += 50.0;
 
-      // 2. Social Connection (Friends of Friends / Following)
-      if (following.contains(authorId)) {
-        score += 20.0; // High boost for followed users
-      }
-
-      // 3. Content Relevance (Personalization)
+      // 2. Relevance (+30) - Bias for my major
       final text = (data['text'] ?? '').toString().toLowerCase();
-      
-      // Boost if text contains department-specific keywords (e.g., 'Coding' for TI anak)
-      for (var keyword in userInterests) {
+      for (var keyword in interests) {
         if (text.contains(keyword)) {
-          score += 15.0; 
-          break; // Boost once per post
+          score += 30.0;
+          break;
         }
       }
 
-      // Boost if explicit PNJ mentions
-      if (text.contains('pnj') || text.contains('politeknik')) {
-        score += 5.0;
+      // 3. Recency (High Decay) - We want *fresh* news from friends
+      final Timestamp? ts = data['timestamp'];
+      if (ts != null) {
+        final hoursAgo = DateTime.now().difference(ts.toDate()).inHours;
+        score += (80.0 / (hoursAgo + 1)); 
       }
-
-      // 4. Viral/Buzz Factor
-      final likes = (data['likes'] as Map?)?.length ?? 0;
-      final comments = data['commentCount'] ?? 0;
-      
-      // Logarithmic boost prevents older viral posts from dominating forever
-      score += (likes * 0.5) + (comments * 1.0);
 
       scoredPosts.add({'doc': doc, 'score': score});
     }
 
-    // Sort descending by score
     scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
-
     return scoredPosts.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
   }
 }

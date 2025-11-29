@@ -50,9 +50,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   void _onCommentChanged(String text) {
     setState(() { _predictedText = null; });
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 800), () async {
+    _debounce = Timer(const Duration(milliseconds: 300), () async { // Faster response
       if (text.trim().isEmpty) return;
-      final suggestion = await _predictionService.getCompletion(text, 'comment');
+      
+      // FIX: Use getLocalPrediction and remove context argument
+      final suggestion = await _predictionService.getLocalPrediction(text);
+      
       if (mounted && suggestion != null && suggestion.isNotEmpty) {
         setState(() { _predictedText = suggestion; });
       }
@@ -67,6 +70,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       _commentController.text = newText;
       _commentController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
       setState(() { _predictedText = null; });
+      // Optionally trigger prediction for next word
+      _onCommentChanged(newText);
     }
   }
 

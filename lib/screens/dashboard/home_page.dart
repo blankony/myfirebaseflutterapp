@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
+import '../../services/prediction_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -25,9 +26,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   late Stream<QuerySnapshot> _postsStream;
   String _refreshKey = ''; 
-  
-  final List<String> _trendingKeywords = ['tech', 'flutter', 'coding', 'project', 'seminar'];
-  final List<String> _personalKeywords = ['selamat pagi', 'morning', 'halo', 'hello', 'semangat'];
+  final PredictionService _aiService = PredictionService(); 
 
   @override
   void initState() {
@@ -54,53 +53,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
   @override
   bool get wantKeepAlive => true;
-
-  List<QueryDocumentSnapshot> _getRecommendedPosts(
-    List<QueryDocumentSnapshot> allPosts, 
-    Map<String, dynamic> userData
-  ) {
-    final List<dynamic> following = userData['following'] ?? [];
-    final String myUid = _auth.currentUser?.uid ?? '';
-
-    List<Map<String, dynamic>> scoredPosts = allPosts.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      double score = 0;
-
-      final String text = (data['text'] ?? '').toString().toLowerCase();
-      final String userId = data['userId'] ?? '';
-      final Timestamp? timestamp = data['timestamp'] as Timestamp?;
-      final int likeCount = (data['likes'] as Map?)?.length ?? 0;
-
-      if (following.contains(userId)) score += 50;
-      score += (likeCount * 0.5); 
-
-      for (var keyword in _trendingKeywords) {
-        if (text.contains(keyword)) {
-          score += 10;
-          break;
-        }
-      }
-
-      for (var keyword in _personalKeywords) {
-        if (text.contains(keyword)) {
-          score += 15;
-          break;
-        }
-      }
-
-      if (timestamp != null) {
-        final hoursAgo = DateTime.now().difference(timestamp.toDate()).inHours;
-        score += (20.0 / (hoursAgo + 1)); 
-      }
-
-      if (userId == myUid) score -= 5; 
-
-      return {'doc': doc, 'score': score};
-    }).toList();
-
-    scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
-    return scoredPosts.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -135,9 +87,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
                 List<QueryDocumentSnapshot> docs = snapshot.data?.docs ?? [];
                 
+                // --- APPLY AI RECOMMENDATION ALGORITHM ---
                 if (widget.isRecommended && docs.isNotEmpty) {
-                  docs = _getRecommendedPosts(docs, userData);
+                  // Explicitly uses the Recommended logic (Friends + Interests)
+                  docs = _aiService.getPersonalizedRecommendations(
+                    docs, 
+                    userData, 
+                    currentUserId ?? ''
+                  );
                 }
+                // ------------------------------------------
 
                 return RefreshIndicator(
                   onRefresh: _handleRefresh,
@@ -179,12 +138,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                                   Icon(Icons.auto_awesome_outlined, size: 64, color: Colors.grey),
                                   SizedBox(height: 16),
                                   Text(
-                                    'No posts yet.', 
+                                    widget.isRecommended 
+                                      ? 'No recommendations yet.' 
+                                      : 'No posts yet.', 
                                     style: TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.bold)
                                   ),
                                   SizedBox(height: 8),
                                   Text(
-                                    'Start exploring or create a post!', 
+                                    widget.isRecommended
+                                      ? 'Interact with posts to teach our AI!'
+                                      : 'Start exploring or create a post!', 
                                     style: TextStyle(color: Colors.grey)
                                   ),
                                 ],
