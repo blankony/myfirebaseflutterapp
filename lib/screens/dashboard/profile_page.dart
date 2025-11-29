@@ -36,7 +36,7 @@ class ProfilePage extends StatefulWidget {
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin {
+class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late TabController _tabController;
   final ScrollController _scrollController = ScrollController();
   
@@ -45,7 +45,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   bool _isScrolled = false;
   bool _isBioExpanded = false;
-  int _targetTabIndex = 0;
+
+  // Agar state halaman tidak mati saat dicover halaman lain
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -53,11 +56,30 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
     
+    // --- FIX: RESTORE TAB INDEX DARI PAGE STORAGE ---
+    // Kita baca apakah ada posisi tab yang tersimpan untuk user ini
+    int initialIndex = 0;
+    // Menggunakan PageStorage agar posisi tab diingat per-user ID
+    final savedIndex = PageStorage.of(context).readState(context, identifier: 'tab_index_$_userId');
+    if (savedIndex != null && savedIndex is int) {
+      initialIndex = savedIndex;
+    }
+
     _tabController = TabController(
       length: 3, 
       vsync: this, 
-      initialIndex: 0,
+      initialIndex: initialIndex, // Set posisi awal sesuai yang tersimpan
     );
+
+    // --- FIX: SIMPAN TAB INDEX SAAT BERUBAH ---
+    _tabController.addListener(() {
+      // Simpan posisi tab saat ini ke memori
+      PageStorage.of(context).writeState(
+        context, 
+        _tabController.index, 
+        identifier: 'tab_index_$_userId'
+      );
+    });
     
     _scrollController.addListener(_scrollListener);
   }
@@ -90,7 +112,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- LOADING OVERLAY ---
   OverlayEntry _showUploadingOverlay() {
     OverlayEntry entry = OverlayEntry(
       builder: (context) => Positioned(
@@ -136,13 +157,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return entry;
   }
 
-  // --- UPDATE SEMUA POSTINGAN & KOMENTAR LAMA (BUG FIX) ---
   Future<void> _updateAllPastContent(String newImageUrl) async {
-    // Fungsi ini berjalan di background agar tidak memblokir UI
     try {
       final batch = _firestore.batch();
       
-      // 1. Cari semua Postingan user ini
       final postsQuery = await _firestore.collection('posts')
           .where('userId', isEqualTo: _userId)
           .get();
@@ -151,7 +169,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         batch.update(doc.reference, {'profileImageUrl': newImageUrl});
       }
 
-      // 2. Cari semua Komentar user ini (di semua postingan)
       final commentsQuery = await _firestore.collectionGroup('comments')
           .where('userId', isEqualTo: _userId)
           .get();
@@ -160,15 +177,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         batch.update(doc.reference, {'profileImageUrl': newImageUrl});
       }
 
-      // Commit update (Max 500 operasi per batch, untuk app skala kecil ini aman)
       await batch.commit();
-      print("Berhasil mengupdate foto profil di postingan lama.");
     } catch (e) {
-      print("Gagal update konten lama: $e");
+      debugPrint("Gagal update konten lama: $e");
     }
   }
 
-  // --- IMAGE PICKER & UPLOAD ---
   Future<void> _pickAndUploadImage({required bool isBanner}) async {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(
@@ -217,10 +231,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           updateData['avatarIconId'] = -1; 
         }
 
-        // 1. Update Dokumen User Utama
         await _firestore.collection('users').doc(_userId).update(updateData);
         
-        // 2. JIKA GANTI AVATAR: Update semua postingan & komentar lama (BUG FIX)
         if (!isBanner) {
           _updateAllPastContent(downloadUrl);
         }
@@ -387,6 +399,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     if (_userId == null) {
       return Center(child: Text("Not logged in."));
     }
@@ -498,9 +512,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               delegate: _SliverAppBarDelegate(
                 TabBar(
                   controller: _tabController,
-                  onTap: (index) {
-                    _targetTabIndex = index;
-                  },
+                  // on Tap sudah tidak diperlukan untuk state saving, karena listener di initState yang handle
                   tabs: [
                     Tab(text: 'Posts'),
                     Tab(text: 'Reposts'),
@@ -537,6 +549,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return content;
   }
 
+  // MODIFIED: Updated Header with Interactive Tap Logic
   Widget _buildUnifiedProfileHeader(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name';
@@ -665,7 +678,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             onPressed: () async {
                               final result = await Navigator.of(context).push(MaterialPageRoute(builder: (context) => EditProfileScreen()));
                               if (mounted && result == true) {
-                                _targetTabIndex = 0;
+                                // Reset to tab 0 on manual edit success (optional)
                                 _tabController.animateTo(0); 
                                 setState(() {});
                               }
