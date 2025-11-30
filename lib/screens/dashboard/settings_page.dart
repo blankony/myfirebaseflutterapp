@@ -2,11 +2,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // REQUIRED
+import 'package:shared_preferences/shared_preferences.dart'; 
 import '../../main.dart'; 
 import 'about_page.dart'; 
 import '../edit_profile_screen.dart';
 import 'account_center_page.dart'; 
+import '../blocked_users_page.dart'; // REQUIRED
 import '../../services/notification_prefs_service.dart'; 
 import '../../services/overlay_service.dart';
 
@@ -40,6 +41,10 @@ class SettingsPage extends StatelessWidget {
   
   void _goToAccountCenter(BuildContext context) {
     Navigator.of(context).push(_createSlideRightRoute(AccountCenterPage()));
+  }
+
+  void _goToBlockedUsers(BuildContext context) {
+    Navigator.of(context).push(_createSlideRightRoute(BlockedUsersPage()));
   }
 
   Future<void> _signOut(BuildContext context) async {
@@ -76,6 +81,13 @@ class SettingsPage extends StatelessWidget {
             icon: Icons.account_circle_outlined,
             title: 'Account Center',
             onTap: () => _goToAccountCenter(context),
+          ),
+          
+          _buildSettingsTile(
+            context: context,
+            icon: Icons.block,
+            title: 'Blocked Accounts',
+            onTap: () => _goToBlockedUsers(context),
           ),
           
           _buildSettingsTile(

@@ -1,51 +1,56 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:ui'; // Required for BackdropFilter
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../change_password_screen.dart';
-import '../welcome_screen.dart'; 
-import '../../services/overlay_service.dart'; // REQUIRED
+import '../../auth_gate.dart'; // CHANGED: Import AuthGate instead of WelcomeScreen
+import '../../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-class AccountCenterPage extends StatelessWidget {
+class AccountCenterPage extends StatefulWidget {
   const AccountCenterPage({super.key});
 
-  // Helper for the "Fly In From Right" Page Transition
+  @override
+  State<AccountCenterPage> createState() => _AccountCenterPageState();
+}
+
+class _AccountCenterPageState extends State<AccountCenterPage> {
+  bool _isDeleting = false; // Controls the full-screen loader
+
+  // Helper for Page Transition
   Route _createSlideRightRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0); // Start from Right
-        const end = Offset.zero;        // End at Center
+        const begin = Offset(1.0, 0.0); 
+        const end = Offset.zero;        
         const curve = Curves.easeInOutQuart;
-
+        
         var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-        var offsetAnimation = animation.drive(tween);
+        var offsetAnimation = animation.drive(tween); 
 
-        return SlideTransition(
-          position: offsetAnimation,
-          child: child,
-        );
+        return SlideTransition(position: offsetAnimation, child: child);
       },
     );
   }
 
   // --- Step 1: Prompt Password ---
-  Future<void> _promptPasswordForDeletion(BuildContext context) async {
+  Future<void> _promptPasswordForDeletion() async {
     final TextEditingController passwordController = TextEditingController();
     String? errorMessage;
-    bool isLoading = false;
+    bool isVerifying = false;
 
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) {
+      builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (builderContext, setDialogState) {
             return AlertDialog(
               title: Text('Verify Password'),
               content: Column(
@@ -67,13 +72,13 @@ class AccountCenterPage extends StatelessWidget {
               ),
               actions: [
                 TextButton(
-                  onPressed: isLoading ? null : () => Navigator.of(context).pop(),
+                  onPressed: isVerifying ? null : () => Navigator.of(builderContext).pop(),
                   child: Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: isLoading ? null : () async {
-                    setState(() {
-                      isLoading = true;
+                  onPressed: isVerifying ? null : () async {
+                    setDialogState(() {
+                      isVerifying = true;
                       errorMessage = null;
                     });
 
@@ -88,15 +93,19 @@ class AccountCenterPage extends StatelessWidget {
                         // Attempt re-auth
                         await user.reauthenticateWithCredential(credential);
                         
-                        if (context.mounted) {
-                          Navigator.of(context).pop(); // Close password dialog
-                          _showFinalDeleteConfirmation(ctx); // Use parent ctx or ensure validity
+                        if (builderContext.mounted) {
+                          Navigator.of(builderContext).pop(); // Close password dialog
+                          
+                          // Proceed to final confirmation
+                          if (mounted) {
+                            _showFinalDeleteConfirmation(); 
+                          }
                         }
                       }
                     } on FirebaseAuthException catch (e) {
-                      if (context.mounted) {
-                        setState(() {
-                          isLoading = false;
+                      if (builderContext.mounted) {
+                        setDialogState(() {
+                          isVerifying = false;
                           if (e.code == 'invalid-credential' || e.code == 'wrong-password') {
                              errorMessage = 'Incorrect password.';
                           } else {
@@ -105,9 +114,9 @@ class AccountCenterPage extends StatelessWidget {
                         });
                       }
                     } catch (e) {
-                       if (context.mounted) {
-                         setState(() {
-                          isLoading = false;
+                       if (builderContext.mounted) {
+                         setDialogState(() {
+                          isVerifying = false;
                           errorMessage = 'An error occurred.';
                         });
                        }
@@ -117,7 +126,7 @@ class AccountCenterPage extends StatelessWidget {
                     backgroundColor: TwitterTheme.blue,
                     foregroundColor: Colors.white,
                   ),
-                  child: isLoading 
+                  child: isVerifying 
                     ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
                     : Text('Verify'),
                 ),
@@ -130,14 +139,14 @@ class AccountCenterPage extends StatelessWidget {
   }
 
   // --- Step 2: Final Confirmation ---
-  Future<void> _showFinalDeleteConfirmation(BuildContext context) async {
+  Future<void> _showFinalDeleteConfirmation() async {
     final didConfirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Delete Account'),
         content: Text(
           'Are you sure you want to delete your account?\n\n'
-          'This action is PERMANENT and cannot be undone. All your data (posts, profile, settings) will be lost forever.',
+          'This action is PERMANENT and cannot be undone. All your posts, profile data, and settings will be lost forever.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
@@ -153,35 +162,50 @@ class AccountCenterPage extends StatelessWidget {
       ),
     ) ?? false;
 
-    if (didConfirm && context.mounted) {
-      _performAccountDeletion(context);
+    if (didConfirm && mounted) {
+      _performAccountDeletion();
     }
   }
 
   // --- Step 3: Execution ---
-  Future<void> _performAccountDeletion(BuildContext context) async {
-    // Show blocking loading dialog
-    showDialog(
-      context: context, 
-      barrierDismissible: false,
-      builder: (_) => Center(child: CircularProgressIndicator()),
-    );
+  Future<void> _performAccountDeletion() async {
+    // 1. Activate Full Screen Loading
+    setState(() {
+      _isDeleting = true;
+    });
 
     try {
       final user = _auth.currentUser;
       if (user != null) {
-        // 1. Delete Firestore Data (User Doc)
-        await _firestore.collection('users').doc(user.uid).delete();
+        final String uid = user.uid;
+
+        // A. Delete User's Posts (Batch)
+        WriteBatch batch = _firestore.batch();
+        int batchCount = 0;
+
+        final postsQuery = await _firestore.collection('posts').where('userId', isEqualTo: uid).get();
         
-        // 2. Delete Auth Account
+        for (var doc in postsQuery.docs) {
+          batch.delete(doc.reference);
+          batchCount++;
+
+          if (batchCount >= 450) {
+            await batch.commit();
+            batch = _firestore.batch();
+            batchCount = 0;
+          }
+        }
+
+        // B. Delete User Profile
+        batch.delete(_firestore.collection('users').doc(uid));
+        
+        // C. Commit final batch (posts + user doc)
+        await batch.commit();
+        
+        // D. Delete Auth Account
         await user.delete();
         
-        if (context.mounted) {
-          // Dismiss loading dialog if possible
-          if (Navigator.canPop(context)) {
-            Navigator.of(context).pop(); 
-          }
-          
+        if (mounted) {
           OverlayService().showTopNotification(
             context, 
             "Account deleted successfully.", 
@@ -190,19 +214,20 @@ class AccountCenterPage extends StatelessWidget {
             color: Colors.grey
           );
           
-          // Navigate to Welcome Screen and remove all previous routes
+          // E. Navigate Away
+          // FIXED: Navigate to AuthGate() instead of WelcomeScreen()
+          // This ensures the StreamBuilder in AuthGate restarts and listens for the next login.
           Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+            MaterialPageRoute(builder: (_) => const AuthGate()),
             (route) => false,
           );
         }
       }
     } catch (e) {
-      if (context.mounted) {
-        // Try to pop loading dialog
-        if (Navigator.canPop(context)) {
-           Navigator.of(context).pop();
-        }
+      if (mounted) {
+        setState(() {
+          _isDeleting = false; // Turn off loading on error
+        });
         
         OverlayService().showTopNotification(
           context, 
@@ -219,78 +244,140 @@ class AccountCenterPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Account Center'),
-      ),
-      body: ListView(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              "Profile & Security",
-              style: theme.textTheme.titleMedium?.copyWith(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
-            ),
+    return Stack(
+      children: [
+        Scaffold(
+          appBar: AppBar(
+            title: Text('Account Center'),
           ),
-          ListTile(
-            leading: Icon(Icons.edit_outlined),
-            title: Text('Edit Profile'),
-            subtitle: Text('Change Name, Bio, and Avatar'),
-            trailing: Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.of(context).push(_createSlideRightRoute(EditProfileScreen()));
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.lock_outline),
-            title: Text('Change Password'),
-            trailing: Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {
-              Navigator.of(context).push(_createSlideRightRoute(ChangePasswordScreen()));
-            },
-          ),
-          
-          Divider(height: 32),
-          
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              "Danger Zone",
-              style: theme.textTheme.titleMedium?.copyWith(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
-          ),
-          ListTile(
-            leading: Icon(Icons.logout, color: theme.iconTheme.color),
-            title: Text('Log Out'),
-            onTap: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: Text('Log Out'),
-                  content: Text('Are you sure you want to log out?'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context, false), child: Text("Cancel")),
-                    TextButton(onPressed: () => Navigator.pop(context, true), child: Text("Log Out", style: TextStyle(color: Colors.red))),
-                  ],
+          body: ListView(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  "Profile & Security",
+                  style: theme.textTheme.titleMedium?.copyWith(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
                 ),
-              ) ?? false;
+              ),
+              ListTile(
+                leading: Icon(Icons.edit_outlined),
+                title: Text('Edit Profile'),
+                subtitle: Text('Change Name, Bio, and Avatar'),
+                trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.of(context).push(_createSlideRightRoute(EditProfileScreen()));
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.lock_outline),
+                title: Text('Change Password'),
+                trailing: Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.of(context).push(_createSlideRightRoute(ChangePasswordScreen()));
+                },
+              ),
+              
+              Divider(height: 32),
+              
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  "Danger Zone",
+                  style: theme.textTheme.titleMedium?.copyWith(color: Colors.red, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ListTile(
+                leading: Icon(Icons.logout, color: theme.iconTheme.color),
+                title: Text('Log Out'),
+                onTap: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('Log Out'),
+                      content: Text('Are you sure you want to log out?'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text("Cancel")),
+                        TextButton(onPressed: () => Navigator.pop(context, true), child: Text("Log Out", style: TextStyle(color: Colors.red))),
+                      ],
+                    ),
+                  ) ?? false;
 
-              if(confirm) {
-                await FirebaseAuth.instance.signOut();
-                if (context.mounted) {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                }
-              }
-            },
+                  if(confirm) {
+                    await FirebaseAuth.instance.signOut();
+                    if (mounted) {
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    }
+                  }
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.delete_forever_outlined, color: Colors.red),
+                title: Text('Delete Account', style: TextStyle(color: Colors.red)),
+                subtitle: Text('Permanently delete your account and data'),
+                onTap: () => _promptPasswordForDeletion(),
+              ),
+            ],
           ),
-          ListTile(
-            leading: Icon(Icons.delete_forever_outlined, color: Colors.red),
-            title: Text('Delete Account', style: TextStyle(color: Colors.red)),
-            subtitle: Text('Permanently delete your account and data'),
-            onTap: () => _promptPasswordForDeletion(context),
+        ),
+        
+        // --- Improved Loading UI ---
+        if (_isDeleting)
+          Positioned.fill(
+            child: Stack(
+              children: [
+                // 1. Dimmed Background
+                Container(color: Colors.black54),
+                
+                // 2. Blur Effect
+                BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                  child: Container(color: Colors.transparent),
+                ),
+                
+                // 3. Status Card
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                    decoration: BoxDecoration(
+                      color: theme.cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 20,
+                          spreadRadius: 5,
+                          offset: Offset(0, 10),
+                        )
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 50, 
+                          height: 50, 
+                          child: CircularProgressIndicator(strokeWidth: 4, color: TwitterTheme.blue)
+                        ),
+                        SizedBox(height: 24),
+                        Text(
+                          "Deleting Account",
+                          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          "Cleaning up your posts and profile data...",
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }

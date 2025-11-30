@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart'; 
 import 'package:video_player/video_player.dart'; 
 import '../services/overlay_service.dart';
+import '../services/moderation_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -248,7 +249,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   @override
   void initState() {
     super.initState();
-    _localIsPinned = widget.isPinned; // Initialize local state
+    _localIsPinned = widget.isPinned; 
     _syncState();
     _initVideoController();
     
@@ -299,7 +300,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         _initVideoController();
       }
     }
-    // Update local state if parent state changes (e.g. from firestore update)
     if (oldWidget.isPinned != widget.isPinned) {
       setState(() {
         _localIsPinned = widget.isPinned;
@@ -413,36 +413,29 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Future<void> _togglePin() async {
     final user = _auth.currentUser;
     if (user == null) return;
-
-    // 1. Optimistic Update (Visual)
     final bool newPinState = !_localIsPinned;
     setState(() {
       _localIsPinned = newPinState; 
     });
-
-    // Notify Parent (ProfilePage) Immediately
     if (widget.onPinToggle != null) {
       widget.onPinToggle!(widget.postId, newPinState);
     }
-
     try {
-      if (!newPinState) { // Unpin
+      if (!newPinState) { 
         await _firestore.collection('users').doc(user.uid).update({
           'pinnedPostId': FieldValue.delete(),
         });
         if(mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
-      } else { // Pin
+      } else { 
         await _firestore.collection('users').doc(user.uid).update({
           'pinnedPostId': widget.postId,
         });
         if(mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
       }
     } catch (e) {
-      // Revert if failed
       setState(() {
         _localIsPinned = !newPinState;
       });
-      // Revert Parent
       if (widget.onPinToggle != null) widget.onPinToggle!(widget.postId, !newPinState);
       if(mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, (){}, color: Colors.red);
     }
@@ -526,6 +519,54 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
+  // --- REPORT & BLOCK LOGIC ---
+  void _reportPost() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: Text("Report Post"),
+          children: [
+            SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text('Spam')),
+            SimpleDialogOption(onPressed: () => _submitReport('Harassment'), child: Text('Harassment')),
+            SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Content'), child: Text('Inappropriate Content')),
+            SimpleDialogOption(onPressed: () => _submitReport('Misinformation'), child: Text('Misinformation')),
+            Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: ()=>Navigator.pop(context), child: Text("Cancel"))),
+          ],
+        );
+      }
+    );
+  }
+
+  void _submitReport(String reason) {
+    Navigator.pop(context);
+    moderationService.reportContent(
+      targetId: widget.postId, 
+      targetType: 'post', 
+      reason: reason
+    );
+    OverlayService().showTopNotification(context, "Report submitted.", Icons.flag, (){});
+  }
+
+  void _blockUser() async {
+    final didConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Block User?"),
+        content: Text("They will not be able to follow you or view your posts, and you will not see their posts."),
+        actions: [
+          TextButton(onPressed: ()=>Navigator.pop(context, false), child: Text("Cancel")),
+          TextButton(onPressed: ()=>Navigator.pop(context, true), child: Text("Block", style: TextStyle(color: Colors.red))),
+        ],
+      )
+    ) ?? false;
+
+    if (didConfirm) {
+      await moderationService.blockUser(widget.postData['userId']);
+      if (mounted) OverlayService().showTopNotification(context, "User blocked", Icons.block, (){});
+    }
+  }
+
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return "just now";
     if (widget.postData['isUploading'] == true) return "Uploading...";
@@ -555,100 +596,113 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final theme = Theme.of(context);
-    final text = widget.postData['text'] ?? '';
-    final mediaUrl = widget.postData['mediaUrl'];
-    final mediaType = widget.postData['mediaType'];
-    final isUploading = widget.postData['isUploading'] == true;
-    final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
-    final uploadFailed = widget.postData['uploadFailed'] == true;
-    final int commentCount = widget.postData['commentCount'] ?? 0;
+    
+    // --- BLOCK CHECK ---
+    // If the post author is in the current user's blocked list, hide this card.
+    return StreamBuilder<List<String>>(
+      stream: moderationService.streamBlockedUsers(),
+      builder: (context, snapshot) {
+        final blockedUsers = snapshot.data ?? [];
+        if (blockedUsers.contains(widget.postData['userId'])) {
+          return SizedBox.shrink(); // Hide Content
+        }
 
-    if (uploadFailed) {
-      return Container(
-        padding: const EdgeInsets.all(12.0),
-        color: Colors.red.withOpacity(0.1),
-        child: Text("Post upload failed: ${text}", style: TextStyle(color: Colors.red)),
-      );
-    }
+        final theme = Theme.of(context);
+        final text = widget.postData['text'] ?? '';
+        final mediaUrl = widget.postData['mediaUrl'];
+        final mediaType = widget.postData['mediaType'];
+        final isUploading = widget.postData['isUploading'] == true;
+        final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
+        final uploadFailed = widget.postData['uploadFailed'] == true;
+        final int commentCount = widget.postData['commentCount'] ?? 0;
 
-    return GestureDetector(
-      onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
-          color: theme.cardColor,
-        ),
-        padding: const EdgeInsets.all(16.0), 
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_localIsPinned)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
-                child: Row(
+        if (uploadFailed) {
+          return Container(
+            padding: const EdgeInsets.all(12.0),
+            color: Colors.red.withOpacity(0.1),
+            child: Text("Post upload failed: ${text}", style: TextStyle(color: Colors.red)),
+          );
+        }
+
+        return GestureDetector(
+          onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
+              color: theme.cardColor,
+            ),
+            padding: const EdgeInsets.all(16.0), 
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_localIsPinned)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.push_pin, size: 14, color: theme.hintColor),
+                        SizedBox(width: 4),
+                        Text(
+                          "Pinned Post", 
+                          style: TextStyle(
+                            fontSize: 12, 
+                            fontWeight: FontWeight.bold,
+                            color: theme.hintColor
+                          )
+                        ),
+                      ],
+                    ),
+                  ),
+
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.push_pin, size: 14, color: theme.hintColor),
-                    SizedBox(width: 4),
-                    Text(
-                      "Pinned Post", 
-                      style: TextStyle(
-                        fontSize: 12, 
-                        fontWeight: FontWeight.bold,
-                        color: theme.hintColor
-                      )
+                    _buildAvatar(context),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildPostHeader(context),
+                          if (text.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Text(
+                                text,
+                                style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
+                                maxLines: widget.isDetailView ? null : 10,
+                                overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+                              ),
+                            ),
+                          if (isUploading)
+                            _buildUploadStatus(uploadProgress)
+                          else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12.0),
+                              child: _PostMediaPreview(
+                                mediaUrl: mediaUrl ?? '',
+                                mediaType: mediaType,
+                                text: text,
+                                postData: widget.postData, 
+                                postId: widget.postId, 
+                                heroContextId: widget.heroContextId, 
+                                videoController: _videoController, 
+                              ),
+                            ),
+                          if (widget.isDetailView && !isUploading)
+                            _buildDetailActionRow()
+                          else if (!isUploading)
+                            _buildFeedActionRow(commentCount),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-              ),
-
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildAvatar(context),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildPostHeader(context),
-                      if (text.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text(
-                            text,
-                            style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
-                            maxLines: widget.isDetailView ? null : 10,
-                            overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
-                          ),
-                        ),
-                      if (isUploading)
-                        _buildUploadStatus(uploadProgress)
-                      else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12.0),
-                          child: _PostMediaPreview(
-                            mediaUrl: mediaUrl ?? '',
-                            mediaType: mediaType,
-                            text: text,
-                            postData: widget.postData, 
-                            postId: widget.postId, 
-                            heroContextId: widget.heroContextId, 
-                            videoController: _videoController, 
-                          ),
-                        ),
-                      if (widget.isDetailView && !isUploading)
-                        _buildDetailActionRow()
-                      else if (!isUploading)
-                        _buildFeedActionRow(commentCount),
-                    ],
-                  ),
-                ),
               ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      }
     );
   }
 
@@ -695,7 +749,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.start, // Align Text & Dots to top
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Flexible(
               child: Text(
@@ -712,15 +766,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                   padding: const EdgeInsets.only(top: 2.0),
                   child: Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
                 ),
-                if (widget.isOwner) 
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4.0),
-                    child: SizedBox(
-                      width: 24,
-                      height: 24, 
-                      child: _buildOptionsButton(),
-                    ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 4.0),
+                  child: SizedBox(
+                    width: 24,
+                    height: 24, 
+                    child: _buildOptionsButton(),
                   ),
+                ),
               ],
             ),
           ],
@@ -732,7 +785,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   Widget _buildOptionsButton() {
     return PopupMenuButton<String>(
-      padding: EdgeInsets.zero, // REMOVE PADDING
+      padding: EdgeInsets.zero,
       icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor, size: 18),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 4,
@@ -741,22 +794,33 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         if (value == 'edit') _showEditDialog();
         else if (value == 'delete') _deletePost();
         else if (value == 'pin') _togglePin(); 
+        else if (value == 'report') _reportPost();
+        else if (value == 'block') _blockUser();
       },
-      itemBuilder: (context) => [
-        PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
-        PopupMenuItem(
-          value: 'pin', 
-          child: Row(
-            children: [
-              Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
-              SizedBox(width: 12), 
-              Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")
-            ]
-          )
-        ),
-        PopupMenuDivider(),
-        PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post", style: TextStyle(color: Colors.red))])),
-      ],
+      itemBuilder: (context) {
+        if (widget.isOwner) {
+          return [
+            PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
+            PopupMenuItem(
+              value: 'pin', 
+              child: Row(
+                children: [
+                  Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
+                  SizedBox(width: 12), 
+                  Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")
+                ]
+              )
+            ),
+            PopupMenuDivider(),
+            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post", style: TextStyle(color: Colors.red))])),
+          ];
+        } else {
+          return [
+            PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Report Post")])),
+            PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text("Block User", style: TextStyle(color: Colors.red))])),
+          ];
+        }
+      },
     );
   }
 

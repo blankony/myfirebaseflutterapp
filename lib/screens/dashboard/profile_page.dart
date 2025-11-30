@@ -19,6 +19,7 @@ import '../image_viewer_screen.dart';
 import 'settings_page.dart';
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/moderation_service.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -47,6 +48,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   bool _isScrolled = false;
   bool _isBioExpanded = false;
+  
+  // Blocking State
+  bool _isBlocked = false;
 
   // Optimistic Pinning State
   String? _optimisticPinnedPostId; 
@@ -60,6 +64,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
     
+    _checkBlockedStatus();
+
     int initialIndex = 0;
     try {
       final savedIndex = PageStorage.of(context).readState(context, identifier: 'tab_index_$_userId');
@@ -87,6 +93,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _scrollController.addListener(_scrollListener);
   }
   
+  void _checkBlockedStatus() async {
+    if (_user == null) return;
+    // Listen to my blocked list
+    moderationService.streamBlockedUsers().listen((blockedList) {
+      if (mounted) {
+        setState(() {
+          _isBlocked = blockedList.contains(_userId);
+        });
+      }
+    });
+  }
+
   void _scrollListener() {
     if (_scrollController.hasClients) {
       final bool scrolled = _scrollController.offset > (120.0 - kToolbarHeight);
@@ -295,7 +313,58 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _shareProfile(String name) { Share.share("Check out $name's profile on Sapa PNJ!"); }
-  void _blockUser(String name) { OverlayService().showTopNotification(context, 'Blocked $name', Icons.block, (){}); }
+  
+  // NEW: Block/Unblock Logic
+  Future<void> _toggleBlock() async {
+    if (_isBlocked) {
+      await moderationService.unblockUser(_userId);
+      if(mounted) OverlayService().showTopNotification(context, "User unblocked", Icons.check_circle, (){});
+    } else {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text("Block User?"),
+          content: Text("They will not be able to follow you or see your posts."),
+          actions: [
+            TextButton(onPressed: ()=>Navigator.pop(ctx, false), child: Text("Cancel")),
+            TextButton(onPressed: ()=>Navigator.pop(ctx, true), child: Text("Block", style: TextStyle(color: Colors.red))),
+          ],
+        )
+      ) ?? false;
+      if (confirm) {
+        await moderationService.blockUser(_userId);
+        if(mounted) OverlayService().showTopNotification(context, "User blocked", Icons.block, (){});
+      }
+    }
+  }
+
+  void _reportUser() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: Text("Report User"),
+          children: [
+            SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text('Spam Account')),
+            SimpleDialogOption(onPressed: () => _submitReport('Impersonation'), child: Text('Impersonation')),
+            SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Profile'), child: Text('Inappropriate Profile')),
+            Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: ()=>Navigator.pop(context), child: Text("Cancel"))),
+          ],
+        );
+      }
+    );
+  }
+
+  void _submitReport(String reason) {
+    Navigator.pop(context);
+    moderationService.reportContent(
+      targetId: _userId, 
+      targetType: 'user', 
+      reason: reason
+    );
+    OverlayService().showTopNotification(context, "Report submitted.", Icons.flag, (){});
+  }
+
   Future<void> _signOut(BuildContext context) async {
     final didConfirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: Text('Sign Out'), content: Text('Are you sure?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel')), TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Sign Out', style: TextStyle(color: Colors.red)))])) ?? false;
     if (didConfirm) { await _auth.signOut(); if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst); }
@@ -388,31 +457,34 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               }
             ),
 
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _SliverAppBarDelegate(
-                TabBar(
-                  controller: _tabController,
-                  tabs: const [Tab(text: 'Posts'), Tab(text: 'Reposts'), Tab(text: 'Replies')],
-                  labelColor: theme.primaryColor,
-                  unselectedLabelColor: theme.hintColor,
-                  indicatorColor: theme.primaryColor,
-                  overlayColor: WidgetStateProperty.all(Colors.transparent),
-                  dividerColor: Colors.transparent, 
+            if (!_isBlocked)
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _SliverAppBarDelegate(
+                  TabBar(
+                    controller: _tabController,
+                    tabs: const [Tab(text: 'Posts'), Tab(text: 'Reposts'), Tab(text: 'Replies')],
+                    labelColor: theme.primaryColor,
+                    unselectedLabelColor: theme.hintColor,
+                    indicatorColor: theme.primaryColor,
+                    overlayColor: WidgetStateProperty.all(Colors.transparent),
+                    dividerColor: Colors.transparent, 
+                  ),
+                  isDarkMode ? Color(0xFF15202B) : TwitterTheme.white,
                 ),
-                isDarkMode ? Color(0xFF15202B) : TwitterTheme.white,
               ),
-            ),
           ];
         },
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            Builder(builder: (context) => _buildMyPosts(context, _userId)),
-            Builder(builder: (context) => _buildMyReposts(context, _userId)),
-            Builder(builder: (context) => _buildMyReplies(context, _userId)),
-          ],
-        ),
+        body: _isBlocked 
+            ? _buildBlockedBody()
+            : TabBarView(
+                controller: _tabController,
+                children: [
+                  Builder(builder: (context) => _buildMyPosts(context, _userId)),
+                  Builder(builder: (context) => _buildMyReposts(context, _userId)),
+                  Builder(builder: (context) => _buildMyReplies(context, _userId)),
+                ],
+              ),
       ),
     );
 
@@ -429,11 +501,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         if (value == 'share') _shareProfile(name);
         if (value == 'settings') Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsPage()));
         if (value == 'logout') _signOut(context);
-        if (value == 'block') _blockUser(name);
+        if (value == 'block') _toggleBlock();
+        if (value == 'report') _reportUser();
       },
       itemBuilder: (context) => isMyProfile 
         ? [PopupMenuItem(value: 'share', child: Text('Share Profile')), PopupMenuItem(value: 'settings', child: Text('Settings')), PopupMenuItem(value: 'logout', child: Text('Logout', style: TextStyle(color: Colors.red)))]
-        : [PopupMenuItem(value: 'share', child: Text('Share Account')), PopupMenuItem(value: 'block', child: Text('Block', style: TextStyle(color: Colors.red)))],
+        : [
+            PopupMenuItem(value: 'share', child: Text('Share Account')), 
+            PopupMenuItem(value: 'report', child: Text('Report User')),
+            PopupMenuItem(value: 'block', child: Text(_isBlocked ? 'Unblock' : 'Block', style: TextStyle(color: Colors.red))),
+          ],
     );
   }
 
@@ -456,7 +533,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           child: GestureDetector(
             onTap: () { 
               if(isMyProfile) _showBannerOptions(context, bannerImageUrl, 'banner'); 
-              else if(bannerImageUrl!=null) _openFullImage(context, bannerImageUrl, 'banner'); 
+              else if(bannerImageUrl!=null && !_isBlocked) _openFullImage(context, bannerImageUrl, 'banner'); 
             },
             child: Hero(
               tag: 'banner', 
@@ -475,7 +552,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           top: 120, 
           left: 16,
           child: GestureDetector(
-            onTap: () { if(isMyProfile) _showProfileOptions(context, profileImageUrl, 'avatar'); else if(profileImageUrl!=null) _openFullImage(context, profileImageUrl, 'avatar'); },
+            onTap: () { 
+              if(isMyProfile) _showProfileOptions(context, profileImageUrl, 'avatar'); 
+              else if(profileImageUrl!=null && !_isBlocked) _openFullImage(context, profileImageUrl, 'avatar'); 
+            },
             child: Hero(tag: 'avatar', child: Stack(children: [
               CircleAvatar(radius: 49, backgroundColor: theme.scaffoldBackgroundColor, child: _buildAvatarImage(data)),
               if (isMyProfile) Positioned(bottom: 0, right: 0, child: Container(padding: EdgeInsets.all(6), decoration: BoxDecoration(color: TwitterTheme.blue, shape: BoxShape.circle, border: Border.all(color: theme.scaffoldBackgroundColor, width: 2)), child: Icon(Icons.camera_alt, size: 14, color: Colors.white)))
@@ -497,7 +577,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ],
               isMyProfile 
               ? OutlinedButton(onPressed: () async { if(await Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfileScreen())) == true) setState((){}); }, child: Text("Edit Profile"), style: OutlinedButton.styleFrom(shape: StadiumBorder()))
-              : _buildFollowButton(data['followers'] ?? [])
+              : _isBlocked 
+                ? ElevatedButton(onPressed: _toggleBlock, child: Text("Unblock"), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white))
+                : _buildFollowButton(data['followers'] ?? [])
             ],
           ),
         ),
@@ -517,14 +599,35 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22)),
         Text(handle, style: theme.textTheme.titleSmall),
         SizedBox(height: 8),
-        Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge),
-        if ((data['bio'] ?? '').length > 100) GestureDetector(onTap: () => setState(() => _isBioExpanded = !_isBioExpanded), child: Text(_isBioExpanded ? "Show less" : "Read more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold))),
-        SizedBox(height: 8),
-        Row(children: [Icon(Icons.calendar_today, size: 14, color: theme.hintColor), SizedBox(width: 4), Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall)]),
-        SizedBox(height: 8),
-        Row(children: [_buildStatText(context, (data['following'] ?? []).length, "Following"), SizedBox(width: 16), _buildStatText(context, (data['followers'] ?? []).length, "Followers")]),
-        SizedBox(height: 16),
+        if (!_isBlocked) ...[
+          Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge),
+          if ((data['bio'] ?? '').length > 100) GestureDetector(onTap: () => setState(() => _isBioExpanded = !_isBioExpanded), child: Text(_isBioExpanded ? "Show less" : "Read more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold))),
+          SizedBox(height: 8),
+          Row(children: [Icon(Icons.calendar_today, size: 14, color: theme.hintColor), SizedBox(width: 4), Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall)]),
+          SizedBox(height: 8),
+          Row(children: [_buildStatText(context, (data['following'] ?? []).length, "Following"), SizedBox(width: 16), _buildStatText(context, (data['followers'] ?? []).length, "Followers")]),
+          SizedBox(height: 16),
+        ]
       ])
+    );
+  }
+
+  Widget _buildBlockedBody() {
+    return Container(
+      alignment: Alignment.center,
+      padding: EdgeInsets.all(32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.block, size: 64, color: Colors.grey),
+          SizedBox(height: 16),
+          Text("You have blocked this user.", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          SizedBox(height: 8),
+          Text("You cannot see their posts or interact with them.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          SizedBox(height: 16),
+          OutlinedButton(onPressed: _toggleBlock, child: Text("Unblock"))
+        ],
+      ),
     );
   }
 
