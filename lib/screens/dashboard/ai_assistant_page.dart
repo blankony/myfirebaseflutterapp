@@ -2,17 +2,287 @@
 import 'dart:async';
 import 'dart:ui';
 import 'dart:math';
+import 'dart:io'; // REQUIRED for Platform check
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // REQUIRED for Clipboard
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:share_plus/share_plus.dart'; // REQUIRED for Share
 import '../../main.dart';
 import '../../services/ai_event_bus.dart';
 import '../../widgets/common_error_widget.dart';
+import '../../services/overlay_service.dart';
 
+// --- ENHANCED LANGUAGE DETECTOR ---
+class LanguageDetector {
+  // Indonesian indicators (expanded)
+  static const Set<String> _idWords = {
+    // Pronouns
+    'aku', 'kamu', 'dia', 'kita', 'kami', 'mereka', 'saya', 'anda', 'kalian',
+    'gue', 'lu', 'elo', 'gw', 'lo', 'beliau',
+    
+    // Common particles (VERY strong indicators)
+    'yang', 'nya', 'di', 'ke', 'dari', 'pada', 'untuk', 'buat',
+    'dan', 'atau', 'tapi', 'tetapi', 'karena', 'jika', 'kalau',
+    
+    // Verbs & auxiliaries
+    'ada', 'adalah', 'ialah', 'jadi', 'bisa', 'dapat', 'mau', 'ingin',
+    'akan', 'sudah', 'telah', 'belum', 'pernah', 'harus', 'bantu', 'tolong',
+    'minta', 'ngetes',
+    
+    // Negation
+    'tidak', 'tak', 'bukan', 'jangan', 'gak', 'nggak', 'kagak', 'enggak',
+    
+    // Questions
+    'apa', 'siapa', 'kapan', 'dimana', 'kemana', 'kenapa', 'mengapa',
+    'bagaimana', 'berapa', 'mana', 'ngapain', 'gimana',
+    
+    // Time & quantity
+    'hari', 'besok', 'kemarin', 'sekarang', 'nanti', 'tadi',
+    'banyak', 'sedikit', 'semua',
+    
+    // Greetings
+    'halo', 'hai', 'selamat', 'pagi', 'siang', 'sore', 'malam', 'terima', 'kasih',
+    
+    // Colloquial
+    'dong', 'sih', 'deh', 'kok', 'yuk', 'nih', 'tuh', 'lain', 'lainnya'
+  };
+
+  // English common words (for better differentiation)
+  static const Set<String> _enWords = {
+    'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did',
+    'will', 'would', 'should', 'could', 'can', 'may', 'might',
+    'what', 'where', 'when', 'why', 'how', 'who', 'which',
+    'this', 'that', 'these', 'those',
+    'not', 'no', 'yes',
+  };
+
+  /// Detects language from text with improved accuracy
+  static String detect(String text) {
+    if (text.trim().isEmpty) return 'en-US';
+    
+    final cleanText = text.toLowerCase().trim();
+    
+    // Score counters
+    int idScore = 0;
+    int enScore = 0;
+    
+    // 1. Check for strong Indonesian affixes (highest priority)
+    if (RegExp(r'\b(meng|peng|ber|ter|ke|se)\w+').hasMatch(cleanText)) idScore += 3;
+    if (RegExp(r'\w+nya\b').hasMatch(cleanText)) idScore += 3;
+    if (RegExp(r'\bdi\s+\w+').hasMatch(cleanText)) idScore += 2; // "di rumah", "di sini"
+    
+    // 2. Tokenize and check word matches
+    final words = cleanText
+        .replaceAll(RegExp(r'[^\w\s]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length > 1) // Ignore single chars
+        .toList();
+    
+    for (var word in words) {
+      if (_idWords.contains(word)) {
+        idScore += 2;
+      }
+      if (_enWords.contains(word)) {
+        enScore += 2;
+      }
+    }
+    
+    // 3. Character pattern analysis
+    // Indonesian uses fewer consecutive consonants
+    if (RegExp(r'[bcdfghjklmnpqrstvwxyz]{4,}').hasMatch(cleanText)) {
+      enScore += 1; // English tends to have more consonant clusters
+    }
+    
+    // 4. Decision logic
+    if (idScore > enScore) {
+      return 'id-ID';
+    } else if (enScore > idScore) {
+      return 'en-US';
+    }
+    
+    // 5. Fallback: Check if text contains any Indonesian particles
+    if (RegExp(r'\b(yang|nya|di|ke|dari|untuk|dan)\b').hasMatch(cleanText)) {
+      return 'id-ID';
+    }
+    
+    return 'en-US'; // Default
+  }
+}
+
+// --- TTS MANAGER WITH ROBUST ERROR HANDLING ---
+class TTSManager {
+  final FlutterTts _tts = FlutterTts();
+  bool _isInitialized = false;
+  Map<String, dynamic>? _availableVoices;
+  
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    
+    try {
+      // Basic TTS settings
+      await _tts.setSpeechRate(0.5);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.0);
+      
+      // Cache available voices
+      _availableVoices = await _getAvailableVoices();
+      
+      // Platform-specific setup
+      if (Platform.isAndroid) {
+        await _tts.awaitSpeakCompletion(true);
+      }
+
+      // Setup Handlers
+      _tts.setCompletionHandler(() {
+        OverlayService().hideAudioPlayer();
+      });
+      _tts.setCancelHandler(() {
+        OverlayService().hideAudioPlayer();
+      });
+      
+      _isInitialized = true;
+      debugPrint("TTS Initialized successfully");
+    } catch (e) {
+      debugPrint("TTS Initialization Error: $e");
+    }
+  }
+  
+  Future<Map<String, dynamic>> _getAvailableVoices() async {
+    try {
+      final voices = await _tts.getVoices;
+      final Map<String, dynamic> voiceMap = {
+        'id-ID': [],
+        'en-US': [],
+        'en-GB': [],
+      };
+      
+      if (voices != null && voices is List) {
+        for (var voice in voices) {
+          if (voice is Map) {
+            final locale = voice['locale']?.toString() ?? '';
+            final name = voice['name']?.toString() ?? '';
+            
+            if (locale.startsWith('id') || name.contains('Indonesia')) {
+              voiceMap['id-ID']!.add(voice);
+            } else if (locale.startsWith('en-US') || name.contains('United States')) {
+              voiceMap['en-US']!.add(voice);
+            } else if (locale.startsWith('en')) {
+              voiceMap['en-GB']!.add(voice);
+            }
+          }
+        }
+      }
+      
+      debugPrint("Available voices: ${voiceMap.keys.where((k) => voiceMap[k]!.isNotEmpty).join(', ')}");
+      return voiceMap;
+    } catch (e) {
+      debugPrint("Voice enumeration failed: $e");
+      return {};
+    }
+  }
+  
+  Future<void> speak(BuildContext context, String text) async {
+    if (!_isInitialized) await initialize();
+    if (text.trim().isEmpty) return;
+    
+    try {
+      await _tts.stop();
+      
+      // 1. Detect language
+      final detectedLang = LanguageDetector.detect(text);
+      debugPrint("Detected language: $detectedLang");
+      
+      // 2. Set language with fallback chain
+      bool success = await _setLanguageWithFallback(detectedLang);
+      
+      if (!success) {
+        debugPrint("No suitable voice found, using system default");
+        // Ensure we at least try to set the language code
+        await _tts.setLanguage(detectedLang);
+      }
+      
+      // 3. Clean text (remove markdown)
+      final cleanText = text
+          .replaceAll(RegExp(r'[*#_`~\[\]()]'), '')
+          .replaceAll(RegExp(r'\n+'), '. ')
+          .trim();
+      
+      if (cleanText.isEmpty) return;
+      
+      // 4. Show player overlay
+      OverlayService().showAudioPlayer(context, () async {
+        await _tts.stop();
+      });
+      
+      // 5. Speak
+      debugPrint("Speaking: ${cleanText.substring(0, min(50, cleanText.length))}...");
+      await _tts.speak(cleanText);
+      
+    } catch (e) {
+      debugPrint("TTS Speak Error: $e");
+      OverlayService().hideAudioPlayer();
+    }
+  }
+  
+  Future<bool> _setLanguageWithFallback(String targetLang) async {
+    // Fallback chain: target -> en-US -> en-GB -> system default
+    final fallbackChain = [
+      targetLang,
+      if (targetLang != 'en-US') 'en-US',
+      'en-GB',
+    ];
+    
+    for (String lang in fallbackChain) {
+      try {
+        // Check if language is available
+        final isAvailable = await _tts.isLanguageAvailable(lang);
+        
+        if (isAvailable) {
+          await _tts.setLanguage(lang);
+          
+          // Try to set a specific voice if available
+          if (Platform.isAndroid && _availableVoices != null) {
+            final voices = _availableVoices![lang] as List?;
+            if (voices != null && voices.isNotEmpty) {
+              try {
+                await _tts.setVoice(voices.first);
+                debugPrint("Voice set: ${voices.first['name']} ($lang)");
+              } catch (e) {
+                debugPrint("Voice selection failed, using language default");
+              }
+            }
+          }
+          
+          debugPrint("Language set: $lang");
+          return true;
+        }
+      } catch (e) {
+        debugPrint("Failed to set $lang: $e");
+      }
+    }
+    
+    return false;
+  }
+  
+  Future<void> stop() async {
+    await _tts.stop();
+    OverlayService().hideAudioPlayer();
+  }
+  
+  void dispose() {
+    _tts.stop();
+    OverlayService().hideAudioPlayer();
+  }
+}
+
+// --- MAIN PAGE ---
 class AiAssistantPage extends StatefulWidget {
   const AiAssistantPage({super.key});
 
@@ -37,6 +307,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   
   late AnimationController _typingController;
 
+  // --- TEXT TO SPEECH MANAGER ---
+  late TTSManager _ttsManager;
+
   // Randomized Suggestions Data
   final List<Map<String, dynamic>> _allSuggestions = [
     {'text': "What is PNJ?", 'icon': Icons.school_outlined},
@@ -52,7 +325,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   ];
   late List<Map<String, dynamic>> _activeSuggestions;
 
-  // System instruction updated to "Spirit AI"
   final Content _systemInstruction = Content.system("""
       You are "Spirit AI", a friendly, intelligent, and spirited virtual assistant for the Politeknik Negeri Jakarta (PNJ) community app "Sapa PNJ".
       
@@ -73,7 +345,10 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     super.initState();
     _initModel();
     
-    // Randomize suggestions
+    // Initialize TTS Manager
+    _ttsManager = TTSManager();
+    _ttsManager.initialize();
+    
     _allSuggestions.shuffle();
     _activeSuggestions = _allSuggestions.take(3).toList();
     
@@ -97,7 +372,23 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     _textController.dispose();
     _scrollController.dispose();
     _typingController.dispose();
+    _ttsManager.dispose();
     super.dispose();
+  }
+
+  // --- TTS HELPER ---
+  Future<void> _speak(String text) async {
+    await _ttsManager.speak(context, text);
+  }
+  
+  // --- ACTION HANDLERS ---
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    OverlayService().showTopNotification(context, "Copied to clipboard", Icons.copy_rounded, (){});
+  }
+
+  void _shareResponse(String text) {
+    Share.share(text);
   }
 
   void _initModel() {
@@ -124,9 +415,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
       _isTyping = false;
       _hasConnectionError = false;
       _chatSession = _model.startChat();
-      // Reshuffle suggestions on new chat
       _allSuggestions.shuffle();
       _activeSuggestions = _allSuggestions.take(3).toList();
+      _ttsManager.stop();
     });
   }
 
@@ -203,6 +494,8 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   Future<void> _handleSubmitted(String text) async {
     _textController.clear();
     if (text.trim().isEmpty) return;
+    
+    _ttsManager.stop();
 
     final user = FirebaseAuth.instance.currentUser;
 
@@ -235,6 +528,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
           ));
         });
         _scrollToBottom();
+        
+        // Auto-speak the response
+        _speak(aiText);
 
         if (user != null) {
           await _saveMessageToFirestore(user.uid, aiText, false);
@@ -298,13 +594,10 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     });
   }
 
-  // --- HANDLER FOR SWIPE NAVIGATION ---
   void _handleHorizontalSwipe(DragEndDetails details) {
     if (details.primaryVelocity! > 0) {
-      // Swiping Right -> Open Left Drawer (Side Panel)
       Scaffold.of(context).openDrawer();
     } else if (details.primaryVelocity! < 0) {
-      // Swiping Left -> Open Right Drawer (History)
       Scaffold.of(context).openEndDrawer();
     }
   }
@@ -328,13 +621,12 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
       );
     }
 
-    // WRAP WITH GESTURE DETECTOR FOR SWIPE
     return GestureDetector(
       onHorizontalDragEnd: _handleHorizontalSwipe,
       child: Scaffold(
         body: Stack(
           children: [
-            // Only show background decoration when chat is empty
+            // Background Decoration
             if (_messages.isEmpty) ...[
                Positioned(
                 top: -100,
@@ -381,15 +673,13 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   Widget _buildEmptyState(ThemeData theme, bool isDark) {
     return SingleChildScrollView(
       child: Container(
-        height: MediaQuery.of(context).size.height, // Full height for centering
+        height: MediaQuery.of(context).size.height, 
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Added Top Padding for AppBar overlap
             SizedBox(height: kToolbarHeight + 40), 
-
-            // LOGO
+            
             Container(
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -408,7 +698,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
             
             const SizedBox(height: 32),
             
-            // TITLE
             Text(
               "Spirit AI",
               style: theme.textTheme.displayMedium?.copyWith(
@@ -426,7 +715,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
             
             const SizedBox(height: 40),
             
-            // SHORTCUTS (Randomized)
             Column(
               children: _activeSuggestions.map((suggestion) {
                 return Padding(
@@ -488,14 +776,18 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   Widget _buildChatList(ThemeData theme, bool isDark) {
     return ListView.builder(
       controller: _scrollController,
-      // Added Top padding to avoid collision with transparent AppBar
       padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 60, 16, 16),
       itemCount: _messages.length + (_isTyping ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _messages.length) {
           return _buildTypingIndicator(theme);
         }
-        return _ChatBubble(message: _messages[index]);
+        return _ChatBubble(
+          message: _messages[index],
+          onSpeak: _speak,
+          onCopy: _copyToClipboard,
+          onShare: _shareResponse,
+        );
       },
     );
   }
@@ -537,12 +829,13 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
 
   Widget _buildInputArea(ThemeData theme, bool isDark) {
     return Container(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
+      padding: EdgeInsets.fromLTRB(12, 12, 16, MediaQuery.of(context).padding.bottom + 12),
       decoration: BoxDecoration(
         color: theme.scaffoldBackgroundColor,
       ),
       child: Row(
         children: [
+          // Expanded Input
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -595,7 +888,16 @@ class ChatMessage {
 
 class _ChatBubble extends StatelessWidget {
   final ChatMessage message;
-  const _ChatBubble({required this.message});
+  final Function(String) onSpeak;
+  final Function(String) onCopy;
+  final Function(String) onShare;
+
+  const _ChatBubble({
+    required this.message,
+    required this.onSpeak,
+    required this.onCopy,
+    required this.onShare,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -621,44 +923,65 @@ class _ChatBubble extends StatelessWidget {
             SizedBox(width: 10),
           ],
           Flexible(
-            child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(24),
-                  topRight: Radius.circular(24),
-                  bottomLeft: isUser ? Radius.circular(24) : Radius.circular(4),
-                  bottomRight: isUser ? Radius.circular(4) : Radius.circular(24),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 8,
-                    offset: Offset(0, 4),
-                  )
-                ],
-              ),
-              child: MarkdownBody(
-                data: message.text,
-                selectable: true,
-                styleSheet: MarkdownStyleSheet(
-                  p: TextStyle(color: textColor, fontSize: 15, height: 1.5),
-                  strong: TextStyle(color: textColor, fontWeight: FontWeight.bold),
-                  listBullet: TextStyle(color: textColor),
-                  code: TextStyle(
-                    color: isUser ? Colors.white70 : theme.primaryColor,
-                    backgroundColor: isUser ? Colors.black26 : theme.scaffoldBackgroundColor,
-                    fontFamily: 'monospace',
-                    fontSize: 13,
+            child: Column(
+              crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(24),
+                      topRight: Radius.circular(24),
+                      bottomLeft: isUser ? Radius.circular(24) : Radius.circular(4),
+                      bottomRight: isUser ? Radius.circular(4) : Radius.circular(24),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 8,
+                        offset: Offset(0, 4),
+                      )
+                    ],
                   ),
-                  blockquote: TextStyle(color: isUser ? Colors.white70 : theme.hintColor),
-                  blockquoteDecoration: BoxDecoration(
-                    border: Border(left: BorderSide(color: isUser ? Colors.white30 : theme.dividerColor, width: 3))
+                  child: MarkdownBody(
+                    data: message.text,
+                    selectable: true,
+                    styleSheet: MarkdownStyleSheet(
+                      p: TextStyle(color: textColor, fontSize: 15, height: 1.5),
+                      strong: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+                      listBullet: TextStyle(color: textColor),
+                      code: TextStyle(
+                        color: isUser ? Colors.white70 : theme.primaryColor,
+                        backgroundColor: isUser ? Colors.black26 : theme.scaffoldBackgroundColor,
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                      ),
+                      blockquote: TextStyle(color: isUser ? Colors.white70 : theme.hintColor),
+                      blockquoteDecoration: BoxDecoration(
+                        border: Border(left: BorderSide(color: isUser ? Colors.white30 : theme.dividerColor, width: 3))
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                
+                // ACTION BUTTONS FOR AI REPLIES ONLY
+                if (!isUser)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildActionIcon(context, Icons.volume_up_rounded, () => onSpeak(message.text)),
+                        SizedBox(width: 16),
+                        _buildActionIcon(context, Icons.copy_rounded, () => onCopy(message.text)),
+                        SizedBox(width: 16),
+                        _buildActionIcon(context, Icons.share_rounded, () => onShare(message.text)),
+                      ],
+                    ),
+                  ),
+              ],
             ),
           ),
           if (isUser) ...[
@@ -666,6 +989,21 @@ class _ChatBubble extends StatelessWidget {
              _UserAvatar(),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionIcon(BuildContext context, IconData icon, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.all(4.0),
+        child: Icon(
+          icon,
+          size: 18,
+          color: Theme.of(context).hintColor.withOpacity(0.6),
+        ),
       ),
     );
   }

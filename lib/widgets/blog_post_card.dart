@@ -245,12 +245,16 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   VideoPlayerController? _videoController;
   bool _isVideoOwner = false; 
+  
+  // Bookmark State
+  bool _isBookmarked = false;
 
   @override
   void initState() {
     super.initState();
     _localIsPinned = widget.isPinned; 
     _syncState();
+    _checkBookmarkStatus();
     _initVideoController();
     
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
@@ -321,6 +325,28 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       });
     }
   }
+  
+  void _checkBookmarkStatus() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('bookmarks')
+          .doc(widget.postId)
+          .get();
+          
+      if (mounted) {
+        setState(() {
+          _isBookmarked = doc.exists;
+        });
+      }
+    } catch (e) {
+      // Silent error
+    }
+  }
 
   @override
   void dispose() {
@@ -377,6 +403,34 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
       }
     } catch (e) { _syncState(); }
+  }
+  
+  void _toggleBookmark() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    
+    setState(() {
+      _isBookmarked = !_isBookmarked;
+    });
+    
+    if (hapticNotifier.value) HapticFeedback.lightImpact();
+    
+    final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
+    
+    try {
+      if (_isBookmarked) {
+        await docRef.set({
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+        if(mounted) OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, (){});
+      } else {
+        await docRef.delete();
+        if(mounted) OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, (){});
+      }
+    } catch (e) {
+      // Revert on error
+      setState(() => _isBookmarked = !_isBookmarked);
+    }
   }
 
   void _sharePost() {
@@ -833,6 +887,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           _buildActionButton(Icons.chat_bubble_outline, commentCount.toString(), null, _navigateToDetail),
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
+          _buildActionButton(_isBookmarked ? Icons.bookmark : Icons.bookmark_border, null, _isBookmarked ? TwitterTheme.blue : null, _toggleBookmark), // Added Bookmark button
           _buildActionButton(Icons.share_outlined, null, _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
@@ -847,6 +902,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         children: [
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
+          _buildActionButton(_isBookmarked ? Icons.bookmark : Icons.bookmark_border, null, _isBookmarked ? TwitterTheme.blue : null, _toggleBookmark), // Added Bookmark button
           _buildActionButton(Icons.share_outlined, 'Share', _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),

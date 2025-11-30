@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart'; // REQUIRED
 import '../main.dart';
 import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
+import '../screens/saved_posts_screen.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -227,6 +228,10 @@ class _SidePanelState extends State<SidePanel> {
                 ListTile(leading: Icon(Icons.account_circle_outlined), title: Text('Account Center'), onTap: () {
                   Navigator.pop(context); 
                   Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
+                }),
+                ListTile(leading: Icon(Icons.bookmark_border), title: Text('Saved'), onTap: () {
+                  Navigator.pop(context); 
+                  Navigator.of(context).push(_createSlideUpRoute(SavedPostsScreen()));
                 }),
                 ListTile(leading: Icon(Icons.settings_outlined), title: Text('More Settings'), onTap: () {
                   Navigator.pop(context); 

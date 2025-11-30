@@ -8,11 +8,12 @@ class OverlayService {
   OverlayService._internal();
 
   OverlayEntry? _overlayEntry;
+  OverlayEntry? _audioOverlayEntry; // Separate entry for Audio Player
   Timer? _timer;
 
+  // --- STANDARD NOTIFICATION (AUTO-HIDE) ---
   void showTopNotification(BuildContext context, String message, IconData icon, VoidCallback onTap, {Color? color}) {
-    // Remove existing overlay if any
-    hideOverlay();
+    hideOverlay(); // Clear previous standard notification
 
     OverlayState? overlayState = Overlay.of(context);
     _overlayEntry = OverlayEntry(
@@ -28,10 +29,8 @@ class OverlayService {
       ),
     );
 
-    // Insert the entry into the overlay
     overlayState.insert(_overlayEntry!);
 
-    // Auto-hide after 4 seconds
     _timer = Timer(const Duration(seconds: 4), () {
       hideOverlay();
     });
@@ -41,6 +40,76 @@ class OverlayService {
     _timer?.cancel();
     _overlayEntry?.remove();
     _overlayEntry = null;
+  }
+
+  // --- AUDIO PLAYER OVERLAY (PERSISTENT) ---
+  void showAudioPlayer(BuildContext context, VoidCallback onStop) {
+    // Don't show if already showing to prevent duplicates
+    if (_audioOverlayEntry != null) return;
+
+    OverlayState? overlayState = Overlay.of(context);
+    _audioOverlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 60, // Below standard notification
+        left: 0,
+        right: 0,
+        child: Material(
+          color: Colors.transparent,
+          child: Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: TwitterTheme.blue, // Brand color
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  )
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Pulse animation could go here, keeping it simple for now
+                  const Icon(Icons.graphic_eq, color: Colors.white, size: 20),
+                  const SizedBox(width: 12),
+                  const Text(
+                    "Spirit AI Speaking...",
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 1, 
+                    height: 20, 
+                    color: Colors.white.withOpacity(0.3)
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.stop_circle_outlined, color: Colors.white),
+                    iconSize: 24,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(), // Tight layout
+                    onPressed: () {
+                      onStop();
+                      hideAudioPlayer();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlayState.insert(_audioOverlayEntry!);
+  }
+
+  void hideAudioPlayer() {
+    _audioOverlayEntry?.remove();
+    _audioOverlayEntry = null;
   }
 }
 
