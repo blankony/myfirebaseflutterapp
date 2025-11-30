@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_const_constructors
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
@@ -6,7 +7,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../main.dart';
-import '../../services/ai_event_bus.dart'; // IMPORT BARU (GANTI home_dashboard.dart)
+import '../../services/ai_event_bus.dart'; 
+import '../../widgets/common_error_widget.dart'; // REQUIRED
 
 class AiAssistantPage extends StatefulWidget {
   const AiAssistantPage({super.key});
@@ -21,6 +23,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
   bool _isLoadingHistory = false;
+  bool _hasConnectionError = false;
 
   String? _currentSessionId;
   StreamSubscription? _eventBusSubscription;
@@ -40,7 +43,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     super.initState();
     _initModel();
 
-    // LISTEN EVENT BUS
     _eventBusSubscription = aiPageEventBus.stream.listen((event) {
       if (event.type == AiEventType.newChat) {
         _startNewChat();
@@ -57,7 +59,10 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   }
 
   void _initModel() {
-    if (_apiKey.isEmpty) return;
+    if (_apiKey.isEmpty) {
+      // In production, handle missing API key better
+      return;
+    }
     try {
       _model = GenerativeModel(
         model: 'gemini-1.5-flash', 
@@ -66,7 +71,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       );
       _chatSession = _model.startChat();
     } catch (e) {
-      print('Model Error: $e');
+      setState(() => _hasConnectionError = true);
     }
   }
 
@@ -75,6 +80,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       _messages.clear();
       _currentSessionId = null;
       _isTyping = false;
+      _hasConnectionError = false;
       _chatSession = _model.startChat();
     });
   }
@@ -86,6 +92,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     setState(() {
       _isLoadingHistory = true;
       _messages.clear();
+      _hasConnectionError = false;
       _currentSessionId = sessionId;
     });
 
@@ -141,8 +148,10 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
 
       _scrollToBottom();
     } catch (e) {
-      print("Error loading history: $e");
-      setState(() => _isLoadingHistory = false);
+      setState(() {
+        _isLoadingHistory = false;
+        _hasConnectionError = true;
+      });
     }
   }
 
@@ -159,6 +168,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
         timestamp: DateTime.now(),
       ));
       _isTyping = true;
+      _hasConnectionError = false;
     });
     _scrollToBottom();
 
@@ -189,8 +199,10 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
       if (mounted) {
         setState(() {
           _isTyping = false;
+          // Don't add error message to chat history, just show retry UI or snackbar?
+          // For now, simpler to add a system message
           _messages.add(ChatMessage(
-            text: "Error: $e",
+            text: "Koneksi terputus. Silakan coba lagi nanti.",
             isUser: false,
             timestamp: DateTime.now(),
           ));
@@ -201,30 +213,34 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   }
 
   Future<void> _saveMessageToFirestore(String uid, String text, bool isUser) async {
-    final sessionsRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('chat_sessions');
+    try {
+      final sessionsRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('chat_sessions');
 
-    if (_currentSessionId == null) {
-      String title = text.replaceAll('\n', ' ');
-      if (title.length > 30) title = "${title.substring(0, 30)}...";
-      if (!isUser) title = "Chat Baru"; 
+      if (_currentSessionId == null) {
+        String title = text.replaceAll('\n', ' ');
+        if (title.length > 30) title = "${title.substring(0, 30)}...";
+        if (!isUser) title = "Chat Baru"; 
 
-      final newSession = await sessionsRef.add({
-        'title': title,
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastUpdated': FieldValue.serverTimestamp(),
+        final newSession = await sessionsRef.add({
+          'title': title,
+          'createdAt': FieldValue.serverTimestamp(),
+          'lastUpdated': FieldValue.serverTimestamp(),
+        });
+        _currentSessionId = newSession.id;
+      } else {
+        sessionsRef.doc(_currentSessionId).update({
+          'lastUpdated': FieldValue.serverTimestamp(),
+        });
+      }
+
+      await sessionsRef.doc(_currentSessionId).collection('messages').add({
+        'text': text,
+        'isUser': isUser,
+        'timestamp': FieldValue.serverTimestamp(),
       });
-      _currentSessionId = newSession.id;
-    } else {
-      sessionsRef.doc(_currentSessionId).update({
-        'lastUpdated': FieldValue.serverTimestamp(),
-      });
+    } catch (e) {
+      // Silent fail on save (offline support via Firebase cache handles this mostly)
     }
-
-    await sessionsRef.doc(_currentSessionId).collection('messages').add({
-      'text': text,
-      'isUser': isUser,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
   }
 
   void _scrollToBottom() {
@@ -245,6 +261,16 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
 
     if (_isLoadingHistory) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_hasConnectionError && _messages.isEmpty) {
+      return Scaffold(
+        body: CommonErrorWidget(
+          message: "Unable to connect to AI Assistant.",
+          isConnectionError: true,
+          onRetry: () => _startNewChat(),
+        ),
+      );
     }
 
     return Scaffold(

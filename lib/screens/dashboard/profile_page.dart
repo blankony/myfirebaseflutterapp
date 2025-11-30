@@ -13,13 +13,15 @@ import 'package:image_cropper/image_cropper.dart';
 // Ensure these imports match your actual file structure
 import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
+import '../../widgets/common_error_widget.dart'; // REQUIRED for offline handling
 import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../image_viewer_screen.dart';
 import 'settings_page.dart';
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../../services/moderation_service.dart'; // REQUIRED
+import '../../services/moderation_service.dart'; // REQUIRED for blocking
+import '../follow_list_screen.dart'; // REQUIRED for following lists
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -66,31 +68,38 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     
     _checkBlockedStatus();
 
-    int initialIndex = 0;
-    try {
-      final savedIndex = PageStorage.of(context).readState(context, identifier: 'tab_index_$_userId');
-      if (savedIndex != null && savedIndex is int) {
-        initialIndex = savedIndex;
-      }
-    } catch (_) {}
-
+    // Always start at index 0 (Posts tab)
     _tabController = TabController(
       length: 3, 
       vsync: this, 
-      initialIndex: initialIndex, 
+      initialIndex: 0,
     );
-
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging) {
-        PageStorage.of(context).writeState(
-          context, 
-          _tabController.index, 
-          identifier: 'tab_index_$_userId'
-        );
-      }
+    
+    // NUCLEAR FIX: Force immediate tab reset MULTIPLE times
+    // This overrides any PageStorage/KeepAlive restoration
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _tabController.index = 0;
+    });
+    
+    Future.delayed(Duration(milliseconds: 50), () {
+      if (mounted) _tabController.index = 0;
+    });
+    
+    Future.delayed(Duration(milliseconds: 100), () {
+      if (mounted) _tabController.index = 0;
     });
     
     _scrollController.addListener(_scrollListener);
+  }
+
+  // ALSO ADD THIS: Override reassemble (called on hot reload)
+  @override
+  void reassemble() {
+    super.reassemble();
+    // Reset to Posts tab on hot reload
+    if (_tabController.index != 0) {
+      _tabController.index = 0;
+    }
   }
   
   void _checkBlockedStatus() async {
@@ -122,6 +131,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     setState(() {
       _optimisticPinnedPostId = isPinned ? postId : ''; 
     });
+    
+    // Show overlay notification
+    if (isPinned) {
+      OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
+    } else {
+      OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
+    }
   }
 
   void _openFullImage(BuildContext context, String url, String heroTag) {
@@ -411,6 +427,20 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             StreamBuilder<DocumentSnapshot>(
               stream: _firestore.collection('users').doc(_userId).snapshots(),
               builder: (context, snapshot) {
+                // --- ERROR HANDLING FOR USER PROFILE HEADER ---
+                if (snapshot.hasError) {
+                  return SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: 200,
+                      child: CommonErrorWidget(
+                        message: "Unable to load profile header.",
+                        isConnectionError: true,
+                        onRetry: () => setState(() {}),
+                      ),
+                    ),
+                  );
+                }
+                
                 final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
                 
                 return SliverAppBar(
@@ -450,6 +480,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             StreamBuilder<DocumentSnapshot>(
               stream: _firestore.collection('users').doc(_userId).snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) return SliverToBoxAdapter(child: SizedBox.shrink()); // Error handled in header
                 final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
                 return SliverToBoxAdapter(
                   child: _buildProfileInfoBody(context, data),
@@ -540,7 +571,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               child: Container(
                 color: TwitterTheme.darkGrey, 
                 child: bannerImageUrl != null 
-                  ? CachedNetworkImage(imageUrl: bannerImageUrl, fit: BoxFit.cover) 
+                  ? CachedNetworkImage(imageUrl: bannerImageUrl, fit: BoxFit.cover, errorWidget: (context, url, error) => Container(color: TwitterTheme.darkGrey)) 
                   : (isMyProfile ? Center(child: Icon(Icons.camera_alt, color: Colors.white)) : null)
               )
             ),
@@ -605,7 +636,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           SizedBox(height: 8),
           Row(children: [Icon(Icons.calendar_today, size: 14, color: theme.hintColor), SizedBox(width: 4), Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall)]),
           SizedBox(height: 8),
-          Row(children: [_buildStatText(context, (data['following'] ?? []).length, "Following"), SizedBox(width: 16), _buildStatText(context, (data['followers'] ?? []).length, "Followers")]),
+          Row(
+            children: [
+              _buildStatText(context, (data['following'] ?? []).length, "Following", 1), 
+              SizedBox(width: 16), 
+              _buildStatText(context, (data['followers'] ?? []).length, "Followers", 2)
+            ]
+          ),
           SizedBox(height: 16),
         ]
       ])
@@ -659,7 +696,29 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       : ElevatedButton(onPressed: _followUser, child: Text("Follow"), style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white));
   }
 
-  Widget _buildStatText(BuildContext context, int count, String label) => Row(children: [Text("$count", style: TextStyle(fontWeight: FontWeight.bold)), SizedBox(width: 4), Text(label, style: TextStyle(color: Theme.of(context).hintColor))]);
+  // --- MODIFIED: Stat Text with Navigation ---
+  Widget _buildStatText(BuildContext context, int count, String label, int tabIndex) {
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FollowListScreen(
+              userId: _userId,
+              initialIndex: tabIndex, // 1 for Following, 2 for Followers
+            )
+          )
+        );
+      },
+      child: Row(
+        children: [
+          Text("$count", style: TextStyle(fontWeight: FontWeight.bold)), 
+          SizedBox(width: 4), 
+          Text(label, style: TextStyle(color: Theme.of(context).hintColor))
+        ]
+      ),
+    );
+  }
 
   // --- POSTS LISTS ---
 
@@ -667,14 +726,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(userId).get(),
       builder: (context, userSnapshot) {
+        if (userSnapshot.hasError) return CommonErrorWidget(message: "Failed to load posts.", isConnectionError: true);
+        
         final firestorePinned = (userSnapshot.data?.data() as Map<String, dynamic>?)?['pinnedPostId'];
         final activePinnedId = _optimisticPinnedPostId == '' ? null : (_optimisticPinnedPostId ?? firestorePinned);
 
         return StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
-            List<Widget> slivers = [];
+            if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load posts stream.", isConnectionError: true);
             
+            List<Widget> slivers = [];
             if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
               slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
             } else {
@@ -693,8 +755,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
                       final doc = docs[index];
-                      // FIX: Removed Column wrapper
+                      // FIX: ValueKey ensures the correct widget is updated/pinned when list reorders
                       return BlogPostCard(
+                        key: ValueKey(doc.id),
                         postId: doc.id,
                         postData: doc.data() as Map<String, dynamic>,
                         isOwner: doc['userId'] == _auth.currentUser?.uid,
@@ -711,7 +774,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             }
 
             return CustomScrollView(
-              key: PageStorageKey('posts_$userId'),
+              // REMOVED PAGE STORAGE KEY to fix tab index persistence bug
               physics: const AlwaysScrollableScrollPhysics(), 
               slivers: slivers,
             );
@@ -725,8 +788,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collectionGroup('comments').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load replies.", isConnectionError: true);
         List<Widget> slivers = [];
-
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
         } else {
@@ -736,7 +799,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           } else {
             slivers.add(SliverList(delegate: SliverChildBuilderDelegate((context, index) {
               final doc = docs[index];
-              // FIX: Removed Column, added Theme to remove padding/gaps for seamless connection
               return Theme(
                 data: Theme.of(context).copyWith(
                   listTileTheme: ListTileThemeData(
@@ -746,6 +808,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   ),
                 ),
                 child: CommentTile(
+                  key: ValueKey(doc.id),
                   commentId: doc.id, 
                   commentData: doc.data() as Map<String, dynamic>, 
                   postId: doc.reference.parent.parent!.id, 
@@ -760,7 +823,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         }
 
         return CustomScrollView(
-          key: PageStorageKey('replies_$userId'),
+          // REMOVED PAGE STORAGE KEY to fix tab index persistence bug
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: slivers,
         );
@@ -772,8 +835,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load reposts.", isConnectionError: true);
         List<Widget> slivers = [];
-
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
         } else {
@@ -783,8 +846,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           } else {
             slivers.add(SliverList(delegate: SliverChildBuilderDelegate((context, index) {
               final doc = docs[index];
-              // FIX: Removed Column wrapper
               return BlogPostCard(
+                key: ValueKey('repost_${doc.id}'),
                 postId: doc.id, 
                 postData: doc.data() as Map<String, dynamic>, 
                 isOwner: doc['userId'] == _auth.currentUser?.uid, 
@@ -796,7 +859,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         }
 
         return CustomScrollView(
-          key: PageStorageKey('reposts_$userId'),
+          // REMOVED PAGE STORAGE KEY to fix tab index persistence bug
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: slivers,
         );

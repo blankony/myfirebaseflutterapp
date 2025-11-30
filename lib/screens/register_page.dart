@@ -60,17 +60,36 @@ class _RegisterPageState extends State<RegisterPage> {
     }
 
     try {
+      // 1. Create Auth User first (to get read permissions)
       UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
       if (userCredential.user != null) {
+        final String nim = _nimController.text.trim();
+
+        // 2. Check for Unique NIM
+        final nimQuery = await _firestore
+            .collection('users')
+            .where('nim', isEqualTo: nim)
+            .get();
+
+        if (nimQuery.docs.isNotEmpty) {
+          // NIM exists! Delete the auth user we just created and throw error
+          await userCredential.user!.delete();
+          throw FirebaseAuthException(
+            code: 'nim-already-in-use', 
+            message: 'The NIM $nim is already registered.'
+          );
+        }
+
+        // 3. Create User Document if NIM is unique
         await _firestore.collection('users').doc(userCredential.user!.uid).set({
           'uid': userCredential.user!.uid,
           'email': _emailController.text.trim(),
           'name': _namaController.text.trim(), 
-          'nim': _nimController.text.trim(), 
+          'nim': nim, 
           'bio': 'Student at PNJ', 
           'createdAt': FieldValue.serverTimestamp(),
           'following': [],

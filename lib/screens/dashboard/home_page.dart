@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/blog_post_card.dart';
+import '../../widgets/common_error_widget.dart'; // REQUIRED
 import '../../main.dart';
 import '../../services/prediction_service.dart';
 
@@ -78,18 +79,27 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
             StreamBuilder<QuerySnapshot>(
               stream: _postsStream,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                // 1. Handle Loading
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return Center(child: CircularProgressIndicator());
                 }
+                
+                // 2. Handle Errors (Offline/Permission)
                 if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
+                  return Padding(
+                    padding: EdgeInsets.only(top: contentTopPadding),
+                    child: CommonErrorWidget(
+                      message: "Couldn't load posts. Please check your connection.",
+                      isConnectionError: true,
+                      onRetry: () => setState(() => _initStream()),
+                    ),
+                  );
                 }
 
                 List<QueryDocumentSnapshot> docs = snapshot.data?.docs ?? [];
                 
                 // --- APPLY AI RECOMMENDATION ALGORITHM ---
                 if (widget.isRecommended && docs.isNotEmpty) {
-                  // Explicitly uses the Recommended logic (Friends + Interests)
                   docs = _aiService.getPersonalizedRecommendations(
                     docs, 
                     userData, 

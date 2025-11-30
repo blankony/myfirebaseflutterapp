@@ -5,8 +5,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../widgets/blog_post_card.dart';
+import '../../widgets/common_error_widget.dart'; // REQUIRED
 import '../../main.dart';
-import 'profile_page.dart';
+import '../dashboard/profile_page.dart';
 import '../../services/prediction_service.dart';
 import '../../services/overlay_service.dart';
 
@@ -128,7 +129,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     FocusScope.of(context).unfocus();
   }
 
-  // User suggestion logic (kept mostly same, helper for Discover logic)
   Future<List<DocumentSnapshot>> _getSuggestedUsers(String? currentUserId) async {
     if (currentUserId == null) return [];
     try {
@@ -310,6 +310,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             StreamBuilder<QuerySnapshot>(
               stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Unable to load trends"));
                 if (!snapshot.hasData) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
 
                 final allPosts = snapshot.data!.docs;
@@ -393,7 +394,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             StreamBuilder<DocumentSnapshot>(
               stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
               builder: (context, userSnapshot) {
-                // Get user's following list to filter Discovery
+                // If user data fails to load (offline/error), assume empty following
                 List<dynamic> followingList = [];
                 if (userSnapshot.hasData && userSnapshot.data!.exists) {
                   final uData = userSnapshot.data!.data() as Map<String, dynamic>;
@@ -403,9 +404,9 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                 return StreamBuilder<QuerySnapshot>(
                   stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
                   builder: (context, snapshot) {
+                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: "Couldn't load discovery.", isConnectionError: true));
                     if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
                     
-                    // --- CHANGED: Use getDiscoverRecommendations ---
                     final discoverDocs = _predictionService.getDiscoverRecommendations(
                       snapshot.data!.docs, 
                       user?.uid ?? '',
@@ -457,6 +458,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
               future: _getSuggestedUsers(user?.uid),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
+                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Couldn't load suggestions (Offline)."));
                 if (!snapshot.hasData || snapshot.data!.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text("No suggestions available right now."));
                 return Column(
                   children: snapshot.data!.map((doc) {
@@ -495,12 +497,11 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     );
   }
 
-  // _buildPostResults and _buildUserResults + _UserSearchTile remain unchanged from previous (omitted for brevity but part of file)
   Widget _buildPostResults() {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
+        if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
@@ -526,7 +527,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('users').limit(100).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
+        if (snapshot.hasError) return CommonErrorWidget(message: "User search failed.", isConnectionError: true);
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;

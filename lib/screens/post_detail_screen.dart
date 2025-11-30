@@ -9,6 +9,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart'; 
 import '../widgets/blog_post_card.dart'; 
 import '../widgets/comment_tile.dart'; 
+import '../widgets/common_error_widget.dart'; // REQUIRED
 import '../services/prediction_service.dart'; 
 import '../services/cloudinary_service.dart'; 
 import '../main.dart'; 
@@ -50,12 +51,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   void _onCommentChanged(String text) {
     setState(() { _predictedText = null; });
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () async { // Faster response
+    _debounce = Timer(const Duration(milliseconds: 300), () async { 
       if (text.trim().isEmpty) return;
-      
-      // FIX: Use getLocalPrediction and remove context argument
       final suggestion = await _predictionService.getLocalPrediction(text);
-      
       if (mounted && suggestion != null && suggestion.isNotEmpty) {
         setState(() { _predictedText = suggestion; });
       }
@@ -70,7 +68,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       _commentController.text = newText;
       _commentController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
       setState(() { _predictedText = null; });
-      // Optionally trigger prediction for next word
       _onCommentChanged(newText);
     }
   }
@@ -201,6 +198,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   StreamBuilder<DocumentSnapshot>(
                     stream: _firestore.collection('posts').doc(widget.postId).snapshots(),
                     builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Padding(
+                          padding: const EdgeInsets.all(32.0),
+                          child: CommonErrorWidget(
+                            message: "Failed to load post. It may have been deleted.",
+                            isConnectionError: true,
+                          ),
+                        );
+                      }
+
                       if (!snapshot.hasData && widget.initialPostData == null) {
                         return Center(child: Padding(padding: const EdgeInsets.all(24.0), child: CircularProgressIndicator()));
                       }
@@ -239,6 +246,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('posts').doc(widget.postId).collection('comments').orderBy('timestamp', descending: false).snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) return Padding(padding: const EdgeInsets.all(16.0), child: Text("Could not load comments.", style: TextStyle(color: Colors.red)));
         if (snapshot.connectionState == ConnectionState.waiting) return Padding(padding: const EdgeInsets.all(16.0), child: Center(child: CircularProgressIndicator()));
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return Padding(padding: const EdgeInsets.all(32.0), child: Center(child: Text("No replies yet. Be the first!", style: TextStyle(color: Colors.grey))));
 

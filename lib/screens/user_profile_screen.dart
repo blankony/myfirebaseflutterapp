@@ -7,6 +7,7 @@ import '../widgets/blog_post_card.dart';
 import '../widgets/comment_tile.dart'; 
 import '../main.dart'; 
 import '../../services/overlay_service.dart';
+import 'follow_list_screen.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -221,16 +222,43 @@ class _UserProfileScreenState extends State<UserProfileScreen> with TickerProvid
           SizedBox(height: 4), Text(nim, style: theme.textTheme.titleSmall), 
           SizedBox(height: 12), Text(bio, style: theme.textTheme.bodyLarge),
           SizedBox(height: 12), Row(children: [Icon(Icons.calendar_today_outlined, size: 14, color: theme.hintColor), SizedBox(width: 8), Text(joinedDate, style: theme.textTheme.titleSmall)]),
-          SizedBox(height: 12), Row(children: [_buildStatText(context, followingList.length, "Following"), SizedBox(width: 16), _buildStatText(context, followersList.length, "Followers")]),
+          SizedBox(height: 12), 
+          Row(
+            children: [
+              _buildStatText(context, followingList.length, "Following", 1), 
+              SizedBox(width: 16), 
+              _buildStatText(context, followersList.length, "Followers", 2)
+            ]
+          ),
           SizedBox(height: 12),
         ],
       ),
     );
   }
 
-  Widget _buildStatText(BuildContext context, int count, String label) {
+  // --- MODIFIED: Stat Text with Navigation ---
+  Widget _buildStatText(BuildContext context, int count, String label, int tabIndex) {
     final theme = Theme.of(context);
-    return Row(children: [Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), SizedBox(width: 4), Text(label, style: theme.textTheme.titleSmall)]);
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FollowListScreen(
+              userId: widget.userId,
+              initialIndex: tabIndex, 
+            )
+          )
+        );
+      },
+      child: Row(
+        children: [
+          Text(count.toString(), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), 
+          SizedBox(width: 4), 
+          Text(label, style: theme.textTheme.titleSmall)
+        ]
+      ),
+    );
   }
 
   Widget _buildMyPosts(String userId) {
