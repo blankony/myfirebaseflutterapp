@@ -202,9 +202,47 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     } catch (e) { debugPrint("Sync fail: $e"); }
   }
 
-  Future<void> _pickAndUploadImage({required bool isBanner}) async {
+  // --- NEW: Source Selection Modal ---
+  void _showImageSourceSelection({required bool isBanner}) {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              SizedBox(height: 16),
+              ListTile(
+                leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
+                title: Text("Take from Camera"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndUploadImage(isBanner: isBanner, source: ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
+                title: Text("Choose from Gallery"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickAndUploadImage(isBanner: isBanner, source: ImageSource.gallery);
+                },
+              ),
+              SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // --- MODIFIED: Accepts ImageSource ---
+  Future<void> _pickAndUploadImage({required bool isBanner, required ImageSource source}) async {
     final picker = ImagePicker();
-    final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+    final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 70);
     if (pickedFile == null) return;
 
     final croppedFile = await ImageCropper().cropImage(
@@ -258,7 +296,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
                 title: Text("Change Banner"),
-                onTap: () { Navigator.pop(context); _pickAndUploadImage(isBanner: true); },
+                // Calls Selection Modal
+                onTap: () { Navigator.pop(context); _showImageSourceSelection(isBanner: true); },
               ),
               SizedBox(height: 12),
             ],
@@ -289,7 +328,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
                 title: Text("Change Photo"),
-                onTap: () { Navigator.pop(context); _pickAndUploadImage(isBanner: false); },
+                // Calls Selection Modal
+                onTap: () { Navigator.pop(context); _showImageSourceSelection(isBanner: false); },
               ),
               SizedBox(height: 12),
             ],
@@ -589,7 +629,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             },
             child: Hero(tag: 'avatar', child: Stack(children: [
               CircleAvatar(radius: 49, backgroundColor: theme.scaffoldBackgroundColor, child: _buildAvatarImage(data)),
-              if (isMyProfile) Positioned(bottom: 0, right: 0, child: Container(padding: EdgeInsets.all(6), decoration: BoxDecoration(color: TwitterTheme.blue, shape: BoxShape.circle, border: Border.all(color: theme.scaffoldBackgroundColor, width: 2)), child: Icon(Icons.camera_alt, size: 14, color: Colors.white)))
+              // REMOVED CAMERA ICON HERE AS REQUESTED
             ])),
           ),
         ),

@@ -58,7 +58,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void initState() {
     super.initState();
     _loadUserData();
-    _trainAiModel(); // <--- TRAIN THE AI HERE
+    _trainAiModel(); 
 
     if (_isEditing && widget.initialData != null) {
       _postController.text = widget.initialData!['text'] ?? '';
@@ -68,12 +68,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // --- AI TRAINING FUNCTION ---
   Future<void> _trainAiModel() async {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // Fetch user's last 50 posts to learn writing style
     try {
       final snapshot = await _firestore
           .collection('posts')
@@ -87,7 +85,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           .where((text) => text.isNotEmpty)
           .toList();
 
-      // Feed data to the Narrow AI Service
       _predictionService.learnFromUserPosts(postHistory);
       
     } catch (e) {
@@ -122,10 +119,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    _debounce = Timer(const Duration(milliseconds: 300), () async { // Faster debounce for local AI
+    _debounce = Timer(const Duration(milliseconds: 300), () async { 
       if (text.trim().isEmpty) return;
       
-      // Get prediction from Local AI (Personalized)
       final suggestion = await _predictionService.getLocalPrediction(text);
       
       if (mounted && suggestion != null && suggestion.isNotEmpty) {
@@ -140,7 +136,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_predictedText != null) {
       final currentText = _postController.text;
       final separator = currentText.endsWith(' ') ? '' : ' ';
-      final newText = "$currentText$separator$_predictedText "; // Append phrase
+      final newText = "$currentText$separator$_predictedText "; 
 
       _postController.text = newText;
       _postController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
@@ -150,7 +146,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _canPost = newText.trim().isNotEmpty || _selectedMediaFile != null || _existingMediaUrl != null;
       });
       
-      // Trigger prediction again for the NEXT word in the chain
       _onTextChanged(newText);
     }
   }
@@ -173,13 +168,54 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (e) { /* Fail silently */ }
   }
 
+  // --- MODIFIED: Show Source Selection Modal ---
+  void _showMediaSourceSelection({required bool isVideo}) {
+    FocusScope.of(context).unfocus();
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              SizedBox(height: 16),
+              ListTile(
+                leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
+                title: Text("Take from Camera"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickMedia(ImageSource.camera, isVideo: isVideo);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
+                title: Text("Choose from Gallery"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickMedia(ImageSource.gallery, isVideo: isVideo);
+                },
+              ),
+              SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // --- MODIFIED: Accepts ImageSource ---
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
     final picker = ImagePicker();
     XFile? pickedFile;
 
     try {
       if (isVideo) {
-        pickedFile = await picker.pickVideo(source: source);
+        // Limitation: pickVideo from camera usually records directly
+        pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
+        
         if (pickedFile != null && mounted) {
           final result = await Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile!.path))),
@@ -196,6 +232,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       } else {
         pickedFile = await picker.pickImage(source: source, imageQuality: 80);
         if (pickedFile != null && mounted) {
+          // If from camera, we might want to edit it directly
           final processedFile = await _editAndCompressPostImage(pickedFile);
           if (processedFile != null) {
             setState(() {
@@ -381,13 +418,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 top: false,
                 child: Row(
                   children: [
+                    // MODIFIED: Calls selection modal
                     IconButton(
                       icon: Icon(Icons.image, color: TwitterTheme.blue),
-                      onPressed: () => _pickMedia(ImageSource.gallery),
+                      onPressed: () => _showMediaSourceSelection(isVideo: false),
                     ),
                     IconButton(
                       icon: Icon(Icons.videocam, color: TwitterTheme.blue),
-                      onPressed: () => _pickMedia(ImageSource.gallery, isVideo: true),
+                      onPressed: () => _showMediaSourceSelection(isVideo: true),
                     ),
                   ],
                 ),
@@ -433,8 +471,6 @@ class _MediaPreviewWidget extends StatelessWidget {
   }
 }
 
-// Background Uploader Class (Omitted for brevity as it remains unchanged)
-// [Please ensure the _BackgroundUploader class from the original file is kept here]
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
@@ -592,7 +628,6 @@ class _BackgroundUploader {
   }
 }
 
-// Overlay Widgets (Unchanged)
 class _PostUploadOverlay extends StatefulWidget {
   final VoidCallback onDismissRequest;
   const _PostUploadOverlay({super.key, required this.onDismissRequest});
@@ -679,7 +714,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
               child: Material(
                 elevation: 4,
                 shape: CircleBorder(),
-                color: _isSuccess ? Colors.green : TwitterTheme.white,
+                color: _isSuccess ? Colors.green : TwitterTheme.blue,
                 child: Container(
                   width: 36, height: 36, padding: EdgeInsets.all(8),
                   child: _isSuccess 

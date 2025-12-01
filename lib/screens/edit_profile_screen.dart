@@ -167,7 +167,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return null;
   }
 
-  // UPDATED: Selection Dialog for Camera/Gallery
+  // --- MODIFIED: Selection Dialog for Camera/Gallery ---
   void _showImageSourceSelection({required bool isAvatar}) {
     showModalBottomSheet(
       context: context,
@@ -204,7 +204,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  // UPDATED: Accepts Source
+  // --- MODIFIED: Accepts Source ---
   Future<void> _pickImage({required bool isAvatar, required ImageSource source}) async {
     FocusScope.of(context).unfocus();
     final picker = ImagePicker();
