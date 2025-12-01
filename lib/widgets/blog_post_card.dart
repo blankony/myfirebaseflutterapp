@@ -13,7 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart'; 
 import 'package:video_player/video_player.dart'; 
 import '../services/overlay_service.dart';
-import '../services/moderation_service.dart'; // REQUIRED
+import '../services/moderation_service.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -246,15 +246,15 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   VideoPlayerController? _videoController;
   bool _isVideoOwner = false; 
   
-  // Bookmark State
-  bool _isBookmarked = false;
+  // FIX: Hapus state _isBookmarked manual, kita akan gunakan StreamBuilder
+  // bool _isBookmarked = false; 
 
   @override
   void initState() {
     super.initState();
     _localIsPinned = widget.isPinned; 
     _syncState();
-    _checkBookmarkStatus();
+    // FIX: _checkBookmarkStatus() dihapus, diganti StreamBuilder di UI
     _initVideoController();
     
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
@@ -326,28 +326,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
   
-  void _checkBookmarkStatus() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-    
-    try {
-      final doc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('bookmarks')
-          .doc(widget.postId)
-          .get();
-          
-      if (mounted) {
-        setState(() {
-          _isBookmarked = doc.exists;
-        });
-      }
-    } catch (e) {
-      // Silent error
-    }
-  }
-
   @override
   void dispose() {
     _likeController.dispose();
@@ -405,31 +383,35 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     } catch (e) { _syncState(); }
   }
   
-  void _toggleBookmark() async {
+  // FIX: New _handleBookmarkToggle
+  // Kita menerima status saat ini sebagai parameter
+  void _handleBookmarkToggle(bool isCurrentlyBookmarked) async {
     final user = _auth.currentUser;
     if (user == null) return;
-    
-    setState(() {
-      _isBookmarked = !_isBookmarked;
-    });
     
     if (hapticNotifier.value) HapticFeedback.lightImpact();
     
     final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
     
+    // 1. Tampilkan notifikasi DULUAN sebelum proses async (agar muncul meskipun widget didispose)
+    if (!isCurrentlyBookmarked) {
+       OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, (){});
+    } else {
+       OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, (){});
+    }
+
+    // 2. Lakukan operasi database
     try {
-      if (_isBookmarked) {
+      if (!isCurrentlyBookmarked) {
         await docRef.set({
           'timestamp': FieldValue.serverTimestamp(),
         });
-        if(mounted) OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, (){});
       } else {
         await docRef.delete();
-        if(mounted) OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, (){});
       }
     } catch (e) {
-      // Revert on error
-      setState(() => _isBookmarked = !_isBookmarked);
+      // Jika error, notifikasi error
+      OverlayService().showTopNotification(context, "Failed to bookmark", Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -652,7 +634,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.build(context);
     
     // --- BLOCK CHECK ---
-    // If the post author is in the current user's blocked list, hide this card.
     return StreamBuilder<List<String>>(
       stream: moderationService.streamBlockedUsers(),
       builder: (context, snapshot) {
@@ -878,6 +859,34 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
+  // --- HELPER UNTUK BOOKMARK BUTTON (STREAM) ---
+  Widget _buildBookmarkButton() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return _buildActionButton(Icons.bookmark_border, null, null, () {});
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      // DENGARKAN STATUS BOOKMARK SECARA REAL-TIME DARI FIRESTORE
+      stream: _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('bookmarks')
+          .doc(widget.postId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final bool isBookmarked = snapshot.hasData && snapshot.data!.exists;
+        
+        return _buildActionButton(
+          isBookmarked ? Icons.bookmark : Icons.bookmark_border, 
+          null, 
+          isBookmarked ? TwitterTheme.blue : null, 
+          () => _handleBookmarkToggle(isBookmarked) // Pass status saat ini
+        );
+      },
+    );
+  }
+
   Widget _buildFeedActionRow(int commentCount) {
     return Padding(
       padding: const EdgeInsets.only(top: 12.0),
@@ -887,7 +896,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           _buildActionButton(Icons.chat_bubble_outline, commentCount.toString(), null, _navigateToDetail),
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
-          _buildActionButton(_isBookmarked ? Icons.bookmark : Icons.bookmark_border, null, _isBookmarked ? TwitterTheme.blue : null, _toggleBookmark), // Added Bookmark button
+          _buildBookmarkButton(), // FIX: Gunakan widget bookmark yang real-time
           _buildActionButton(Icons.share_outlined, null, _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
@@ -902,7 +911,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         children: [
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
-          _buildActionButton(_isBookmarked ? Icons.bookmark : Icons.bookmark_border, null, _isBookmarked ? TwitterTheme.blue : null, _toggleBookmark), // Added Bookmark button
+          _buildBookmarkButton(), // FIX: Gunakan widget bookmark yang real-time
           _buildActionButton(Icons.share_outlined, 'Share', _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
