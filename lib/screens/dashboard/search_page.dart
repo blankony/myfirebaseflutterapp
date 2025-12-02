@@ -5,11 +5,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../widgets/blog_post_card.dart';
-import '../../widgets/common_error_widget.dart'; // REQUIRED
+import '../../widgets/common_error_widget.dart';
 import '../../main.dart';
 import '../dashboard/profile_page.dart';
 import '../../services/prediction_service.dart';
 import '../../services/overlay_service.dart';
+import '../../services/voice_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -35,6 +36,9 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   final FocusNode _searchFocusNode = FocusNode();
   final PredictionService _predictionService = PredictionService();
   
+  // VOICE STATE
+  bool _isListening = false;
+  
   late TabController _tabController;
   
   String _searchText = '';
@@ -47,6 +51,8 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // Inisialisasi Voice Service secara diam-diam saat halaman dimuat
+    voiceService.initialize();
   }
 
   @override
@@ -60,6 +66,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       _searchController.clear();
       _searchText = '';
       _searchSuggestion = null;
+      _stopListening(); // Pastikan mic mati jika search ditutup
       FocusScope.of(context).unfocus(); 
     }
   }
@@ -72,6 +79,68 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     _debounce?.cancel();
     super.dispose();
   }
+
+  // --- LOGIKA VOICE COMMAND ---
+  void _toggleListening() async {
+    if (_isListening) {
+      _stopListening();
+    } else {
+      _startListening();
+    }
+  }
+
+  void _startListening() {
+    // Pastikan UI dalam mode pencarian
+    if (!widget.isSearching) {
+      widget.onSearchPressed();
+    }
+
+    voiceService.startListening(
+      onListeningStateChanged: (isListening) {
+        if (mounted) setState(() => _isListening = isListening);
+      },
+      onResult: (text) {
+        if (!mounted) return;
+        
+        // Smart Command Logic: Membersihkan kata perintah
+        String finalQuery = text;
+        
+        if (finalQuery.toLowerCase().startsWith("cari ")) {
+          finalQuery = finalQuery.substring(5);
+        } else if (finalQuery.toLowerCase().startsWith("search for ")) {
+          finalQuery = finalQuery.substring(11);
+        } else if (finalQuery.toLowerCase().startsWith("buka ")) {
+          finalQuery = finalQuery.substring(5);
+        }
+
+        // Navigasi Tab Otomatis berdasarkan konteks
+        if (finalQuery.toLowerCase().contains("profil") || 
+            finalQuery.toLowerCase().contains("dosen") ||
+            finalQuery.toLowerCase().contains("user") ||
+            finalQuery.toLowerCase().contains("orang") ||
+            finalQuery.toLowerCase().contains("teman")) {
+          _tabController.animateTo(1); // Pindah ke Tab Users
+        } else if (finalQuery.toLowerCase().contains("post") || 
+                   finalQuery.toLowerCase().contains("berita") ||
+                   finalQuery.toLowerCase().contains("status")) {
+          _tabController.animateTo(0); // Pindah ke Tab Posts
+        }
+
+        // Update Text Field
+        _searchController.text = finalQuery;
+        _searchController.selection = TextSelection.fromPosition(TextPosition(offset: finalQuery.length));
+        
+        // Trigger Pencarian
+        _onSearchChanged(finalQuery);
+      },
+    );
+  }
+
+  void _stopListening() {
+    voiceService.stopListening();
+    if (mounted) setState(() => _isListening = false);
+  }
+  // ---------------------------
 
   void _onSearchChanged(String value) {
     setState(() {
@@ -109,6 +178,8 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
       _searchSuggestion = null;
     });
     
+    if (_isListening) _stopListening();
+
     if (widget.isSearching) {
       widget.onSearchPressed();
     }
@@ -185,12 +256,7 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
     return WillPopScope(
       onWillPop: () async {
         if (widget.isSearching) {
-          setState(() {
-            _searchController.clear();
-            _searchText = '';
-            _searchSuggestion = null;
-          });
-          widget.onSearchPressed(); 
+          _clearSearch(); // Ini juga mematikan mic jika aktif
           return false; 
         }
         return true; 
@@ -232,11 +298,44 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
                                 focusNode: _searchFocusNode,
                                 autofocus: false, 
                                 decoration: InputDecoration(
-                                  hintText: 'Search for posts, or users...',
+                                  hintText: _isListening ? 'Mendengarkan...' : 'Cari "Beasiswa" atau "Dosen"...',
+                                  hintStyle: TextStyle(
+                                    color: _isListening ? TwitterTheme.blue : theme.hintColor,
+                                    fontStyle: _isListening ? FontStyle.italic : FontStyle.normal,
+                                  ),
                                   prefixIcon: Icon(Icons.search),
-                                  suffixIcon: _searchController.text.isNotEmpty 
-                                    ? IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch) 
-                                    : null,
+                                  
+                                  // --- TOMBOL MIKROFON & CLEAR ---
+                                  suffixIcon: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_searchController.text.isNotEmpty)
+                                        IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch),
+                                      
+                                      GestureDetector(
+                                        onTap: _toggleListening,
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(right: 12.0, left: 4.0),
+                                          child: AnimatedContainer(
+                                            duration: Duration(milliseconds: 200),
+                                            padding: EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: _isListening ? Colors.red.withOpacity(0.1) : Colors.transparent,
+                                              border: _isListening ? Border.all(color: Colors.red, width: 2) : null,
+                                            ),
+                                            child: Icon(
+                                              _isListening ? Icons.mic : Icons.mic_none,
+                                              color: _isListening ? Colors.red : theme.primaryColor,
+                                              size: 24,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  // -------------------------------
+                                  
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
                                   filled: true,
                                   contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
@@ -394,7 +493,6 @@ class SearchPageState extends State<SearchPage> with SingleTickerProviderStateMi
             StreamBuilder<DocumentSnapshot>(
               stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
               builder: (context, userSnapshot) {
-                // If user data fails to load (offline/error), assume empty following
                 List<dynamic> followingList = [];
                 if (userSnapshot.hasData && userSnapshot.data!.exists) {
                   final uData = userSnapshot.data!.data() as Map<String, dynamic>;
