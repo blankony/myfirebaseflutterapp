@@ -33,6 +33,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.0"
+  badword_guard:
+    dependency: "direct main"
+    description:
+      name: badword_guard
+      sha256: "5553ab2d6b678dd9cbde6c5b619b40ea93d8e48f7b80d3fff13ea5ddce11e8c9"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
   boolean_selector:
     dependency: transitive
     description:

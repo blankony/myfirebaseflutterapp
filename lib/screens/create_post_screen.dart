@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_const_constructors
+// ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -9,12 +9,13 @@ import 'package:image_editor_plus/image_editor_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_compress/video_compress.dart'; 
-import 'package:google_generative_ai/google_generative_ai.dart'; // REQUIRED FOR GEMINI
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // REQUIRED FOR API KEY
+import 'package:google_generative_ai/google_generative_ai.dart'; 
+import 'package:flutter_dotenv/flutter_dotenv.dart'; 
+import 'package:badword_guard/badword_guard.dart'; // REQUIRED: Pastikan package ini sudah diinstall
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
-import '../services/overlay_service.dart'; // REQUIRED FOR NOTIFICATION
+import '../services/overlay_service.dart'; 
 import 'video_trimmer_screen.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -37,11 +38,14 @@ class CreatePostScreen extends StatefulWidget {
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _postController = TextEditingController();
-  final PredictionService _predictionService = PredictionService(); // Local AI Service
+  final PredictionService _predictionService = PredictionService(); 
   final FocusNode _postFocusNode = FocusNode();
 
+  // Inisialisasi BadwordGuard
+  final BadwordGuard _badwordGuard = BadwordGuard();
+
   bool _canPost = false;
-  bool _isGeneratingCaption = false; // State for loading animation
+  bool _isProcessing = false; 
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
@@ -68,11 +72,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _postController.text = widget.initialData!['text'] ?? '';
       _existingMediaUrl = widget.initialData!['mediaUrl'];
       _mediaType = widget.initialData!['mediaType'];
-      _canPost = true;
+      _checkCanPost();
     }
   }
 
-  // --- AI LOGIC ---
+  void _checkCanPost() {
+    final textNotEmpty = _postController.text.trim().isNotEmpty;
+    final hasMedia = _selectedMediaFile != null || _existingMediaUrl != null;
+    
+    setState(() {
+      _canPost = textNotEmpty || hasMedia;
+    });
+  }
 
   Future<void> _trainAiModel() async {
     final user = _auth.currentUser;
@@ -90,34 +101,40 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           .toList();
       _predictionService.learnFromUserPosts(postHistory);
     } catch (e) {
-      print("AI Training failed: $e");
+      // Silent error
     }
   }
 
-  // --- MODIFIED: GEMINI IMAGE DESCRIPTION (SHORT & DIRECT) ---
+  void _showRejectDialog(String reason) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Ditolak")]),
+        content: Text("Postingan mengandung kata-kata yang dilarang.\n\n$reason"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Perbaiki", style: TextStyle(color: TwitterTheme.blue)))
+        ],
+      ),
+    );
+  }
+
+  // --- GEMINI IMAGE CAPTION (TETAP DIPERTAHANKAN) ---
   Future<void> _generateImageCaption() async {
     if (_selectedMediaFile == null || _mediaType != 'image') return;
 
-    setState(() {
-      _isGeneratingCaption = true;
-    });
+    setState(() => _isProcessing = true);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
       if (apiKey == null) throw Exception("API Key not found");
 
-      // Initialize Gemini Model (Flash is faster/cheaper for vision)
-      final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
-      
+      final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: apiKey);
       final imageBytes = await _selectedMediaFile!.readAsBytes();
       
-      // --- UPDATED PROMPT FOR BREVITY AND DIRECTNESS ---
-      String promptText = "Deskripsikan objek atau pemandangan utama dalam gambar ini secara sangat singkat, padat, dan langsung pada intinya (to the point) dalam Bahasa Indonesia. Maksimal satu kalimat. Jangan gunakan emoji atau gaya bahasa media sosial. Keep it simple";
-      // --------------------------------------------------
+      String promptText = "Deskripsikan objek utama gambar ini dengan sangat singkat (max 1 kalimat), to the point, bahasa Indonesia formal. Tanpa emoji.";
       
       if (_postController.text.isNotEmpty) {
-        // If user already typed something, ask AI to keep it relevant but still short.
-        promptText += ". Jika relevan, hubungkan deskripsi singkat ini dengan konteks: '${_postController.text}'";
+        promptText += ". Hubungkan dengan: '${_postController.text}'";
       }
 
       final content = [
@@ -130,21 +147,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final response = await model.generateContent(content);
       
       if (response.text != null && mounted) {
-        String newText = response.text!.trim();
-        
-        // Remove markdown formatting just in case
-        newText = newText.replaceAll('**', '').replaceAll('*', '');
+        String newText = response.text!.trim().replaceAll('**', '').replaceAll('*', '');
 
         setState(() {
           if (_postController.text.isEmpty) {
             _postController.text = newText;
           } else {
-            // Add a new line if appending
             _postController.text = "${_postController.text}\n$newText";
           }
-          // Move cursor to end
           _postController.selection = TextSelection.fromPosition(TextPosition(offset: _postController.text.length));
-          _onTextChanged(_postController.text);
+          _checkCanPost(); 
         });
         
         OverlayService().showTopNotification(context, "Description generated", Icons.short_text, (){}, color: Colors.purple);
@@ -152,14 +164,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (e) {
       if (mounted) {
         OverlayService().showTopNotification(context, "Failed to generate description", Icons.error_outline, (){}, color: Colors.red);
-        debugPrint("Gemini Error: $e");
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isGeneratingCaption = false;
-        });
-      }
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
@@ -168,9 +175,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (!mounted) return null;
 
     final editedImageBytes = await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ImageEditor(image: imageBytes),
-      ),
+      MaterialPageRoute(builder: (context) => ImageEditor(image: imageBytes)),
     );
 
     if (editedImageBytes != null) {
@@ -183,10 +188,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _onTextChanged(String text) {
-    setState(() {
-      _canPost = text.trim().isNotEmpty || _selectedMediaFile != null || _existingMediaUrl != null;
-      _predictedText = null;
-    });
+    _checkCanPost(); 
+    _predictedText = null;
 
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
@@ -194,9 +197,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (text.trim().isEmpty) return;
       final suggestion = await _predictionService.getLocalPrediction(text);
       if (mounted && suggestion != null && suggestion.isNotEmpty) {
-        setState(() {
-          _predictedText = suggestion;
-        });
+        setState(() => _predictedText = suggestion);
       }
     });
   }
@@ -210,7 +211,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _postController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
       setState(() {
         _predictedText = null;
-        _canPost = newText.trim().isNotEmpty || _selectedMediaFile != null || _existingMediaUrl != null;
+        _canPost = true;
       });
       _onTextChanged(newText);
     }
@@ -231,7 +232,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           _profileImageUrl = data['profileImageUrl'];
         });
       }
-    } catch (e) { /* Fail silently */ }
+    } catch (e) {}
   }
 
   void _showMediaSourceSelection({required bool isVideo}) {
@@ -287,7 +288,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               _mediaType = 'video';
               _selectedMediaFile = result['file'];
               _existingMediaUrl = null;
-              _canPost = true;
+              _checkCanPost(); 
             });
           }
         }
@@ -300,7 +301,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               _mediaType = 'image';
               _selectedMediaFile = processedFile;
               _existingMediaUrl = null;
-              _canPost = true;
+              _checkCanPost(); 
             });
           }
         }
@@ -315,7 +316,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _selectedMediaFile = null;
       _existingMediaUrl = null;
       _mediaType = null;
-      _canPost = _postController.text.trim().isNotEmpty;
+      _checkCanPost(); 
     });
   }
 
@@ -324,7 +325,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    final String text = _postController.text;
+    // --- 1. LOCAL BADWORD CHECK (REPLACEMENT FOR GEMINI) ---
+    final text = _postController.text;
+    
+    // Cek apakah teks mengandung kata kasar menggunakan plugin
+    if (_badwordGuard.containsBadWord(text)) {
+      _showRejectDialog("Mohon gunakan bahasa yang sopan.");
+      return; 
+    }
+    // --------------------------------------------------------
+
+    // 2. Persiapan Data
     final File? mediaFile = _selectedMediaFile;
     final String? existingUrl = _existingMediaUrl;
     final String? mediaType = _mediaType;
@@ -338,6 +349,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final String uHex = _avatarHex;
     final String? uProfileImg = _profileImageUrl;
 
+    // 3. Tutup Layar & Jalankan Background Upload
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop();
 
@@ -388,8 +400,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: ElevatedButton(
-              onPressed: _canPost && !_isGeneratingCaption ? _submitPost : null,
-              child: _isGeneratingCaption 
+              onPressed: _canPost && !_isProcessing ? _submitPost : null,
+              child: _isProcessing 
                 ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : Text(_isEditing ? 'Save' : 'Post'),
               style: ElevatedButton.styleFrom(
@@ -437,21 +449,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             fileOrUrl: _selectedMediaFile, 
                             type: _mediaType ?? 'image', 
                             onRemove: _clearMedia,
-                            onGenerateCaption: _generateImageCaption, // Pass the function here
-                            isGenerating: _isGeneratingCaption,
+                            onGenerateCaption: _generateImageCaption,
+                            isGenerating: _isProcessing,
                           )
                         else if (_existingMediaUrl != null)
                           _MediaPreviewWidget(
                             fileOrUrl: _existingMediaUrl, 
                             type: _mediaType ?? 'image', 
                             onRemove: _clearMedia,
-                            // Note: We can't easily gen-AI existing URLs without downloading them first or sending URL to a backend proxy.
-                            // For simplicity, we disable magic wand for existing URLs in edit mode.
                             onGenerateCaption: null, 
                             isGenerating: false,
                           ),
                         
-                        // --- PREDICTION UI ---
                         if (_predictedText != null)
                           GestureDetector(
                             onTap: _acceptPrediction,
@@ -518,8 +527,8 @@ class _MediaPreviewWidget extends StatelessWidget {
   final dynamic fileOrUrl;
   final String type;
   final VoidCallback onRemove;
-  final VoidCallback? onGenerateCaption; // New Callback
-  final bool isGenerating; // New State
+  final VoidCallback? onGenerateCaption; 
+  final bool isGenerating; 
 
   const _MediaPreviewWidget({
     required this.fileOrUrl, 
@@ -552,7 +561,6 @@ class _MediaPreviewWidget extends StatelessWidget {
           child: IconButton(icon: Icon(Icons.cancel, color: Colors.white), onPressed: onRemove),
         ),
         
-        // --- NEW: MAGIC WAND BUTTON ---
         if (type == 'image' && onGenerateCaption != null)
           Positioned(
             right: 5, 
