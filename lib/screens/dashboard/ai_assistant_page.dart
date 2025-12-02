@@ -398,7 +398,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     }
     try {
       _model = GenerativeModel(
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.5-flash',
         apiKey: _apiKey,
         systemInstruction: _systemInstruction,
       );
