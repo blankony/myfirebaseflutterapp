@@ -246,15 +246,11 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   VideoPlayerController? _videoController;
   bool _isVideoOwner = false; 
   
-  // FIX: Hapus state _isBookmarked manual, kita akan gunakan StreamBuilder
-  // bool _isBookmarked = false; 
-
   @override
   void initState() {
     super.initState();
     _localIsPinned = widget.isPinned; 
     _syncState();
-    // FIX: _checkBookmarkStatus() dihapus, diganti StreamBuilder di UI
     _initVideoController();
     
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
@@ -412,6 +408,26 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     } catch (e) {
       // Jika error, notifikasi error
       OverlayService().showTopNotification(context, "Failed to bookmark", Icons.error, (){}, color: Colors.red);
+    }
+  }
+
+  // --- NEW: TOGGLE VISIBILITY ---
+  void _toggleVisibility() async {
+    final currentVis = widget.postData['visibility'] ?? 'public';
+    final newVis = currentVis == 'public' ? 'private' : 'public';
+    
+    try {
+      await _firestore.collection('posts').doc(widget.postId).update({
+        'visibility': newVis,
+      });
+      OverlayService().showTopNotification(
+        context, 
+        "Post is now ${newVis.toUpperCase()}", 
+        newVis == 'public' ? Icons.public : Icons.lock, 
+        (){},
+      );
+    } catch (e) {
+      OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -650,7 +666,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
         final uploadFailed = widget.postData['uploadFailed'] == true;
         final int commentCount = widget.postData['commentCount'] ?? 0;
-
+        
+        // --- NEW: VISIBILITY CHECK ---
+        final visibility = widget.postData['visibility'] ?? 'public';
+        
         if (uploadFailed) {
           return Container(
             padding: const EdgeInsets.all(12.0),
@@ -778,6 +797,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final String userName = widget.postData['userName'] ?? 'User';
     final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
     final theme = Theme.of(context);
+    
+    // VISIBILITY CHECK
+    final String visibility = widget.postData['visibility'] ?? 'public';
+    final bool isPrivate = visibility == 'private';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -787,11 +810,22 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Flexible(
-              child: Text(
-                userName, 
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
-                overflow: TextOverflow.ellipsis
-              )
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      userName, 
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
+                      overflow: TextOverflow.ellipsis
+                    ),
+                  ),
+                  if (isPrivate) ...[
+                    SizedBox(width: 4),
+                    Icon(Icons.lock, size: 14, color: theme.hintColor),
+                  ],
+                ],
+              ),
             ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start, 
@@ -831,11 +865,23 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         else if (value == 'pin') _togglePin(); 
         else if (value == 'report') _reportPost();
         else if (value == 'block') _blockUser();
+        else if (value == 'toggle_visibility') _toggleVisibility(); // NEW
       },
       itemBuilder: (context) {
         if (widget.isOwner) {
+          final isPrivate = (widget.postData['visibility'] ?? 'public') == 'private';
           return [
             PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
+            PopupMenuItem(
+              value: 'toggle_visibility', 
+              child: Row(
+                children: [
+                  Icon(isPrivate ? Icons.public : Icons.lock, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
+                  SizedBox(width: 12), 
+                  Text(isPrivate ? "Set to Public" : "Set to Private")
+                ]
+              )
+            ),
             PopupMenuItem(
               value: 'pin', 
               child: Row(

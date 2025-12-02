@@ -76,7 +76,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
     
     // NUCLEAR FIX: Force immediate tab reset MULTIPLE times
-    // This overrides any PageStorage/KeepAlive restoration
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _tabController.index = 0;
     });
@@ -780,22 +779,30 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
               slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
             } else {
-              final docs = snapshot.data?.docs ?? [];
-              if (docs.isEmpty) {
+              // --- FILTER VISIBILITY ---
+              final allDocs = snapshot.data?.docs ?? [];
+              final visibleDocs = allDocs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final isPublic = (data['visibility'] ?? 'public') == 'public';
+                final isMe = _auth.currentUser?.uid == userId;
+                return isPublic || isMe;
+              }).toList();
+              // -------------------------
+
+              if (visibleDocs.isEmpty) {
                 slivers.add(SliverFillRemaining(child: Center(child: Text("No posts yet."))));
               } else {
                 if (activePinnedId != null) {
-                  final index = docs.indexWhere((d) => d.id == activePinnedId);
+                  final index = visibleDocs.indexWhere((d) => d.id == activePinnedId);
                   if (index != -1) {
-                    final pinned = docs.removeAt(index);
-                    docs.insert(0, pinned);
+                    final pinned = visibleDocs.removeAt(index);
+                    visibleDocs.insert(0, pinned);
                   }
                 }
                 slivers.add(SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
-                      final doc = docs[index];
-                      // FIX: ValueKey ensures the correct widget is updated/pinned when list reorders
+                      final doc = visibleDocs[index];
                       return BlogPostCard(
                         key: ValueKey(doc.id),
                         postId: doc.id,
@@ -806,7 +813,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                         onPinToggle: (id, isPinned) => _handlePinToggle(id, isPinned),
                       );
                     },
-                    childCount: docs.length,
+                    childCount: visibleDocs.length,
                   ),
                 ));
                 slivers.add(SliverToBoxAdapter(child: SizedBox(height: 80)));
@@ -814,7 +821,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             }
 
             return CustomScrollView(
-              // REMOVED PAGE STORAGE KEY to fix tab index persistence bug
               physics: const AlwaysScrollableScrollPhysics(), 
               slivers: slivers,
             );
@@ -824,11 +830,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
+  // --- FIXED: REPLIES VISIBILITY BUG ---
   Widget _buildMyReplies(BuildContext context, String userId) {
     return StreamBuilder<QuerySnapshot>(
+      // 1. Ambil semua komentar user ini
       stream: _firestore.collectionGroup('comments').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load replies.", isConnectionError: true);
+        
         List<Widget> slivers = [];
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
@@ -839,34 +848,40 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           } else {
             slivers.add(SliverList(delegate: SliverChildBuilderDelegate((context, index) {
               final doc = docs[index];
-              return Theme(
-                data: Theme.of(context).copyWith(
-                  listTileTheme: ListTileThemeData(
-                    minVerticalPadding: 0,
-                    visualDensity: VisualDensity.compact,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                  ),
-                ),
-                child: CommentTile(
-                  key: ValueKey(doc.id),
-                  commentId: doc.id, 
-                  commentData: doc.data() as Map<String, dynamic>, 
-                  postId: doc.reference.parent.parent!.id, 
-                  isOwner: true, 
-                  showPostContext: true, 
-                  heroContextId: 'profile_replies'
-                ),
+              final parentPostId = doc.reference.parent.parent!.id;
+
+              // 2. LISTEN REAL-TIME KE PARENT POST
+              // Ganti FutureBuilder menjadi StreamBuilder agar update instan saat user A mengubah visibility
+              return StreamBuilder<DocumentSnapshot>(
+                stream: _firestore.collection('posts').doc(parentPostId).snapshots(),
+                builder: (context, parentSnapshot) {
+                  // Jika loading atau post terhapus, sembunyikan
+                  if (!parentSnapshot.hasData || !parentSnapshot.data!.exists) return SizedBox.shrink();
+                  
+                  final parentData = parentSnapshot.data!.data() as Map<String, dynamic>;
+                  final isPublic = (parentData['visibility'] ?? 'public') == 'public';
+                  final isParentMyPost = parentData['userId'] == _auth.currentUser?.uid;
+                  
+                  // LOGIKA KETAT:
+                  // Tampilkan HANYA JIKA:
+                  // 1. Postingan Induknya PUBLIC
+                  // 2. ATAU Saya adalah PEMILIK Postingan Induknya
+                  // (Meskipun ini komentar saya di profil saya sendiri, jika induknya private punya orang lain, saya tidak boleh melihat konteksnya)
+                  if (isPublic || isParentMyPost) {
+                    return Theme(
+                      data: Theme.of(context).copyWith(listTileTheme: ListTileThemeData(minVerticalPadding: 0, visualDensity: VisualDensity.compact, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0))),
+                      child: CommentTile(key: ValueKey(doc.id), commentId: doc.id, commentData: doc.data() as Map<String, dynamic>, postId: parentPostId, isOwner: true, showPostContext: true, heroContextId: 'profile_replies'),
+                    );
+                  }
+                  
+                  return SizedBox.shrink(); 
+                },
               );
             }, childCount: docs.length)));
             slivers.add(SliverToBoxAdapter(child: SizedBox(height: 80)));
           }
         }
-
-        return CustomScrollView(
-          // REMOVED PAGE STORAGE KEY to fix tab index persistence bug
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: slivers,
-        );
+        return CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: slivers);
       },
     );
   }
@@ -880,12 +895,21 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
         } else {
-          final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty) {
+          final allDocs = snapshot.data?.docs ?? [];
+          // --- FILTER VISIBILITY FOR REPOSTS ---
+          final visibleDocs = allDocs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final isPublic = (data['visibility'] ?? 'public') == 'public';
+            final isOwnerOfOriginalPost = data['userId'] == _auth.currentUser?.uid;
+            return isPublic || isOwnerOfOriginalPost;
+          }).toList();
+          // -------------------------------------
+
+          if (visibleDocs.isEmpty) {
             slivers.add(SliverFillRemaining(child: Center(child: Text("No reposts yet."))));
           } else {
             slivers.add(SliverList(delegate: SliverChildBuilderDelegate((context, index) {
-              final doc = docs[index];
+              final doc = visibleDocs[index];
               return BlogPostCard(
                 key: ValueKey('repost_${doc.id}'),
                 postId: doc.id, 
@@ -893,13 +917,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 isOwner: doc['userId'] == _auth.currentUser?.uid, 
                 heroContextId: 'profile_reposts'
               );
-            }, childCount: docs.length)));
+            }, childCount: visibleDocs.length)));
             slivers.add(SliverToBoxAdapter(child: SizedBox(height: 80)));
           }
         }
 
         return CustomScrollView(
-          // REMOVED PAGE STORAGE KEY to fix tab index persistence bug
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: slivers,
         );

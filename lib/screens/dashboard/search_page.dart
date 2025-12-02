@@ -59,7 +59,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       upperBound: 1.3, 
     );
     
-    // Inisialisasi Voice Service
     voiceService.initialize();
   }
 
@@ -89,13 +88,14 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // --- LOGIKA VOICE COMMAND (HOLD TO TALK) ---
-
+  // --- LOGIKA VOICE COMMAND ---
   Future<void> _startListening() async {
-    // 1. Matikan keyboard DULUAN agar tidak ada layout shift
+    if (voiceService.isListening) {
+      await voiceService.stopListening();
+    }
+
     if (_searchFocusNode.hasFocus) {
       _searchFocusNode.unfocus();
-      // Jeda sedikit agar keyboard turun sepenuhnya
       await Future.delayed(const Duration(milliseconds: 200));
     }
 
@@ -103,20 +103,13 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       widget.onSearchPressed();
     }
 
-    // Reset teks jika mau mulai baru (opsional)
-    // _searchController.clear(); 
-
-    // Mulai animasi UI
     if(mounted) {
       setState(() => _isListening = true);
       _micAnimController.forward();
     }
 
-    // Mulai Service
-    await voiceService.startListening(
-      onListeningStateChanged: (isListening) {
-        // Biarkan gesture yang mengontrol UI state
-      },
+    voiceService.startListening(
+      onListeningStateChanged: (isListening) {},
       onResult: (text) {
         if (!mounted) return;
         
@@ -148,7 +141,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     }
     voiceService.stopListening();
   }
-  // ---------------------------
 
   void _onSearchChanged(String value) {
     setState(() {
@@ -288,7 +280,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                 controller: _searchController,
                                 focusNode: _searchFocusNode,
                                 autofocus: false, 
-                                // Cegah input manual saat merekam untuk menghindari konflik UI
                                 readOnly: _isListening, 
                                 decoration: InputDecoration(
                                   hintText: _isListening ? 'Mendengarkan...' : 'Tahan mic untuk bicara...',
@@ -298,8 +289,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                     fontWeight: _isListening ? FontWeight.bold : FontWeight.normal,
                                   ),
                                   prefixIcon: Icon(Icons.search),
-                                  
-                                  // --- TOMBOL MIKROFON (LISTENER + ROW) ---
                                   suffixIcon: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -307,15 +296,9 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                         IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch),
                                       
                                       Listener(
-                                        onPointerDown: (details) {
-                                          _startListening();
-                                        },
-                                        onPointerUp: (details) {
-                                          _stopListening();
-                                        },
-                                        onPointerCancel: (details) {
-                                          _stopListening();
-                                        },
+                                        onPointerDown: (details) => _startListening(),
+                                        onPointerUp: (details) => _stopListening(),
+                                        onPointerCancel: (details) => _stopListening(),
                                         child: Padding(
                                           padding: const EdgeInsets.only(right: 12.0, left: 4.0),
                                           child: ScaleTransition(
@@ -340,8 +323,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                       ),
                                     ],
                                   ),
-                                  // -------------------------------------
-                                  
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
                                   filled: true,
                                   contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
@@ -387,24 +368,19 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
-  // --- WIDGETS BAWAAN ---
-  
   Widget _buildExplorePage(ThemeData theme) {
     return RefreshIndicator(
-      // --- PERBAIKAN BUG REFRESH ---
       notificationPredicate: (notification) => !_isListening,
       onRefresh: () async {
         setState(() {}); 
         await Future.delayed(Duration(seconds: 1));
       },
       child: SingleChildScrollView(
-        // Kunci Scroll saat merekam
         physics: _isListening 
             ? NeverScrollableScrollPhysics() 
             : AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.only(bottom: 100),
         child: Column(
-          // ... (Isi Column tetap sama seperti sebelumnya)
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
@@ -417,16 +393,33 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 ],
               ),
             ),
+            
             StreamBuilder<QuerySnapshot>(
               stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Unable to load trends"));
                 if (!snapshot.hasData) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
-                final allPosts = snapshot.data!.docs;
+
+                // --- FILTER PUBLIC POSTS FOR TRENDING ---
+                final allPosts = snapshot.data!.docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return (data['visibility'] ?? 'public') == 'public';
+                }).toList();
+                // -----------------------------------------
+
                 final trends = _predictionService.analyzeTrendingTopics(allPosts);
-                if (trends.isEmpty) return Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Text("No trending topics yet.", style: TextStyle(color: Colors.grey)));
+
+                if (trends.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Text("No trending topics yet.", style: TextStyle(color: Colors.grey)),
+                  );
+                }
+
                 final maxItems = _showAllTrending ? 10 : 3;
                 final displayedTrends = trends.take(maxItems).toList();
+                final canExpand = trends.length > 3;
+
                 return Column(
                   children: [
                     ListView.separated(
@@ -437,29 +430,58 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                       separatorBuilder: (context, index) => Divider(height: 1, thickness: 0.5, color: theme.dividerColor.withOpacity(0.3)),
                       itemBuilder: (context, index) {
                         final tag = displayedTrends[index]['tag'];
+                        final count = displayedTrends[index]['count'];
+                        final isHashtag = tag.toString().startsWith('#');
+                        final isTopTrending = index == 0;
+                        
                         return ListTile(
                           dense: false,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           leading: Text("${index + 1}", style: TextStyle(color: theme.hintColor, fontWeight: FontWeight.bold, fontSize: 16)),
-                          title: Text(tag, style: TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text("${displayedTrends[index]['count']} posts"),
+                          title: Text(tag, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isHashtag ? TwitterTheme.blue : theme.textTheme.bodyLarge?.color)),
+                          subtitle: Text("$count distinct posts"),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isTopTrending) Padding(padding: const EdgeInsets.only(right: 8.0), child: Icon(Icons.local_fire_department, color: Colors.orange, size: 20)),
+                              Icon(Icons.arrow_forward_ios, size: 14, color: theme.hintColor),
+                            ],
+                          ),
                           onTap: () => _onTrendingTagClicked(tag),
                         );
                       },
                     ),
-                    if (trends.length > 3)
+                    if (canExpand)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                         child: InkWell(
                           onTap: () => setState(() => _showAllTrending = !_showAllTrending),
-                          child: Row(children: [Text(_showAllTrending ? "Show less" : "Show more", style: TextStyle(color: TwitterTheme.blue)), Icon(_showAllTrending ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: TwitterTheme.blue)]),
+                          child: Row(
+                            children: [
+                              Text(_showAllTrending ? "Show less" : "Show more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
+                              Icon(_showAllTrending ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: TwitterTheme.blue, size: 16)
+                            ],
+                          ),
                         ),
                       ),
                   ],
                 );
               },
             ),
+
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
-            Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), child: Row(children: [Icon(Icons.explore_outlined, color: Colors.purple), SizedBox(width: 8), Text("Discover For You", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900))])),
+
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.explore_outlined, color: Colors.purple),
+                  SizedBox(width: 8),
+                  Text("Discover For You", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                ],
+              ),
+            ),
+
             StreamBuilder<DocumentSnapshot>(
               stream: _auth.currentUser != null ? _firestore.collection('users').doc(_auth.currentUser!.uid).snapshots() : null,
               builder: (context, userSnapshot) {
@@ -468,26 +490,79 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   final uData = userSnapshot.data!.data() as Map<String, dynamic>;
                   followingList = uData['following'] ?? [];
                 }
+
                 return StreamBuilder<QuerySnapshot>(
                   stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
                   builder: (context, snapshot) {
                     if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: "Couldn't load discovery.", isConnectionError: true));
                     if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-                    final discoverDocs = _predictionService.getDiscoverRecommendations(snapshot.data!.docs, _auth.currentUser?.uid ?? '', followingList);
-                    if (discoverDocs.isEmpty) return Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0), child: Center(child: Text("No new discoveries.")));
-                    return Column(children: discoverDocs.take(10).map((doc) => BlogPostCard(postId: doc.id, postData: doc.data() as Map<String, dynamic>, isOwner: false, heroContextId: 'discover')).toList());
+                    
+                    // --- FILTER PUBLIC POSTS FOR DISCOVERY ---
+                    final publicPosts = snapshot.data!.docs.where((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      return (data['visibility'] ?? 'public') == 'public';
+                    }).toList();
+                    // -----------------------------------------
+
+                    final discoverDocs = _predictionService.getDiscoverRecommendations(
+                      publicPosts, 
+                      _auth.currentUser?.uid ?? '',
+                      followingList,
+                    );
+
+                    if (discoverDocs.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
+                        child: Center(child: Text("No new discoveries. Follow more people to help us learn!")),
+                      );
+                    }
+
+                    final displayedPosts = discoverDocs.take(10).toList();
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ...displayedPosts.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          return BlogPostCard(
+                            postId: doc.id,
+                            postData: data,
+                            isOwner: false,
+                            heroContextId: 'discover',
+                          );
+                        }).toList(),
+                      ],
+                    );
                   },
                 );
               }
             ),
+
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
-            Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), child: Row(children: [Icon(Icons.person_add_alt_1_outlined, color: Colors.blueAccent), SizedBox(width: 8), Text("People You Might Know", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900))])),
+
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.person_add_alt_1_outlined, color: Colors.blueAccent),
+                  SizedBox(width: 8),
+                  Text("People You Might Know", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                ],
+              ),
+            ),
+
             FutureBuilder<List<DocumentSnapshot>>(
               future: _getSuggestedUsers(_auth.currentUser?.uid),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
-                if (!snapshot.hasData || snapshot.data!.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text("No suggestions available."));
-                return Column(children: snapshot.data!.map((doc) => _UserSearchTile(userId: doc.id, userData: doc.data() as Map<String, dynamic>, currentUserId: _auth.currentUser?.uid)).toList());
+                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Couldn't load suggestions (Offline)."));
+                if (!snapshot.hasData || snapshot.data!.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text("No suggestions available right now."));
+                return Column(
+                  children: snapshot.data!.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return _UserSearchTile(userId: doc.id, userData: data, currentUserId: _auth.currentUser?.uid);
+                  }).toList(),
+                );
               }
             ),
           ],
@@ -496,24 +571,62 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
-  // _buildSearchResults dan _buildPostResults/_buildUserResults tetap sama...
-  // (Saya singkat agar tidak melebihi batas karakter, tapi pastikan copy dari kode sebelumnya 
-  // atau biarkan jika Anda sudah memilikinya karena tidak ada perubahan di bagian ini)
   Widget _buildSearchResults(ThemeData theme) {
-    return Column(children: [
-        Container(decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.dividerColor))), child: TabBar(controller: _tabController, labelColor: theme.primaryColor, unselectedLabelColor: theme.hintColor, indicatorColor: theme.primaryColor, tabs: const [Tab(text: 'Posts'), Tab(text: 'Users')])),
-        Expanded(child: TabBarView(controller: _tabController, children: [_buildPostResults(), _buildUserResults()])),
-    ]);
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.dividerColor))),
+          child: TabBar(
+            controller: _tabController,
+            labelColor: theme.primaryColor,
+            unselectedLabelColor: theme.hintColor,
+            indicatorColor: theme.primaryColor,
+            tabs: const [Tab(text: 'Posts'), Tab(text: 'Users')],
+          ),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [_buildPostResults(), _buildUserResults()],
+          ),
+        ),
+      ],
+    );
   }
-  
+
   Widget _buildPostResults() {
+    final currentUserId = _auth.currentUser?.uid;
+
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-        final docs = snapshot.data?.docs.where((doc) => (doc.data() as Map<String,dynamic>)['text'].toString().toLowerCase().contains(_searchText)).toList() ?? [];
-        if (docs.isEmpty) return Center(child: Text('No posts found'));
-        return ListView.builder(padding: EdgeInsets.only(bottom: 100), itemCount: docs.length, itemBuilder: (context, index) => BlogPostCard(postId: docs[index].id, postData: docs[index].data() as Map<String, dynamic>, isOwner: docs[index]['userId'] == _auth.currentUser?.uid, heroContextId: 'search_results'));
+        if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
+        if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
+        
+        final docs = snapshot.data?.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final text = (data['text'] ?? '').toString().toLowerCase();
+          
+          // --- FILTER VISIBILITY ---
+          final visibility = data['visibility'] ?? 'public';
+          final ownerId = data['userId'];
+          final isVisible = (visibility == 'public') || (ownerId == currentUserId);
+          // ------------------------
+
+          return isVisible && text.contains(_searchText);
+        }).toList() ?? [];
+
+        if (docs.isEmpty) return Center(child: Text('No posts found for "$_searchText"'));
+        
+        return ListView.builder(
+          padding: EdgeInsets.only(bottom: 100),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            return BlogPostCard(postId: docs[index].id, postData: data, isOwner: data['userId'] == currentUserId, heroContextId: 'search_results');
+          },
+        );
       },
     );
   }
@@ -523,24 +636,31 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('users').limit(100).snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return CommonErrorWidget(message: "User search failed.", isConnectionError: true);
+        if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
-          return (data['name']??'').toString().toLowerCase().contains(_searchText);
+          final name = (data['name'] ?? '').toString().toLowerCase();
+          final email = (data['email'] ?? '').toString().toLowerCase();
+          return name.contains(_searchText) || email.contains(_searchText);
         }).toList() ?? [];
-        if (docs.isEmpty) return Center(child: Text('No users found'));
-        return ListView.builder(padding: EdgeInsets.only(bottom: 100), itemCount: docs.length, itemBuilder: (context, index) {
-          if (docs[index].id == myUid) return SizedBox.shrink();
-          return _UserSearchTile(userId: docs[index].id, userData: docs[index].data() as Map<String, dynamic>, currentUserId: myUid);
-        });
+        if (docs.isEmpty) return Center(child: Text('No users found for "$_searchText"'));
+        return ListView.builder(
+          padding: EdgeInsets.only(bottom: 100),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            final userId = docs[index].id;
+            if (userId == myUid) return SizedBox.shrink();
+            return _UserSearchTile(userId: userId, userData: data, currentUserId: myUid);
+          },
+        );
       },
     );
   }
 }
 
-// _UserSearchTile class tetap sama seperti kode sebelumnya...
-// (Jika Anda butuh full code user tile lagi, beri tahu saya, 
-// tapi bagian ini tidak ada perubahan dari versi sebelumnya)
 class _UserSearchTile extends StatefulWidget {
   final String userId;
   final Map<String, dynamic> userData;
@@ -559,7 +679,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     setState(() { _isFollowing = followers.contains(widget.currentUserId); });
   }
   Future<void> _toggleFollow() async {
-    // Logika follow tetap sama
     if (widget.currentUserId == null) return;
     final myDocRef = _firestore.collection('users').doc(widget.currentUserId);
     final targetDocRef = _firestore.collection('users').doc(widget.userId);

@@ -10,8 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:badword_guard/badword_guard.dart'; // Untuk Caption & Hasil Analisis Gambar
-import 'package:visual_detector_ai/visual_detector_ai.dart'; // PLUGIN BARU
+import 'package:badword_guard/badword_guard.dart'; // REQUIRED
+import 'package:visual_detector_ai/visual_detector_ai.dart'; // REQUIRED
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
@@ -41,11 +41,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final PredictionService _predictionService = PredictionService();
   final FocusNode _postFocusNode = FocusNode();
 
-  // Inisialisasi BadwordGuard
-  final BadwordGuard _badwordGuard = BadwordGuard();
+  // FIX: Menggunakan LanguageChecker sesuai library badword_guard terbaru
+  final LanguageChecker _badwordGuard = LanguageChecker();
 
   bool _canPost = false;
   bool _isProcessing = false;
+
+  // --- NEW: VISIBILITY STATE ---
+  String _visibility = 'public'; // Default public
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
@@ -72,6 +75,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _postController.text = widget.initialData!['text'] ?? '';
       _existingMediaUrl = widget.initialData!['mediaUrl'];
       _mediaType = widget.initialData!['mediaType'];
+      
+      // Load existing visibility
+      _visibility = widget.initialData!['visibility'] ?? 'public';
+      
       _checkCanPost();
     }
   }
@@ -105,9 +112,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // --- MODUL FILTER: VISUAL DETECTOR AI ---
+  // --- VISUAL DETECTOR AI ---
   Future<bool> _checkImageSafety() async {
-    // Jika tidak ada gambar baru yang dipilih, lewati pemeriksaan (Aman)
     if (_selectedMediaFile == null || _mediaType != 'image') return true;
 
     setState(() => _isProcessing = true);
@@ -115,29 +121,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
-      if (apiKey == null || apiKey.isEmpty) {
-        debugPrint("API Key missing, skipping visual check.");
-        return true;
-      }
+      if (apiKey == null || apiKey.isEmpty) return true;
 
-      // 1. Analisis Gambar menggunakan visual_detector_ai
-      // Plugin ini akan mengembalikan deskripsi gambar.
+      // Analisis Gambar
       final result = await VisualDetectorAi.analyzeImage(
         image: _selectedMediaFile!,
         geminiApiKey: apiKey,
-        // Kita gunakan bahasa Inggris agar keyword 18+ lebih mudah dideteksi secara global
-        // Namun Anda bisa mengubahnya jika plugin mendukung parameter bahasa lain.
       );
 
-      final String description = result.text.toLowerCase();
+      // FIX: Gunakan toString() untuk mendapatkan deskripsi teks dari objek result
+      // Ini lebih aman karena setiap objek di Dart memiliki metode toString()
+      final String description = result.toString().toLowerCase(); 
       debugPrint("Visual Analysis Result: $description");
 
-      // 2. Cek Keywords Berbahaya (18+ / Kekerasan) pada Deskripsi
-      // Jika AI mendeskripsikan hal-hal ini, berarti gambar tersebut mengandung unsur tersebut.
       final List<String> dangerKeywords = [
-        'nude', 'naked', 'sex', 'genitals', 'porn', 'erotic', // 18+
-        'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill', // Kekerasan
-        'telanjang', 'bugil', 'darah', 'membunuh' // Keyword Indo jaga-jaga
+        'nude', 'naked', 'sex', 'genitals', 'porn', 'erotic', 
+        'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill',
+        'telanjang', 'bugil', 'darah', 'membunuh' 
       ];
 
       for (var word in dangerKeywords) {
@@ -147,19 +147,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         }
       }
 
-      // 3. Cek SARA menggunakan Badword Guard pada Deskripsi Gambar
-      // (Misal ada tulisan SARA di dalam gambar yang terbaca oleh AI)
-      if (_badwordGuard.containsBadWord(description)) {
+      // Cek SARA pada deskripsi gambar menggunakan LanguageChecker
+      if (_badwordGuard.containsBadLanguage(description)) {
         if (mounted) _showRejectDialog("Gambar terdeteksi mengandung unsur tidak pantas.");
         return false;
       }
 
-      return true; // Lolos pemeriksaan
+      return true; 
 
     } catch (e) {
       debugPrint("Visual Detector Error: $e");
-      // PENTING: Jika Gemini menolak mendeskripsikan gambar (biasanya karena Safety Filter aktif),
-      // ia akan melempar Exception. Kita tangkap ini sebagai tanda "Gambar Tidak Aman".
+      // Jika AI menolak memproses (karena safety filter internalnya), anggap TIDAK AMAN
       if (mounted) _showRejectDialog("Gambar ditolak oleh sistem keamanan AI.");
       return false;
     } finally {
@@ -335,27 +333,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // --- 1. FILTER TEKS (CAPTION) ---
+    // 1. FILTER TEKS
     final text = _postController.text;
-    if (_badwordGuard.containsBadWord(text)) {
+    if (_badwordGuard.containsBadLanguage(text)) {
       _showRejectDialog("Caption mengandung kata-kata yang dilarang.");
       return;
     }
 
-    // --- 2. FILTER GAMBAR (VISUAL AI) ---
-    // Cek apakah gambar aman menggunakan Visual Detector AI
+    // 2. FILTER GAMBAR
     final isImageSafe = await _checkImageSafety();
-    if (!isImageSafe) {
-      // Dialog penolakan sudah ditangani di dalam fungsi _checkImageSafety
-      return; 
-    }
+    if (!isImageSafe) return; 
 
-    // --- 3. PROSES UPLOAD ---
+    // 3. PROSES UPLOAD
     final File? mediaFile = _selectedMediaFile;
     final String? existingUrl = _existingMediaUrl;
     final String? mediaType = _mediaType;
     final bool isEditing = _isEditing;
     final String? postId = widget.postId;
+    final String visibility = _visibility; 
 
     final String uid = user.uid;
     final String uName = _userName;
@@ -376,6 +371,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         mediaFile: mediaFile,
         existingMediaUrl: existingUrl,
         mediaType: mediaType,
+        visibility: visibility,
         isEditing: isEditing,
         postId: postId,
         uid: uid,
@@ -411,6 +407,40 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         title: _isEditing ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) : null,
         centerTitle: false,
         actions: [
+          // --- DROPDOWN VISIBILITY SELECTOR ---
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10.0),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _visibility,
+                  icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
+                  style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.bold, fontSize: 13),
+                  onChanged: (String? newValue) {
+                    if (newValue != null) {
+                      setState(() => _visibility = newValue);
+                    }
+                  },
+                  items: [
+                    DropdownMenuItem(
+                      value: 'public',
+                      child: Row(children: [Icon(Icons.public, size: 16, color: Colors.blue), SizedBox(width: 4), Text("Public")]),
+                    ),
+                    DropdownMenuItem(
+                      value: 'private',
+                      child: Row(children: [Icon(Icons.lock, size: 16, color: Colors.red), SizedBox(width: 4), Text("Private")]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: ElevatedButton(
@@ -576,29 +606,6 @@ class _MediaPreviewWidget extends StatelessWidget {
           right: 5, top: 15,
           child: IconButton(icon: Icon(Icons.cancel, color: Colors.white), onPressed: onRemove),
         ),
-        
-        if (type == 'image' && onGenerateCaption != null)
-          Positioned(
-            right: 5, 
-            bottom: 15,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white24)
-              ),
-              child: isGenerating 
-                ? Padding(
-                    padding: const EdgeInsets.all(10.0),
-                    child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-                  )
-                : IconButton(
-                    icon: Icon(Icons.auto_awesome, color: Colors.white), 
-                    tooltip: "Generate Caption",
-                    onPressed: onGenerateCaption,
-                  ),
-            ),
-          )
       ],
     );
   }
@@ -612,6 +619,7 @@ class _BackgroundUploader {
     required File? mediaFile,
     required String? existingMediaUrl,
     required String? mediaType,
+    required String visibility, // Add this
     required bool isEditing,
     required String? postId,
     required String uid,
@@ -640,6 +648,7 @@ class _BackgroundUploader {
       mediaFile: mediaFile,
       existingMediaUrl: existingMediaUrl,
       mediaType: mediaType,
+      visibility: visibility,
       isEditing: isEditing,
       postId: postId,
       uid: uid,
@@ -671,6 +680,7 @@ class _BackgroundUploader {
     File? mediaFile,
     String? existingMediaUrl,
     String? mediaType,
+    required String visibility, // Add this
     required bool isEditing,
     String? postId,
     required String uid,
@@ -717,6 +727,7 @@ class _BackgroundUploader {
           'text': text,
           'mediaUrl': finalMediaUrl,
           'mediaType': mediaType,
+          'visibility': visibility, // Update visibility
           'isUploading': false,
           'editedAt': FieldValue.serverTimestamp(),
         });
@@ -735,6 +746,7 @@ class _BackgroundUploader {
           'repostedBy': [],
           'mediaUrl': finalMediaUrl,
           'mediaType': mediaType,
+          'visibility': visibility, // Add visibility
           'isUploading': false,
         });
       }
@@ -848,7 +860,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
               child: Material(
                 elevation: 4,
                 shape: CircleBorder(),
-                color: _isSuccess ? Colors.green : TwitterTheme.blue,
+                color: _isSuccess ? Colors.green : TwitterTheme.white,
                 child: Container(
                   width: 36, height: 36, padding: EdgeInsets.all(8),
                   child: _isSuccess 

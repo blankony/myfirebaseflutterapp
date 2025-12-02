@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/blog_post_card.dart';
-import '../../widgets/common_error_widget.dart'; // REQUIRED
+import '../../widgets/common_error_widget.dart';
 import '../../main.dart';
 import '../../services/prediction_service.dart';
 
@@ -79,12 +79,10 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
             StreamBuilder<QuerySnapshot>(
               stream: _postsStream,
               builder: (context, snapshot) {
-                // 1. Handle Loading
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return Center(child: CircularProgressIndicator());
                 }
                 
-                // 2. Handle Errors (Offline/Permission)
                 if (snapshot.hasError) {
                   return Padding(
                     padding: EdgeInsets.only(top: contentTopPadding),
@@ -96,31 +94,41 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   );
                 }
 
-                List<QueryDocumentSnapshot> docs = snapshot.data?.docs ?? [];
+                List<QueryDocumentSnapshot> allDocs = snapshot.data?.docs ?? [];
                 
-                // --- APPLY AI RECOMMENDATION ALGORITHM ---
-                if (widget.isRecommended && docs.isNotEmpty) {
-                  docs = _aiService.getPersonalizedRecommendations(
-                    docs, 
+                final visibleDocs = allDocs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final visibility = data['visibility'] ?? 'public';
+                  final ownerId = data['userId'];
+                  
+                  if (visibility == 'public') return true;
+                  if (visibility == 'private' && ownerId == currentUserId) return true;
+                  
+                  return false;
+                }).toList();
+
+                List<QueryDocumentSnapshot> finalDocs = visibleDocs;
+                if (widget.isRecommended && visibleDocs.isNotEmpty) {
+                  finalDocs = _aiService.getPersonalizedRecommendations(
+                    visibleDocs,
                     userData, 
                     currentUserId ?? ''
                   );
                 }
-                // ------------------------------------------
 
                 return RefreshIndicator(
                   onRefresh: _handleRefresh,
                   color: TwitterTheme.blue,
                   edgeOffset: refreshIndicatorOffset,
-                  child: docs.isNotEmpty
+                  child: finalDocs.isNotEmpty
                       ? ListView.builder(
                           key: PageStorageKey('home_list_${widget.isRecommended ? 'rec' : 'recents'}$_refreshKey'),
                           controller: widget.scrollController,
                           physics: const AlwaysScrollableScrollPhysics(),
                           padding: EdgeInsets.only(top: contentTopPadding, bottom: 100),
-                          itemCount: docs.length,
+                          itemCount: finalDocs.length,
                           itemBuilder: (context, index) {
-                            final doc = docs[index];
+                            final doc = finalDocs[index];
                             final data = doc.data() as Map<String, dynamic>;
                             
                             return Column(
