@@ -9,9 +9,12 @@ import 'package:image_editor_plus/image_editor_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_compress/video_compress.dart'; 
+import 'package:google_generative_ai/google_generative_ai.dart'; // REQUIRED FOR GEMINI
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // REQUIRED FOR API KEY
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
+import '../services/overlay_service.dart'; // REQUIRED FOR NOTIFICATION
 import 'video_trimmer_screen.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -38,6 +41,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final FocusNode _postFocusNode = FocusNode();
 
   bool _canPost = false;
+  bool _isGeneratingCaption = false; // State for loading animation
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
@@ -68,10 +72,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // --- AI LOGIC ---
+
   Future<void> _trainAiModel() async {
     final user = _auth.currentUser;
     if (user == null) return;
-
     try {
       final snapshot = await _firestore
           .collection('posts')
@@ -79,16 +84,82 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           .orderBy('timestamp', descending: true)
           .limit(50)
           .get();
-
       List<String> postHistory = snapshot.docs
           .map((doc) => (doc.data()['text'] ?? '').toString())
           .where((text) => text.isNotEmpty)
           .toList();
-
       _predictionService.learnFromUserPosts(postHistory);
-      
     } catch (e) {
       print("AI Training failed: $e");
+    }
+  }
+
+  // --- MODIFIED: GEMINI IMAGE DESCRIPTION (SHORT & DIRECT) ---
+  Future<void> _generateImageCaption() async {
+    if (_selectedMediaFile == null || _mediaType != 'image') return;
+
+    setState(() {
+      _isGeneratingCaption = true;
+    });
+
+    try {
+      final apiKey = dotenv.env['GEMINI_API_KEY'];
+      if (apiKey == null) throw Exception("API Key not found");
+
+      // Initialize Gemini Model (Flash is faster/cheaper for vision)
+      final model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
+      
+      final imageBytes = await _selectedMediaFile!.readAsBytes();
+      
+      // --- UPDATED PROMPT FOR BREVITY AND DIRECTNESS ---
+      String promptText = "Deskripsikan objek atau pemandangan utama dalam gambar ini secara sangat singkat, padat, dan langsung pada intinya (to the point) dalam Bahasa Indonesia. Maksimal satu kalimat. Jangan gunakan emoji atau gaya bahasa media sosial. Keep it simple";
+      // --------------------------------------------------
+      
+      if (_postController.text.isNotEmpty) {
+        // If user already typed something, ask AI to keep it relevant but still short.
+        promptText += ". Jika relevan, hubungkan deskripsi singkat ini dengan konteks: '${_postController.text}'";
+      }
+
+      final content = [
+        Content.multi([
+          TextPart(promptText),
+          DataPart('image/jpeg', imageBytes), 
+        ])
+      ];
+
+      final response = await model.generateContent(content);
+      
+      if (response.text != null && mounted) {
+        String newText = response.text!.trim();
+        
+        // Remove markdown formatting just in case
+        newText = newText.replaceAll('**', '').replaceAll('*', '');
+
+        setState(() {
+          if (_postController.text.isEmpty) {
+            _postController.text = newText;
+          } else {
+            // Add a new line if appending
+            _postController.text = "${_postController.text}\n$newText";
+          }
+          // Move cursor to end
+          _postController.selection = TextSelection.fromPosition(TextPosition(offset: _postController.text.length));
+          _onTextChanged(_postController.text);
+        });
+        
+        OverlayService().showTopNotification(context, "Description generated", Icons.short_text, (){}, color: Colors.purple);
+      }
+    } catch (e) {
+      if (mounted) {
+        OverlayService().showTopNotification(context, "Failed to generate description", Icons.error_outline, (){}, color: Colors.red);
+        debugPrint("Gemini Error: $e");
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGeneratingCaption = false;
+        });
+      }
     }
   }
 
@@ -121,9 +192,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     _debounce = Timer(const Duration(milliseconds: 300), () async { 
       if (text.trim().isEmpty) return;
-      
       final suggestion = await _predictionService.getLocalPrediction(text);
-      
       if (mounted && suggestion != null && suggestion.isNotEmpty) {
         setState(() {
           _predictedText = suggestion;
@@ -137,15 +206,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final currentText = _postController.text;
       final separator = currentText.endsWith(' ') ? '' : ' ';
       final newText = "$currentText$separator$_predictedText "; 
-
       _postController.text = newText;
       _postController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
-
       setState(() {
         _predictedText = null;
         _canPost = newText.trim().isNotEmpty || _selectedMediaFile != null || _existingMediaUrl != null;
       });
-      
       _onTextChanged(newText);
     }
   }
@@ -168,7 +234,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (e) { /* Fail silently */ }
   }
 
-  // --- MODIFIED: Show Source Selection Modal ---
   void _showMediaSourceSelection({required bool isVideo}) {
     FocusScope.of(context).unfocus();
     showModalBottomSheet(
@@ -206,16 +271,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  // --- MODIFIED: Accepts ImageSource ---
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
     final picker = ImagePicker();
     XFile? pickedFile;
 
     try {
       if (isVideo) {
-        // Limitation: pickVideo from camera usually records directly
         pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
-        
         if (pickedFile != null && mounted) {
           final result = await Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile!.path))),
@@ -232,7 +294,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       } else {
         pickedFile = await picker.pickImage(source: source, imageQuality: 80);
         if (pickedFile != null && mounted) {
-          // If from camera, we might want to edit it directly
           final processedFile = await _editAndCompressPostImage(pickedFile);
           if (processedFile != null) {
             setState(() {
@@ -327,8 +388,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: ElevatedButton(
-              onPressed: _canPost ? _submitPost : null,
-              child: Text(_isEditing ? 'Save' : 'Post'),
+              onPressed: _canPost && !_isGeneratingCaption ? _submitPost : null,
+              child: _isGeneratingCaption 
+                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : Text(_isEditing ? 'Save' : 'Post'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: TwitterTheme.blue,
                 foregroundColor: Colors.white,
@@ -370,9 +433,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           ),
                         ),
                         if (_selectedMediaFile != null)
-                          _MediaPreviewWidget(fileOrUrl: _selectedMediaFile, type: _mediaType ?? 'image', onRemove: _clearMedia)
+                          _MediaPreviewWidget(
+                            fileOrUrl: _selectedMediaFile, 
+                            type: _mediaType ?? 'image', 
+                            onRemove: _clearMedia,
+                            onGenerateCaption: _generateImageCaption, // Pass the function here
+                            isGenerating: _isGeneratingCaption,
+                          )
                         else if (_existingMediaUrl != null)
-                          _MediaPreviewWidget(fileOrUrl: _existingMediaUrl, type: _mediaType ?? 'image', onRemove: _clearMedia),
+                          _MediaPreviewWidget(
+                            fileOrUrl: _existingMediaUrl, 
+                            type: _mediaType ?? 'image', 
+                            onRemove: _clearMedia,
+                            // Note: We can't easily gen-AI existing URLs without downloading them first or sending URL to a backend proxy.
+                            // For simplicity, we disable magic wand for existing URLs in edit mode.
+                            onGenerateCaption: null, 
+                            isGenerating: false,
+                          ),
                         
                         // --- PREDICTION UI ---
                         if (_predictedText != null)
@@ -418,7 +495,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 top: false,
                 child: Row(
                   children: [
-                    // MODIFIED: Calls selection modal
                     IconButton(
                       icon: Icon(Icons.image, color: TwitterTheme.blue),
                       onPressed: () => _showMediaSourceSelection(isVideo: false),
@@ -442,7 +518,16 @@ class _MediaPreviewWidget extends StatelessWidget {
   final dynamic fileOrUrl;
   final String type;
   final VoidCallback onRemove;
-  const _MediaPreviewWidget({required this.fileOrUrl, required this.type, required this.onRemove});
+  final VoidCallback? onGenerateCaption; // New Callback
+  final bool isGenerating; // New State
+
+  const _MediaPreviewWidget({
+    required this.fileOrUrl, 
+    required this.type, 
+    required this.onRemove,
+    this.onGenerateCaption,
+    this.isGenerating = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -465,12 +550,37 @@ class _MediaPreviewWidget extends StatelessWidget {
         Positioned(
           right: 5, top: 15,
           child: IconButton(icon: Icon(Icons.cancel, color: Colors.white), onPressed: onRemove),
-        )
+        ),
+        
+        // --- NEW: MAGIC WAND BUTTON ---
+        if (type == 'image' && onGenerateCaption != null)
+          Positioned(
+            right: 5, 
+            bottom: 15,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white24)
+              ),
+              child: isGenerating 
+                ? Padding(
+                    padding: const EdgeInsets.all(10.0),
+                    child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+                  )
+                : IconButton(
+                    icon: Icon(Icons.auto_awesome, color: Colors.white), 
+                    tooltip: "Generate Description",
+                    onPressed: onGenerateCaption,
+                  ),
+            ),
+          )
       ],
     );
   }
 }
 
+// Background Uploader Class (Unchanged)
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
