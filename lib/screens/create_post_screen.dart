@@ -8,14 +8,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_editor_plus/image_editor_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:video_compress/video_compress.dart'; 
-import 'package:google_generative_ai/google_generative_ai.dart'; 
-import 'package:flutter_dotenv/flutter_dotenv.dart'; 
-import 'package:badword_guard/badword_guard.dart'; // REQUIRED: Pastikan package ini sudah diinstall
+import 'package:video_compress/video_compress.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:badword_guard/badword_guard.dart'; // Untuk Caption & Hasil Analisis Gambar
+import 'package:visual_detector_ai/visual_detector_ai.dart'; // PLUGIN BARU
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
-import '../services/overlay_service.dart'; 
+import '../services/overlay_service.dart';
 import 'video_trimmer_screen.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -38,14 +38,14 @@ class CreatePostScreen extends StatefulWidget {
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _postController = TextEditingController();
-  final PredictionService _predictionService = PredictionService(); 
+  final PredictionService _predictionService = PredictionService();
   final FocusNode _postFocusNode = FocusNode();
 
   // Inisialisasi BadwordGuard
   final BadwordGuard _badwordGuard = BadwordGuard();
 
   bool _canPost = false;
-  bool _isProcessing = false; 
+  bool _isProcessing = false;
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
@@ -66,7 +66,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void initState() {
     super.initState();
     _loadUserData();
-    _trainAiModel(); 
+    _trainAiModel();
 
     if (_isEditing && widget.initialData != null) {
       _postController.text = widget.initialData!['text'] ?? '';
@@ -79,7 +79,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _checkCanPost() {
     final textNotEmpty = _postController.text.trim().isNotEmpty;
     final hasMedia = _selectedMediaFile != null || _existingMediaUrl != null;
-    
+
     setState(() {
       _canPost = textNotEmpty || hasMedia;
     });
@@ -105,69 +105,79 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // --- MODUL FILTER: VISUAL DETECTOR AI ---
+  Future<bool> _checkImageSafety() async {
+    // Jika tidak ada gambar baru yang dipilih, lewati pemeriksaan (Aman)
+    if (_selectedMediaFile == null || _mediaType != 'image') return true;
+
+    setState(() => _isProcessing = true);
+    OverlayService().showTopNotification(context, "Memindai gambar...", Icons.remove_red_eye, (){}, color: Colors.orange);
+
+    try {
+      final apiKey = dotenv.env['GEMINI_API_KEY'];
+      if (apiKey == null || apiKey.isEmpty) {
+        debugPrint("API Key missing, skipping visual check.");
+        return true;
+      }
+
+      // 1. Analisis Gambar menggunakan visual_detector_ai
+      // Plugin ini akan mengembalikan deskripsi gambar.
+      final result = await VisualDetectorAi.analyzeImage(
+        image: _selectedMediaFile!,
+        geminiApiKey: apiKey,
+        // Kita gunakan bahasa Inggris agar keyword 18+ lebih mudah dideteksi secara global
+        // Namun Anda bisa mengubahnya jika plugin mendukung parameter bahasa lain.
+      );
+
+      final String description = result.text.toLowerCase();
+      debugPrint("Visual Analysis Result: $description");
+
+      // 2. Cek Keywords Berbahaya (18+ / Kekerasan) pada Deskripsi
+      // Jika AI mendeskripsikan hal-hal ini, berarti gambar tersebut mengandung unsur tersebut.
+      final List<String> dangerKeywords = [
+        'nude', 'naked', 'sex', 'genitals', 'porn', 'erotic', // 18+
+        'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill', // Kekerasan
+        'telanjang', 'bugil', 'darah', 'membunuh' // Keyword Indo jaga-jaga
+      ];
+
+      for (var word in dangerKeywords) {
+        if (description.contains(word)) {
+          if (mounted) _showRejectDialog("Gambar terdeteksi mengandung unsur sensitif/18+ ($word).");
+          return false;
+        }
+      }
+
+      // 3. Cek SARA menggunakan Badword Guard pada Deskripsi Gambar
+      // (Misal ada tulisan SARA di dalam gambar yang terbaca oleh AI)
+      if (_badwordGuard.containsBadWord(description)) {
+        if (mounted) _showRejectDialog("Gambar terdeteksi mengandung unsur tidak pantas.");
+        return false;
+      }
+
+      return true; // Lolos pemeriksaan
+
+    } catch (e) {
+      debugPrint("Visual Detector Error: $e");
+      // PENTING: Jika Gemini menolak mendeskripsikan gambar (biasanya karena Safety Filter aktif),
+      // ia akan melempar Exception. Kita tangkap ini sebagai tanda "Gambar Tidak Aman".
+      if (mounted) _showRejectDialog("Gambar ditolak oleh sistem keamanan AI.");
+      return false;
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
   void _showRejectDialog(String reason) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Ditolak")]),
-        content: Text("Postingan mengandung kata-kata yang dilarang.\n\n$reason"),
+        content: Text("Konten Anda tidak dapat diposting.\n\nAlasan: $reason"),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Perbaiki", style: TextStyle(color: TwitterTheme.blue)))
         ],
       ),
     );
-  }
-
-  // --- GEMINI IMAGE CAPTION (TETAP DIPERTAHANKAN) ---
-  Future<void> _generateImageCaption() async {
-    if (_selectedMediaFile == null || _mediaType != 'image') return;
-
-    setState(() => _isProcessing = true);
-
-    try {
-      final apiKey = dotenv.env['GEMINI_API_KEY'];
-      if (apiKey == null) throw Exception("API Key not found");
-
-      final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: apiKey);
-      final imageBytes = await _selectedMediaFile!.readAsBytes();
-      
-      String promptText = "Deskripsikan objek utama gambar ini dengan sangat singkat (max 1 kalimat), to the point, bahasa Indonesia formal. Tanpa emoji.";
-      
-      if (_postController.text.isNotEmpty) {
-        promptText += ". Hubungkan dengan: '${_postController.text}'";
-      }
-
-      final content = [
-        Content.multi([
-          TextPart(promptText),
-          DataPart('image/jpeg', imageBytes), 
-        ])
-      ];
-
-      final response = await model.generateContent(content);
-      
-      if (response.text != null && mounted) {
-        String newText = response.text!.trim().replaceAll('**', '').replaceAll('*', '');
-
-        setState(() {
-          if (_postController.text.isEmpty) {
-            _postController.text = newText;
-          } else {
-            _postController.text = "${_postController.text}\n$newText";
-          }
-          _postController.selection = TextSelection.fromPosition(TextPosition(offset: _postController.text.length));
-          _checkCanPost(); 
-        });
-        
-        OverlayService().showTopNotification(context, "Description generated", Icons.short_text, (){}, color: Colors.purple);
-      }
-    } catch (e) {
-      if (mounted) {
-        OverlayService().showTopNotification(context, "Failed to generate description", Icons.error_outline, (){}, color: Colors.red);
-      }
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
-    }
   }
 
   Future<File?> _editAndCompressPostImage(XFile pickedFile) async {
@@ -188,12 +198,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _onTextChanged(String text) {
-    _checkCanPost(); 
+    _checkCanPost();
     _predictedText = null;
 
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    _debounce = Timer(const Duration(milliseconds: 300), () async { 
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (text.trim().isEmpty) return;
       final suggestion = await _predictionService.getLocalPrediction(text);
       if (mounted && suggestion != null && suggestion.isNotEmpty) {
@@ -206,7 +216,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_predictedText != null) {
       final currentText = _postController.text;
       final separator = currentText.endsWith(' ') ? '' : ' ';
-      final newText = "$currentText$separator$_predictedText "; 
+      final newText = "$currentText$separator$_predictedText ";
       _postController.text = newText;
       _postController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
       setState(() {
@@ -288,7 +298,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               _mediaType = 'video';
               _selectedMediaFile = result['file'];
               _existingMediaUrl = null;
-              _checkCanPost(); 
+              _checkCanPost();
             });
           }
         }
@@ -301,7 +311,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               _mediaType = 'image';
               _selectedMediaFile = processedFile;
               _existingMediaUrl = null;
-              _checkCanPost(); 
+              _checkCanPost();
             });
           }
         }
@@ -316,7 +326,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _selectedMediaFile = null;
       _existingMediaUrl = null;
       _mediaType = null;
-      _checkCanPost(); 
+      _checkCanPost();
     });
   }
 
@@ -325,17 +335,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // --- 1. LOCAL BADWORD CHECK (REPLACEMENT FOR GEMINI) ---
+    // --- 1. FILTER TEKS (CAPTION) ---
     final text = _postController.text;
-    
-    // Cek apakah teks mengandung kata kasar menggunakan plugin
     if (_badwordGuard.containsBadWord(text)) {
-      _showRejectDialog("Mohon gunakan bahasa yang sopan.");
+      _showRejectDialog("Caption mengandung kata-kata yang dilarang.");
+      return;
+    }
+
+    // --- 2. FILTER GAMBAR (VISUAL AI) ---
+    // Cek apakah gambar aman menggunakan Visual Detector AI
+    final isImageSafe = await _checkImageSafety();
+    if (!isImageSafe) {
+      // Dialog penolakan sudah ditangani di dalam fungsi _checkImageSafety
       return; 
     }
-    // --------------------------------------------------------
 
-    // 2. Persiapan Data
+    // --- 3. PROSES UPLOAD ---
     final File? mediaFile = _selectedMediaFile;
     final String? existingUrl = _existingMediaUrl;
     final String? mediaType = _mediaType;
@@ -349,7 +364,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final String uHex = _avatarHex;
     final String? uProfileImg = _profileImageUrl;
 
-    // 3. Tutup Layar & Jalankan Background Upload
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop();
 
@@ -449,8 +463,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             fileOrUrl: _selectedMediaFile, 
                             type: _mediaType ?? 'image', 
                             onRemove: _clearMedia,
-                            onGenerateCaption: _generateImageCaption,
-                            isGenerating: _isProcessing,
+                            // (Opsional) Jika ingin fitur generate caption dari plugin ini juga bisa
+                            // Tapi user request hanya untuk filter saat upload
+                            onGenerateCaption: null, 
+                            isGenerating: false,
                           )
                         else if (_existingMediaUrl != null)
                           _MediaPreviewWidget(
@@ -578,7 +594,7 @@ class _MediaPreviewWidget extends StatelessWidget {
                   )
                 : IconButton(
                     icon: Icon(Icons.auto_awesome, color: Colors.white), 
-                    tooltip: "Generate Description",
+                    tooltip: "Generate Caption",
                     onPressed: onGenerateCaption,
                   ),
             ),
