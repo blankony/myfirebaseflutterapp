@@ -13,15 +13,15 @@ import 'package:image_cropper/image_cropper.dart';
 // Ensure these imports match your actual file structure
 import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
-import '../../widgets/common_error_widget.dart'; // REQUIRED for offline handling
+import '../../widgets/common_error_widget.dart'; 
 import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../image_viewer_screen.dart';
 import 'settings_page.dart';
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../../services/moderation_service.dart'; // REQUIRED for blocking
-import '../follow_list_screen.dart'; // REQUIRED for following lists
+import '../../services/moderation_service.dart'; 
+import '../follow_list_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -51,10 +51,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _isScrolled = false;
   bool _isBioExpanded = false;
   
-  // Blocking State
   bool _isBlocked = false;
-
-  // Optimistic Pinning State
   String? _optimisticPinnedPostId; 
 
   @override
@@ -68,34 +65,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     
     _checkBlockedStatus();
 
-    // Always start at index 0 (Posts tab)
     _tabController = TabController(
       length: 3, 
       vsync: this, 
       initialIndex: 0,
     );
     
-    // NUCLEAR FIX: Force immediate tab reset MULTIPLE times
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _tabController.index = 0;
-    });
-    
-    Future.delayed(Duration(milliseconds: 50), () {
-      if (mounted) _tabController.index = 0;
-    });
-    
-    Future.delayed(Duration(milliseconds: 100), () {
       if (mounted) _tabController.index = 0;
     });
     
     _scrollController.addListener(_scrollListener);
   }
 
-  // ALSO ADD THIS: Override reassemble (called on hot reload)
   @override
   void reassemble() {
     super.reassemble();
-    // Reset to Posts tab on hot reload
     if (_tabController.index != 0) {
       _tabController.index = 0;
     }
@@ -103,7 +88,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   void _checkBlockedStatus() async {
     if (_user == null) return;
-    // Listen to my blocked list
     moderationService.streamBlockedUsers().listen((blockedList) {
       if (mounted) {
         setState(() {
@@ -124,14 +108,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     }
   }
 
-  // --- HANDLERS ---
-
   void _handlePinToggle(String postId, bool isPinned) {
     setState(() {
       _optimisticPinnedPostId = isPinned ? postId : ''; 
     });
     
-    // Show overlay notification
     if (isPinned) {
       OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
     } else {
@@ -201,7 +182,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     } catch (e) { debugPrint("Sync fail: $e"); }
   }
 
-  // --- NEW: Source Selection Modal ---
   void _showImageSourceSelection({required bool isBanner}) {
     showModalBottomSheet(
       context: context,
@@ -238,7 +218,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- MODIFIED: Accepts ImageSource ---
   Future<void> _pickAndUploadImage({required bool isBanner, required ImageSource source}) async {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 70);
@@ -295,7 +274,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
                 title: Text("Change Banner"),
-                // Calls Selection Modal
                 onTap: () { Navigator.pop(context); _showImageSourceSelection(isBanner: true); },
               ),
               SizedBox(height: 12),
@@ -327,7 +305,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
                 title: Text("Change Photo"),
-                // Calls Selection Modal
                 onTap: () { Navigator.pop(context); _showImageSourceSelection(isBanner: false); },
               ),
               SizedBox(height: 12),
@@ -338,38 +315,61 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // Follow/Unfollow/Share/Block/SignOut
-  Future<void> _followUser() async {
+  Future<void> _followUser(bool isPrivate) async {
     if (_user == null) return;
-    try {
-      final batch = _firestore.batch();
-      final myDocRef = _firestore.collection('users').doc(_user!.uid);
-      final targetDocRef = _firestore.collection('users').doc(_userId);
-      batch.update(myDocRef, {'following': FieldValue.arrayUnion([_userId])});
-      batch.update(targetDocRef, {'followers': FieldValue.arrayUnion([_user!.uid])});
-      await batch.commit();
-      _firestore.collection('users').doc(_userId).collection('notifications').doc('follow_${_user!.uid}').set({
-        'type': 'follow', 'senderId': _user!.uid, 'timestamp': FieldValue.serverTimestamp(), 'isRead': false,
-      });
-    } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Failed to follow", Icons.error, (){}, color: Colors.red); }
+    
+    if (isPrivate) {
+      try {
+        await _firestore.collection('users').doc(_userId).collection('follow_requests').doc(_user!.uid).set({
+          'timestamp': FieldValue.serverTimestamp(),
+          'status': 'pending',
+        });
+        
+        await _firestore.collection('users').doc(_userId).collection('notifications').add({
+          'type': 'follow_request',
+          'senderId': _user!.uid,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
+        
+        if(mounted) OverlayService().showTopNotification(context, "Follow request sent", Icons.send, (){}, color: Colors.blue);
+      } catch (e) {
+         if(mounted) OverlayService().showTopNotification(context, "Failed to send request", Icons.error, (){}, color: Colors.red);
+      }
+    } else {
+      try {
+        final batch = _firestore.batch();
+        final myDocRef = _firestore.collection('users').doc(_user!.uid);
+        final targetDocRef = _firestore.collection('users').doc(_userId);
+        batch.update(myDocRef, {'following': FieldValue.arrayUnion([_userId])});
+        batch.update(targetDocRef, {'followers': FieldValue.arrayUnion([_user!.uid])});
+        await batch.commit();
+        _firestore.collection('users').doc(_userId).collection('notifications').add({
+          'type': 'follow', 'senderId': _user!.uid, 'timestamp': FieldValue.serverTimestamp(), 'isRead': false,
+        });
+      } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Failed to follow", Icons.error, (){}, color: Colors.red); }
+    }
   }
 
-  Future<void> _unfollowUser() async {
+  Future<void> _unfollowUser(bool isRequestOnly) async {
     if (_user == null) return;
     try {
-      final batch = _firestore.batch();
-      final myDocRef = _firestore.collection('users').doc(_user!.uid);
-      final targetDocRef = _firestore.collection('users').doc(_userId);
-      batch.update(myDocRef, {'following': FieldValue.arrayRemove([_userId])});
-      batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([_user!.uid])});
-      await batch.commit();
-      _firestore.collection('users').doc(_userId).collection('notifications').doc('follow_${_user!.uid}').delete();
-    } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Failed to unfollow", Icons.error, (){}, color: Colors.red); }
+      if (isRequestOnly) {
+        await _firestore.collection('users').doc(_userId).collection('follow_requests').doc(_user!.uid).delete();
+        if(mounted) OverlayService().showTopNotification(context, "Request cancelled", Icons.close, (){});
+      } else {
+        final batch = _firestore.batch();
+        final myDocRef = _firestore.collection('users').doc(_user!.uid);
+        final targetDocRef = _firestore.collection('users').doc(_userId);
+        batch.update(myDocRef, {'following': FieldValue.arrayRemove([_userId])});
+        batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([_user!.uid])});
+        await batch.commit();
+      }
+    } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red); }
   }
 
   void _shareProfile(String name) { Share.share("Check out $name's profile on Sapa PNJ!"); }
   
-  // NEW: Block/Unblock Logic
   Future<void> _toggleBlock() async {
     if (_isBlocked) {
       await moderationService.unblockUser(_userId);
@@ -452,42 +452,37 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final double topPadding = MediaQuery.of(context).padding.top;
     final double pinnedHeaderHeight = topPadding + kToolbarHeight;
 
-    Widget content = RefreshIndicator(
-      onRefresh: _handleRefresh,
-      color: TwitterTheme.blue,
-      edgeOffset: pinnedHeaderHeight,
-      // Allow pull down to trigger from top
-      notificationPredicate: (notification) => true,
-      child: NestedScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            StreamBuilder<DocumentSnapshot>(
-              stream: _firestore.collection('users').doc(_userId).snapshots(),
-              builder: (context, snapshot) {
-                // --- ERROR HANDLING FOR USER PROFILE HEADER ---
-                if (snapshot.hasError) {
-                  return SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: 200,
-                      child: CommonErrorWidget(
-                        message: "Unable to load profile header.",
-                        isConnectionError: true,
-                        onRetry: () => setState(() {}),
-                      ),
-                    ),
-                  );
-                }
-                
-                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-                
-                return SliverAppBar(
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore.collection('users').doc(_userId).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(appBar: AppBar(title: Text("Error")), body: Center(child: Text("Something went wrong.")));
+        }
+
+        final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+        final name = data['name'] ?? 'User';
+        
+        final bool isMyProfile = _user?.uid == _userId;
+        final bool isPrivateAccount = data['isPrivate'] ?? false;
+        final List<dynamic> followers = data['followers'] ?? [];
+        final bool amIFollowing = followers.contains(_user?.uid);
+        
+        final bool canViewProfile = isMyProfile || !isPrivateAccount || amIFollowing;
+
+        Widget content = RefreshIndicator(
+          onRefresh: _handleRefresh,
+          color: TwitterTheme.blue,
+          edgeOffset: pinnedHeaderHeight,
+          notificationPredicate: (notification) => true,
+          child: NestedScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            headerSliverBuilder: (context, innerBoxIsScrolled) {
+              return [
+                SliverAppBar(
                   pinned: true,
                   elevation: 0,
                   scrolledUnderElevation: 0,
-                  // Height = Banner (150) + Avatar Overhang (120 top + 98 height - 150 banner = 68)
-                  // Total ~ 218.0
                   expandedHeight: 218.0, 
                   backgroundColor: isDarkMode ? Color(0xFF15202B) : TwitterTheme.white,
                   iconTheme: IconThemeData(color: isDarkMode ? TwitterTheme.white : TwitterTheme.blue),
@@ -496,72 +491,75 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   title: AnimatedOpacity(
                     opacity: _isScrolled ? 1.0 : 0.0,
                     duration: Duration(milliseconds: 200),
-                    child: Text(
-                      data['name'] ?? '', 
-                      style: TextStyle(
-                        color: isDarkMode ? TwitterTheme.white : TwitterTheme.black, 
-                        fontWeight: FontWeight.bold
-                      )
+                    child: Row(
+                      children: [
+                        Text(
+                          name, 
+                          style: TextStyle(
+                            color: isDarkMode ? TwitterTheme.white : TwitterTheme.black, 
+                            fontWeight: FontWeight.bold
+                          )
+                        ),
+                        if (isPrivateAccount) ...[
+                          SizedBox(width: 4),
+                          Icon(Icons.lock, size: 16, color: isDarkMode ? TwitterTheme.white : TwitterTheme.black),
+                        ],
+                      ],
                     ),
                   ),
                   centerTitle: false,
                   actions: [
-                     _buildActionMenu(context, data, _user?.uid == _userId),
+                     _buildActionMenu(context, data, isMyProfile),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
-                    background: _buildHeaderFlexibleSpace(context, data, _user?.uid == _userId),
+                    background: _buildHeaderFlexibleSpace(context, data, isMyProfile, isPrivateAccount, amIFollowing),
                   ),
-                );
-              }
-            ),
-
-            // Profile Info (Name, Bio, Stats)
-            StreamBuilder<DocumentSnapshot>(
-              stream: _firestore.collection('users').doc(_userId).snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) return SliverToBoxAdapter(child: SizedBox.shrink()); // Error handled in header
-                final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-                return SliverToBoxAdapter(
-                  child: _buildProfileInfoBody(context, data),
-                );
-              }
-            ),
-
-            if (!_isBlocked)
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _SliverAppBarDelegate(
-                  TabBar(
-                    controller: _tabController,
-                    tabs: const [Tab(text: 'Posts'), Tab(text: 'Reposts'), Tab(text: 'Replies')],
-                    labelColor: theme.primaryColor,
-                    unselectedLabelColor: theme.hintColor,
-                    indicatorColor: theme.primaryColor,
-                    overlayColor: WidgetStateProperty.all(Colors.transparent),
-                    dividerColor: Colors.transparent, 
-                  ),
-                  isDarkMode ? Color(0xFF15202B) : TwitterTheme.white,
                 ),
-              ),
-          ];
-        },
-        body: _isBlocked 
-            ? _buildBlockedBody()
-            : TabBarView(
-                controller: _tabController,
-                children: [
-                  Builder(builder: (context) => _buildMyPosts(context, _userId)),
-                  Builder(builder: (context) => _buildMyReposts(context, _userId)),
-                  Builder(builder: (context) => _buildMyReplies(context, _userId)),
-                ],
-              ),
-      ),
+
+                SliverToBoxAdapter(
+                  child: _buildProfileInfoBody(context, data),
+                ),
+
+                if (!_isBlocked && canViewProfile)
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _SliverAppBarDelegate(
+                      TabBar(
+                        controller: _tabController,
+                        tabs: const [Tab(text: 'Posts'), Tab(text: 'Reposts'), Tab(text: 'Replies')],
+                        labelColor: theme.primaryColor,
+                        unselectedLabelColor: theme.hintColor,
+                        indicatorColor: theme.primaryColor,
+                        overlayColor: WidgetStateProperty.all(Colors.transparent),
+                        dividerColor: Colors.transparent, 
+                      ),
+                      isDarkMode ? Color(0xFF15202B) : TwitterTheme.white,
+                    ),
+                  ),
+              ];
+            },
+            
+            body: _isBlocked 
+                ? _buildBlockedBody()
+                : (!canViewProfile)
+                    ? _buildPrivateAccountBody() 
+                    : TabBarView(
+                        controller: _tabController,
+                        children: [
+                          Builder(builder: (context) => _buildMyPosts(context, _userId)),
+                          Builder(builder: (context) => _buildMyReposts(context, _userId)),
+                          Builder(builder: (context) => _buildMyReplies(context, _userId)),
+                        ],
+                      ),
+          ),
+        );
+
+        return widget.includeScaffold 
+            ? Scaffold(extendBodyBehindAppBar: true, body: content) 
+            : content;
+      }
     );
-
-    return widget.includeScaffold ? Scaffold(extendBodyBehindAppBar: true, body: content) : content;
   }
-
-  // --- Header Components ---
 
   Widget _buildActionMenu(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final name = data['name'] ?? '';
@@ -584,7 +582,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildHeaderFlexibleSpace(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
+  Widget _buildHeaderFlexibleSpace(
+    BuildContext context, 
+    Map<String, dynamic> data, 
+    bool isMyProfile, 
+    bool isPrivate, 
+    bool amIFollowing
+  ) {
     final theme = Theme.of(context);
     final String? bannerImageUrl = data['bannerImageUrl'];
     final String? profileImageUrl = data['profileImageUrl'];
@@ -594,7 +598,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     
     return Stack(
       children: [
-        // 1. Banner Layer
         Positioned(
           top: 0,
           left: 0,
@@ -617,7 +620,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           ),
         ),
         
-        // 2. Avatar Layer
         Positioned(
           top: 120, 
           left: 16,
@@ -628,12 +630,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             },
             child: Hero(tag: 'avatar', child: Stack(children: [
               CircleAvatar(radius: 49, backgroundColor: theme.scaffoldBackgroundColor, child: _buildAvatarImage(data)),
-              // REMOVED CAMERA ICON HERE AS REQUESTED
             ])),
           ),
         ),
 
-        // 3. Action Buttons & Badges
         Positioned(
           top: 156,
           right: 16,
@@ -649,11 +649,55 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ? OutlinedButton(onPressed: () async { if(await Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfileScreen())) == true) setState((){}); }, child: Text("Edit Profile"), style: OutlinedButton.styleFrom(shape: StadiumBorder()))
               : _isBlocked 
                 ? ElevatedButton(onPressed: _toggleBlock, child: Text("Unblock"), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white))
-                : _buildFollowButton(data['followers'] ?? [])
+                : _buildFollowButton(isPrivate, amIFollowing)
             ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildFollowButton(bool isPrivate, bool amIFollowing) {
+    if (amIFollowing) {
+      return OutlinedButton(
+        onPressed: () => _unfollowUser(false), 
+        child: Text("Unfollow")
+      );
+    }
+
+    if (!isPrivate) {
+      return ElevatedButton(
+        onPressed: () => _followUser(false), 
+        style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
+        child: Text("Follow"),
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore
+          .collection('users')
+          .doc(_userId)
+          .collection('follow_requests')
+          .doc(_user!.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasData && snapshot.data!.exists) {
+          return OutlinedButton(
+            onPressed: () => _unfollowUser(true), 
+            style: OutlinedButton.styleFrom(
+              backgroundColor: Theme.of(context).cardColor,
+              side: BorderSide(color: Theme.of(context).dividerColor),
+            ),
+            child: Text("Requested", style: TextStyle(color: Theme.of(context).hintColor)),
+          );
+        }
+        
+        return ElevatedButton(
+          onPressed: () => _followUser(true), 
+          style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
+          child: Text("Follow"),
+        );
+      },
     );
   }
 
@@ -666,7 +710,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22)),
+        Row(
+          children: [
+            Flexible(
+              child: Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22), overflow: TextOverflow.ellipsis),
+            ),
+            if (data['isPrivate'] ?? false) ...[
+              SizedBox(width: 6),
+              Icon(Icons.lock, size: 22, color: theme.textTheme.titleLarge?.color),
+            ],
+          ],
+        ),
         Text(handle, style: theme.textTheme.titleSmall),
         SizedBox(height: 8),
         if (!_isBlocked) ...[
@@ -707,7 +761,38 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- Department Badge Logic ---
+  Widget _buildPrivateAccountBody() {
+    final theme = Theme.of(context);
+    return Container(
+      alignment: Alignment.center,
+      padding: EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: theme.dividerColor, width: 2)
+            ),
+            child: Icon(Icons.lock_outline, size: 48, color: theme.primaryColor),
+          ),
+          SizedBox(height: 24),
+          Text(
+            "This account is private",
+            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 8),
+          Text(
+            "Follow this account to see their posts and replies.",
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showBadgeInfo(BuildContext context, String dept, String prodi) {
     showDialog(context: context, builder: (context) => AlertDialog(title: Text("Academic Info"), content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(dept, style: TextStyle(fontSize: 16)), SizedBox(height: 16), Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(prodi, style: TextStyle(fontSize: 16))]), actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("Close", style: TextStyle(color: TwitterTheme.blue)))]));
   }
@@ -729,13 +814,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     return CircleAvatar(radius: 45, backgroundColor: AvatarHelper.getColor(data['avatarHex']), child: Icon(AvatarHelper.getIcon(data['avatarIconId']??0), size: 50, color: Colors.white));
   }
 
-  Widget _buildFollowButton(List followers) {
-    return followers.contains(_user?.uid) 
-      ? OutlinedButton(onPressed: _unfollowUser, child: Text("Unfollow"))
-      : ElevatedButton(onPressed: _followUser, child: Text("Follow"), style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white));
-  }
-
-  // --- MODIFIED: Stat Text with Navigation ---
   Widget _buildStatText(BuildContext context, int count, String label, int tabIndex) {
     return InkWell(
       onTap: () {
@@ -744,7 +822,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           MaterialPageRoute(
             builder: (_) => FollowListScreen(
               userId: _userId,
-              initialIndex: tabIndex, // 1 for Following, 2 for Followers
+              initialIndex: tabIndex, 
             )
           )
         );
@@ -758,8 +836,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       ),
     );
   }
-
-  // --- POSTS LISTS ---
 
   Widget _buildMyPosts(BuildContext context, String userId) {
     return FutureBuilder<DocumentSnapshot>(
@@ -779,15 +855,19 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
               slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
             } else {
-              // --- FILTER VISIBILITY ---
               final allDocs = snapshot.data?.docs ?? [];
+              
               final visibleDocs = allDocs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
-                final isPublic = (data['visibility'] ?? 'public') == 'public';
-                final isMe = _auth.currentUser?.uid == userId;
-                return isPublic || isMe;
+                final visibility = data['visibility'] ?? 'public';
+                final ownerId = data['userId'];
+                
+                if (visibility == 'public') return true;
+                
+                if (visibility == 'private' && ownerId == _auth.currentUser?.uid) return true;
+                
+                return false;
               }).toList();
-              // -------------------------
 
               if (visibleDocs.isEmpty) {
                 slivers.add(SliverFillRemaining(child: Center(child: Text("No posts yet."))));
@@ -830,10 +910,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  // --- FIXED: REPLIES VISIBILITY BUG ---
   Widget _buildMyReplies(BuildContext context, String userId) {
     return StreamBuilder<QuerySnapshot>(
-      // 1. Ambil semua komentar user ini
       stream: _firestore.collectionGroup('comments').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load replies.", isConnectionError: true);
@@ -850,24 +928,18 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               final doc = docs[index];
               final parentPostId = doc.reference.parent.parent!.id;
 
-              // 2. LISTEN REAL-TIME KE PARENT POST
-              // Ganti FutureBuilder menjadi StreamBuilder agar update instan saat user A mengubah visibility
               return StreamBuilder<DocumentSnapshot>(
                 stream: _firestore.collection('posts').doc(parentPostId).snapshots(),
                 builder: (context, parentSnapshot) {
-                  // Jika loading atau post terhapus, sembunyikan
                   if (!parentSnapshot.hasData || !parentSnapshot.data!.exists) return SizedBox.shrink();
                   
                   final parentData = parentSnapshot.data!.data() as Map<String, dynamic>;
-                  final isPublic = (parentData['visibility'] ?? 'public') == 'public';
-                  final isParentMyPost = parentData['userId'] == _auth.currentUser?.uid;
+                  final visibility = parentData['visibility'] ?? 'public';
+                  final ownerId = parentData['userId'];
                   
-                  // LOGIKA KETAT:
-                  // Tampilkan HANYA JIKA:
-                  // 1. Postingan Induknya PUBLIC
-                  // 2. ATAU Saya adalah PEMILIK Postingan Induknya
-                  // (Meskipun ini komentar saya di profil saya sendiri, jika induknya private punya orang lain, saya tidak boleh melihat konteksnya)
-                  if (isPublic || isParentMyPost) {
+                  final isVisible = (visibility == 'public') || (visibility == 'private' && ownerId == _auth.currentUser?.uid);
+                  
+                  if (isVisible) {
                     return Theme(
                       data: Theme.of(context).copyWith(listTileTheme: ListTileThemeData(minVerticalPadding: 0, visualDensity: VisualDensity.compact, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0))),
                       child: CommentTile(key: ValueKey(doc.id), commentId: doc.id, commentData: doc.data() as Map<String, dynamic>, postId: parentPostId, isOwner: true, showPostContext: true, heroContextId: 'profile_replies'),
@@ -896,14 +968,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
         } else {
           final allDocs = snapshot.data?.docs ?? [];
-          // --- FILTER VISIBILITY FOR REPOSTS ---
+          
           final visibleDocs = allDocs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final isPublic = (data['visibility'] ?? 'public') == 'public';
-            final isOwnerOfOriginalPost = data['userId'] == _auth.currentUser?.uid;
-            return isPublic || isOwnerOfOriginalPost;
+            final visibility = data['visibility'] ?? 'public';
+            final ownerId = data['userId'];
+            
+            if (visibility == 'public') return true;
+            if (visibility == 'private' && ownerId == _auth.currentUser?.uid) return true;
+            
+            return false;
           }).toList();
-          // -------------------------------------
 
           if (visibleDocs.isEmpty) {
             slivers.add(SliverFillRemaining(child: Center(child: Text("No reposts yet."))));

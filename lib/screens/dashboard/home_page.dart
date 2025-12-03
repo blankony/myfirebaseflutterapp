@@ -96,16 +96,21 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
                 List<QueryDocumentSnapshot> allDocs = snapshot.data?.docs ?? [];
                 
+                // --- VISIBILITY FILTER ---
                 final visibleDocs = allDocs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
                   final visibility = data['visibility'] ?? 'public';
                   final ownerId = data['userId'];
                   
+                  // Public posts are visible to everyone
                   if (visibility == 'public') return true;
+                  
+                  // Private posts are ONLY visible to the owner
                   if (visibility == 'private' && ownerId == currentUserId) return true;
                   
                   return false;
                 }).toList();
+                // ------------------------
 
                 List<QueryDocumentSnapshot> finalDocs = visibleDocs;
                 if (widget.isRecommended && visibleDocs.isNotEmpty) {

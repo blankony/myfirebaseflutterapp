@@ -7,11 +7,12 @@ import '../../main.dart';
 import 'about_page.dart'; 
 import '../edit_profile_screen.dart';
 import 'account_center_page.dart'; 
-import '../blocked_users_page.dart'; // REQUIRED
+import '../blocked_users_page.dart'; 
 import '../../services/notification_prefs_service.dart'; 
 import '../../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
+final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -80,6 +81,7 @@ class SettingsPage extends StatelessWidget {
             context: context,
             icon: Icons.account_circle_outlined,
             title: 'Account Center',
+            subtitle: 'Password, Security, and Account Deletion',
             onTap: () => _goToAccountCenter(context),
           ),
           
@@ -243,7 +245,6 @@ class _OptimizedThemeTileState extends State<_OptimizedThemeTile> {
   }
 
   void _handleChange(bool value) async {
-    // SAVE TO PREFS
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_dark_mode', value);
 

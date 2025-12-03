@@ -10,8 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:badword_guard/badword_guard.dart'; // REQUIRED
-import 'package:visual_detector_ai/visual_detector_ai.dart'; // REQUIRED
+import 'package:badword_guard/badword_guard.dart'; 
+import 'package:visual_detector_ai/visual_detector_ai.dart'; 
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
@@ -41,14 +41,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final PredictionService _predictionService = PredictionService();
   final FocusNode _postFocusNode = FocusNode();
 
-  // FIX: Menggunakan LanguageChecker sesuai library badword_guard terbaru
   final LanguageChecker _badwordGuard = LanguageChecker();
 
   bool _canPost = false;
   bool _isProcessing = false;
 
-  // --- NEW: VISIBILITY STATE ---
-  String _visibility = 'public'; // Default public
+  // --- VISIBILITY STATE (Phase 1) ---
+  String _visibility = 'public'; 
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
@@ -117,20 +116,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_selectedMediaFile == null || _mediaType != 'image') return true;
 
     setState(() => _isProcessing = true);
-    OverlayService().showTopNotification(context, "Memindai gambar...", Icons.remove_red_eye, (){}, color: Colors.orange);
+    OverlayService().showTopNotification(context, "Scanning image...", Icons.remove_red_eye, (){}, color: Colors.orange);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
       if (apiKey == null || apiKey.isEmpty) return true;
 
-      // Analisis Gambar
       final result = await VisualDetectorAi.analyzeImage(
         image: _selectedMediaFile!,
         geminiApiKey: apiKey,
       );
 
-      // FIX: Gunakan toString() untuk mendapatkan deskripsi teks dari objek result
-      // Ini lebih aman karena setiap objek di Dart memiliki metode toString()
       final String description = result.toString().toLowerCase(); 
       debugPrint("Visual Analysis Result: $description");
 
@@ -142,14 +138,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       for (var word in dangerKeywords) {
         if (description.contains(word)) {
-          if (mounted) _showRejectDialog("Gambar terdeteksi mengandung unsur sensitif/18+ ($word).");
+          if (mounted) _showRejectDialog("Image contains sensitive content ($word).");
           return false;
         }
       }
 
-      // Cek SARA pada deskripsi gambar menggunakan LanguageChecker
       if (_badwordGuard.containsBadLanguage(description)) {
-        if (mounted) _showRejectDialog("Gambar terdeteksi mengandung unsur tidak pantas.");
+        if (mounted) _showRejectDialog("Image content flagged as inappropriate.");
         return false;
       }
 
@@ -157,8 +152,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     } catch (e) {
       debugPrint("Visual Detector Error: $e");
-      // Jika AI menolak memproses (karena safety filter internalnya), anggap TIDAK AMAN
-      if (mounted) _showRejectDialog("Gambar ditolak oleh sistem keamanan AI.");
+      if (mounted) _showRejectDialog("AI Security check failed.");
       return false;
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -169,10 +163,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Ditolak")]),
-        content: Text("Konten Anda tidak dapat diposting.\n\nAlasan: $reason"),
+        title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Rejected")]),
+        content: Text("Your content cannot be posted.\n\nReason: $reason"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Perbaiki", style: TextStyle(color: TwitterTheme.blue)))
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Edit", style: TextStyle(color: TwitterTheme.blue)))
         ],
       ),
     );
@@ -333,18 +327,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // 1. FILTER TEKS
     final text = _postController.text;
     if (_badwordGuard.containsBadLanguage(text)) {
-      _showRejectDialog("Caption mengandung kata-kata yang dilarang.");
+      _showRejectDialog("Caption contains prohibited words.");
       return;
     }
 
-    // 2. FILTER GAMBAR
     final isImageSafe = await _checkImageSafety();
     if (!isImageSafe) return; 
 
-    // 3. PROSES UPLOAD
     final File? mediaFile = _selectedMediaFile;
     final String? existingUrl = _existingMediaUrl;
     final String? mediaType = _mediaType;
@@ -407,11 +398,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         title: _isEditing ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) : null,
         centerTitle: false,
         actions: [
-          // --- DROPDOWN VISIBILITY SELECTOR ---
+          // --- VISIBILITY DROPDOWN (PHASE 1) ---
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10.0),
             child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 8),
+              padding: EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
                 borderRadius: BorderRadius.circular(20),
@@ -420,7 +411,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: DropdownButton<String>(
                   value: _visibility,
                   icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
-                  style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(
+                    color: theme.textTheme.bodyLarge?.color, 
+                    fontWeight: FontWeight.bold, 
+                    fontSize: 13
+                  ),
                   onChanged: (String? newValue) {
                     if (newValue != null) {
                       setState(() => _visibility = newValue);
@@ -429,11 +424,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   items: [
                     DropdownMenuItem(
                       value: 'public',
-                      child: Row(children: [Icon(Icons.public, size: 16, color: Colors.blue), SizedBox(width: 4), Text("Public")]),
+                      child: Row(
+                        children: [
+                          Icon(Icons.public, size: 16, color: Colors.blue),
+                          SizedBox(width: 6), 
+                          Text("Public")
+                        ]
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'private',
-                      child: Row(children: [Icon(Icons.lock, size: 16, color: Colors.red), SizedBox(width: 4), Text("Private")]),
+                      child: Row(
+                        children: [
+                          Icon(Icons.lock, size: 16, color: Colors.red),
+                          SizedBox(width: 6), 
+                          Text("Only Me") // "Hide" from everyone initially
+                        ]
+                      ),
                     ),
                   ],
                 ),
@@ -493,18 +500,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             fileOrUrl: _selectedMediaFile, 
                             type: _mediaType ?? 'image', 
                             onRemove: _clearMedia,
-                            // (Opsional) Jika ingin fitur generate caption dari plugin ini juga bisa
-                            // Tapi user request hanya untuk filter saat upload
-                            onGenerateCaption: null, 
-                            isGenerating: false,
                           )
                         else if (_existingMediaUrl != null)
                           _MediaPreviewWidget(
                             fileOrUrl: _existingMediaUrl, 
                             type: _mediaType ?? 'image', 
                             onRemove: _clearMedia,
-                            onGenerateCaption: null, 
-                            isGenerating: false,
                           ),
                         
                         if (_predictedText != null)
@@ -573,15 +574,11 @@ class _MediaPreviewWidget extends StatelessWidget {
   final dynamic fileOrUrl;
   final String type;
   final VoidCallback onRemove;
-  final VoidCallback? onGenerateCaption; 
-  final bool isGenerating; 
 
   const _MediaPreviewWidget({
     required this.fileOrUrl, 
     required this.type, 
     required this.onRemove,
-    this.onGenerateCaption,
-    this.isGenerating = false,
   });
 
   @override
@@ -611,7 +608,6 @@ class _MediaPreviewWidget extends StatelessWidget {
   }
 }
 
-// Background Uploader Class (Unchanged)
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
@@ -619,7 +615,7 @@ class _BackgroundUploader {
     required File? mediaFile,
     required String? existingMediaUrl,
     required String? mediaType,
-    required String visibility, // Add this
+    required String visibility,
     required bool isEditing,
     required String? postId,
     required String uid,
@@ -680,7 +676,7 @@ class _BackgroundUploader {
     File? mediaFile,
     String? existingMediaUrl,
     String? mediaType,
-    required String visibility, // Add this
+    required String visibility,
     required bool isEditing,
     String? postId,
     required String uid,
@@ -727,7 +723,7 @@ class _BackgroundUploader {
           'text': text,
           'mediaUrl': finalMediaUrl,
           'mediaType': mediaType,
-          'visibility': visibility, // Update visibility
+          'visibility': visibility, 
           'isUploading': false,
           'editedAt': FieldValue.serverTimestamp(),
         });
@@ -746,19 +742,22 @@ class _BackgroundUploader {
           'repostedBy': [],
           'mediaUrl': finalMediaUrl,
           'mediaType': mediaType,
-          'visibility': visibility, // Add visibility
+          'visibility': visibility, 
           'isUploading': false,
         });
       }
 
-      await _firestore.collection('users').doc(uid).collection('notifications').add({
-        'type': 'upload_complete',
-        'senderId': 'system', 
-        'postId': null,
-        'postTextSnippet': 'Your ${mediaType ?? 'post'} was uploaded successfully.',
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-      });
+      // Only notify followers if it's PUBLIC
+      if (visibility == 'public') {
+        await _firestore.collection('users').doc(uid).collection('notifications').add({
+          'type': 'upload_complete',
+          'senderId': 'system', 
+          'postId': null,
+          'postTextSnippet': 'Your ${mediaType ?? 'post'} was uploaded successfully.',
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
+      }
 
       if (mediaFile != null && mediaFile.existsSync()) {
         try { mediaFile.deleteSync(); } catch (_) {}
@@ -788,6 +787,8 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isSuccess = false;
   bool _isError = false;
   String _message = "Uploading media...";
+  
+  // ignore: unused_field
   String _statusText = "Uploading...";
   Timer? _autoDismissTimer;
 

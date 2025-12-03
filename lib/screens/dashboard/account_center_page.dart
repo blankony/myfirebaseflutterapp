@@ -1,12 +1,12 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:ui'; // Required for BackdropFilter
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../main.dart';
 import '../edit_profile_screen.dart';
 import '../change_password_screen.dart';
-import '../../auth_gate.dart'; // CHANGED: Import AuthGate instead of WelcomeScreen
+import '../../auth_gate.dart'; 
 import '../../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -20,9 +20,8 @@ class AccountCenterPage extends StatefulWidget {
 }
 
 class _AccountCenterPageState extends State<AccountCenterPage> {
-  bool _isDeleting = false; // Controls the full-screen loader
+  bool _isDeleting = false; 
 
-  // Helper for Page Transition
   Route _createSlideRightRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -90,13 +89,11 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                           password: passwordController.text,
                         );
                         
-                        // Attempt re-auth
                         await user.reauthenticateWithCredential(credential);
                         
                         if (builderContext.mounted) {
-                          Navigator.of(builderContext).pop(); // Close password dialog
+                          Navigator.of(builderContext).pop(); 
                           
-                          // Proceed to final confirmation
                           if (mounted) {
                             _showFinalDeleteConfirmation(); 
                           }
@@ -169,7 +166,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
 
   // --- Step 3: Execution ---
   Future<void> _performAccountDeletion() async {
-    // 1. Activate Full Screen Loading
     setState(() {
       _isDeleting = true;
     });
@@ -179,7 +175,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
       if (user != null) {
         final String uid = user.uid;
 
-        // A. Delete User's Posts (Batch)
         WriteBatch batch = _firestore.batch();
         int batchCount = 0;
 
@@ -196,13 +191,9 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
           }
         }
 
-        // B. Delete User Profile
         batch.delete(_firestore.collection('users').doc(uid));
-        
-        // C. Commit final batch (posts + user doc)
         await batch.commit();
         
-        // D. Delete Auth Account
         await user.delete();
         
         if (mounted) {
@@ -214,9 +205,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
             color: Colors.grey
           );
           
-          // E. Navigate Away
-          // FIXED: Navigate to AuthGate() instead of WelcomeScreen()
-          // This ensures the StreamBuilder in AuthGate restarts and listens for the next login.
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const AuthGate()),
             (route) => false,
@@ -226,7 +214,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isDeleting = false; // Turn off loading on error
+          _isDeleting = false; 
         });
         
         OverlayService().showTopNotification(
@@ -268,6 +256,10 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                   Navigator.of(context).push(_createSlideRightRoute(EditProfileScreen()));
                 },
               ),
+              
+              // --- PRIVATE ACCOUNT TOGGLE ---
+              _PrivacySwitchTile(),
+              
               ListTile(
                 leading: Icon(Icons.lock_outline),
                 title: Text('Change Password'),
@@ -320,21 +312,15 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
           ),
         ),
         
-        // --- Improved Loading UI ---
         if (_isDeleting)
           Positioned.fill(
             child: Stack(
               children: [
-                // 1. Dimmed Background
                 Container(color: Colors.black54),
-                
-                // 2. Blur Effect
                 BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
                   child: Container(color: Colors.transparent),
                 ),
-                
-                // 3. Status Card
                 Center(
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 40),
@@ -378,6 +364,50 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
             ),
           ),
       ],
+    );
+  }
+}
+
+// --- PRIVACY SWITCH WIDGET ---
+class _PrivacySwitchTile extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return SizedBox.shrink();
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return SizedBox.shrink();
+        
+        final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+        final bool isPrivate = data['isPrivate'] ?? false;
+
+        return SwitchListTile(
+          secondary: Icon(
+            isPrivate ? Icons.lock : Icons.lock_open, 
+            color: Theme.of(context).primaryColor
+          ),
+          title: Text('Private Account'),
+          subtitle: Text('Only followers can see your posts and profile details.'),
+          value: isPrivate,
+          onChanged: (val) async {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .update({'isPrivate': val});
+                
+            if (context.mounted) {
+              OverlayService().showTopNotification(
+                context, 
+                val ? "Account is now Private" : "Account is now Public", 
+                val ? Icons.lock : Icons.public, 
+                (){}
+              );
+            }
+          },
+        );
+      },
     );
   }
 }

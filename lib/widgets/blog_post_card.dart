@@ -379,8 +379,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     } catch (e) { _syncState(); }
   }
   
-  // FIX: New _handleBookmarkToggle
-  // Kita menerima status saat ini sebagai parameter
   void _handleBookmarkToggle(bool isCurrentlyBookmarked) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -389,14 +387,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     
     final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
     
-    // 1. Tampilkan notifikasi DULUAN sebelum proses async (agar muncul meskipun widget didispose)
     if (!isCurrentlyBookmarked) {
        OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, (){});
     } else {
        OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, (){});
     }
 
-    // 2. Lakukan operasi database
     try {
       if (!isCurrentlyBookmarked) {
         await docRef.set({
@@ -406,26 +402,24 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         await docRef.delete();
       }
     } catch (e) {
-      // Jika error, notifikasi error
       OverlayService().showTopNotification(context, "Failed to bookmark", Icons.error, (){}, color: Colors.red);
     }
   }
 
-  // --- NEW: TOGGLE VISIBILITY ---
+  // --- TOGGLE VISIBILITY (HIDE/UNHIDE) ---
   void _toggleVisibility() async {
     final currentVis = widget.postData['visibility'] ?? 'public';
     final newVis = currentVis == 'public' ? 'private' : 'public';
+    
+    // Optimistic Update (UI will update via Stream automatically, but show overlay first)
+    final msg = newVis == 'private' ? "Post hidden (Only Me)" : "Post is now Public";
+    final icon = newVis == 'private' ? Icons.visibility_off : Icons.public;
     
     try {
       await _firestore.collection('posts').doc(widget.postId).update({
         'visibility': newVis,
       });
-      OverlayService().showTopNotification(
-        context, 
-        "Post is now ${newVis.toUpperCase()}", 
-        newVis == 'public' ? Icons.public : Icons.lock, 
-        (){},
-      );
+      OverlayService().showTopNotification(context, msg, icon, (){});
     } catch (e) {
       OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, (){}, color: Colors.red);
     }
@@ -571,7 +565,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
-  // --- REPORT & BLOCK LOGIC ---
   void _reportPost() {
     showDialog(
       context: context,
@@ -649,13 +642,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Widget build(BuildContext context) {
     super.build(context);
     
-    // --- BLOCK CHECK ---
     return StreamBuilder<List<String>>(
       stream: moderationService.streamBlockedUsers(),
       builder: (context, snapshot) {
         final blockedUsers = snapshot.data ?? [];
         if (blockedUsers.contains(widget.postData['userId'])) {
-          return SizedBox.shrink(); // Hide Content
+          return SizedBox.shrink(); 
         }
 
         final theme = Theme.of(context);
@@ -667,7 +659,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         final uploadFailed = widget.postData['uploadFailed'] == true;
         final int commentCount = widget.postData['commentCount'] ?? 0;
         
-        // --- NEW: VISIBILITY CHECK ---
+        // --- VISIBILITY CHECK ---
         final visibility = widget.postData['visibility'] ?? 'public';
         
         if (uploadFailed) {
@@ -822,7 +814,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                   ),
                   if (isPrivate) ...[
                     SizedBox(width: 4),
-                    Icon(Icons.lock, size: 14, color: theme.hintColor),
+                    Icon(Icons.lock, size: 14, color: theme.hintColor), // LOCK ICON FOR PRIVATE POSTS
                   ],
                 ],
               ),
@@ -865,20 +857,21 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         else if (value == 'pin') _togglePin(); 
         else if (value == 'report') _reportPost();
         else if (value == 'block') _blockUser();
-        else if (value == 'toggle_visibility') _toggleVisibility(); // NEW
+        else if (value == 'toggle_visibility') _toggleVisibility(); 
       },
       itemBuilder: (context) {
         if (widget.isOwner) {
           final isPrivate = (widget.postData['visibility'] ?? 'public') == 'private';
           return [
             PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
+            // TOGGLE VISIBILITY MENU ITEM
             PopupMenuItem(
               value: 'toggle_visibility', 
               child: Row(
                 children: [
-                  Icon(isPrivate ? Icons.public : Icons.lock, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
+                  Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
                   SizedBox(width: 12), 
-                  Text(isPrivate ? "Set to Public" : "Set to Private")
+                  Text(isPrivate ? "Unhide Post (Public)" : "Hide Post (Only Me)")
                 ]
               )
             ),
@@ -905,7 +898,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
-  // --- HELPER UNTUK BOOKMARK BUTTON (STREAM) ---
   Widget _buildBookmarkButton() {
     final user = _auth.currentUser;
     if (user == null) {
@@ -913,7 +905,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
 
     return StreamBuilder<DocumentSnapshot>(
-      // DENGARKAN STATUS BOOKMARK SECARA REAL-TIME DARI FIRESTORE
       stream: _firestore
           .collection('users')
           .doc(user.uid)
@@ -927,7 +918,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           isBookmarked ? Icons.bookmark : Icons.bookmark_border, 
           null, 
           isBookmarked ? TwitterTheme.blue : null, 
-          () => _handleBookmarkToggle(isBookmarked) // Pass status saat ini
+          () => _handleBookmarkToggle(isBookmarked) 
         );
       },
     );
@@ -942,7 +933,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           _buildActionButton(Icons.chat_bubble_outline, commentCount.toString(), null, _navigateToDetail),
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
-          _buildBookmarkButton(), // FIX: Gunakan widget bookmark yang real-time
+          _buildBookmarkButton(), 
           _buildActionButton(Icons.share_outlined, null, _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
@@ -957,7 +948,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         children: [
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
-          _buildBookmarkButton(), // FIX: Gunakan widget bookmark yang real-time
+          _buildBookmarkButton(), 
           _buildActionButton(Icons.share_outlined, 'Share', _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),

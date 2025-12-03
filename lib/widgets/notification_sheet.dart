@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../screens/post_detail_screen.dart';
 import '../screens/dashboard/profile_page.dart';
 import '../main.dart';
+import '../services/overlay_service.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -31,7 +32,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
 
   Future<void> _markNotificationsAsRead() async {
     if (_currentUser == null) return;
-    // Batch update unread notifications
     final notifQuery = _firestore
         .collection('users')
         .doc(_currentUser!.uid)
@@ -48,7 +48,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
     await batch.commit();
   }
 
-  // --- Date Grouping Helper ---
   String _getGroupLabel(Timestamp timestamp) {
     final now = DateTime.now();
     final date = timestamp.toDate();
@@ -57,7 +56,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
     final difference = today.difference(notificationDate).inDays;
 
     if (difference == 0) {
-      // Check if it's very recent (last 1 hour)
       if (now.difference(date).inMinutes < 60) return "New";
       return "Today";
     }
@@ -81,9 +79,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
       ),
       child: Column(
         children: [
-          // REMOVED DRAG HANDLE (Black Stripe)
-          
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 10), 
             child: Row(
@@ -104,7 +99,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
           
           Divider(height: 1),
 
-          // Notification List with Grouping
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _firestore
@@ -133,7 +127,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
                   );
                 }
 
-                // --- Build Grouped List ---
                 List<Widget> listItems = [];
                 String? currentGroup;
 
@@ -161,7 +154,17 @@ class _NotificationSheetState extends State<NotificationSheet> {
                   }
 
                   final bool isRead = data['isRead'] ?? true;
-                  listItems.add(_NotificationTile(notificationData: data, isRead: isRead));
+                  
+                  // --- PHASE 3: SPECIAL HANDLING FOR REQUESTS ---
+                  if (data['type'] == 'follow_request') {
+                    listItems.add(_FollowRequestTile(
+                      notificationId: doc.id,
+                      notificationData: data,
+                      isRead: isRead
+                    ));
+                  } else {
+                    listItems.add(_NotificationTile(notificationData: data, isRead: isRead));
+                  }
                 }
 
                 return ListView(
@@ -173,6 +176,144 @@ class _NotificationSheetState extends State<NotificationSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// --- PHASE 3: REQUEST TILE (ACCEPT/DECLINE) ---
+class _FollowRequestTile extends StatefulWidget {
+  final String notificationId;
+  final Map<String, dynamic> notificationData;
+  final bool isRead;
+
+  const _FollowRequestTile({required this.notificationId, required this.notificationData, required this.isRead});
+
+  @override
+  State<_FollowRequestTile> createState() => _FollowRequestTileState();
+}
+
+class _FollowRequestTileState extends State<_FollowRequestTile> {
+  bool _isProcessing = false;
+
+  Future<void> _handleRequest(bool isAccepted) async {
+    setState(() => _isProcessing = true);
+    final myUid = _auth.currentUser!.uid;
+    final senderId = widget.notificationData['senderId'];
+
+    try {
+      final batch = _firestore.batch();
+      
+      // 1. Delete Request
+      final requestRef = _firestore.collection('users').doc(myUid).collection('follow_requests').doc(senderId);
+      batch.delete(requestRef);
+
+      if (isAccepted) {
+        // 2. Add to lists
+        final myDoc = _firestore.collection('users').doc(myUid);
+        final senderDoc = _firestore.collection('users').doc(senderId);
+        
+        batch.update(myDoc, {'followers': FieldValue.arrayUnion([senderId])});
+        batch.update(senderDoc, {'following': FieldValue.arrayUnion([myUid])});
+        
+        // 3. Notify sender
+        final newNotif = _firestore.collection('users').doc(senderId).collection('notifications').doc();
+        batch.set(newNotif, {
+          'type': 'follow', // Standard follow notif now that they follow you
+          'senderId': myUid,
+          'postTextSnippet': 'accepted your follow request.',
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
+      }
+
+      // 4. Delete THIS notification
+      final thisNotifRef = _firestore.collection('users').doc(myUid).collection('notifications').doc(widget.notificationId);
+      batch.delete(thisNotifRef);
+
+      await batch.commit();
+      
+      if(isAccepted && mounted) OverlayService().showTopNotification(context, "Request accepted", Icons.person_add, (){}, color: Colors.green);
+    } catch (e) {
+      if(mounted) OverlayService().showTopNotification(context, "Error processing request", Icons.error, (){}, color: Colors.red);
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final senderId = widget.notificationData['senderId'];
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: _firestore.collection('users').doc(senderId).get(),
+      builder: (context, snapshot) {
+        String name = "Someone";
+        String? profileUrl;
+        
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final userData = snapshot.data!.data() as Map<String, dynamic>;
+          name = userData['name'] ?? "Unknown";
+          profileUrl = userData['profileImageUrl'];
+        }
+
+        return Container(
+          color: widget.isRead ? Colors.transparent : theme.primaryColor.withOpacity(0.05),
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: theme.dividerColor,
+                    backgroundImage: profileUrl != null ? CachedNetworkImageProvider(profileUrl) : null,
+                    child: profileUrl == null ? Icon(Icons.person, color: Colors.white) : null,
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: RichText(
+                      text: TextSpan(
+                        style: theme.textTheme.bodyMedium,
+                        children: [
+                          TextSpan(text: name, style: TextStyle(fontWeight: FontWeight.bold)),
+                          TextSpan(text: " wants to follow you."),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (_isProcessing)
+                    SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  else ...[
+                    OutlinedButton(
+                      onPressed: () => _handleRequest(false), 
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: BorderSide(color: Colors.red.withOpacity(0.5))
+                      ),
+                      child: Text("Decline")
+                    ),
+                    SizedBox(width: 12),
+                    ElevatedButton(
+                      onPressed: () => _handleRequest(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: TwitterTheme.blue,
+                        foregroundColor: Colors.white
+                      ),
+                      child: Text("Confirm")
+                    ),
+                  ]
+                ],
+              )
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -213,12 +354,10 @@ class _NotificationTile extends StatelessWidget {
     final theme = Theme.of(context);
     final String senderId = notificationData['senderId'];
     
-    // --- SYSTEM NOTIFICATION (Direct Render) ---
     if (senderId == 'system') {
       return _buildSystemTile(context, theme);
     }
 
-    // --- USER NOTIFICATION (Fetch Data) ---
     return FutureBuilder<DocumentSnapshot>(
       future: _getSenderData(senderId),
       builder: (context, snapshot) {
