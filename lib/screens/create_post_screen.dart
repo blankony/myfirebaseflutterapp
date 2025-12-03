@@ -46,8 +46,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _canPost = false;
   bool _isProcessing = false;
 
-  // --- VISIBILITY STATE (Phase 1) ---
   String _visibility = 'public'; 
+  bool _isAccountPrivate = false; 
 
   String _userName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
@@ -74,10 +74,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _postController.text = widget.initialData!['text'] ?? '';
       _existingMediaUrl = widget.initialData!['mediaUrl'];
       _mediaType = widget.initialData!['mediaType'];
-      
-      // Load existing visibility
       _visibility = widget.initialData!['visibility'] ?? 'public';
-      
       _checkCanPost();
     }
   }
@@ -111,7 +108,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // --- VISUAL DETECTOR AI ---
   Future<bool> _checkImageSafety() async {
     if (_selectedMediaFile == null || _mediaType != 'image') return true;
 
@@ -232,6 +228,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           _avatarIconId = data['avatarIconId'] ?? 0;
           _avatarHex = data['avatarHex'] ?? '';
           _profileImageUrl = data['profileImageUrl'];
+          _isAccountPrivate = data['isPrivate'] ?? false;
+          
+          // Initial visibility setup based on account type
+          if (!_isEditing) {
+            _visibility = _isAccountPrivate ? 'followers' : 'public';
+          }
         });
       }
     } catch (e) {}
@@ -341,7 +343,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final String? mediaType = _mediaType;
     final bool isEditing = _isEditing;
     final String? postId = widget.postId;
-    final String visibility = _visibility; 
+    
+    // IMPORTANT: If account is private and visibility is 'public', force it to 'followers'
+    // This prevents the bug where private posts appear as "public" data
+    String finalVisibility = _visibility;
+    if (_isAccountPrivate && _visibility == 'public') {
+      finalVisibility = 'followers';
+    }
 
     final String uid = user.uid;
     final String uName = _userName;
@@ -362,7 +370,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         mediaFile: mediaFile,
         existingMediaUrl: existingUrl,
         mediaType: mediaType,
-        visibility: visibility,
+        visibility: finalVisibility, // Use the corrected visibility
         isEditing: isEditing,
         postId: postId,
         uid: uid,
@@ -373,6 +381,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         profileImageUrl: uProfileImg,
       );
     }
+  }
+
+  void _showPrivacyRestrictionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.lock, color: Colors.orange),
+            SizedBox(width: 8),
+            Text("Private Account"),
+          ],
+        ),
+        content: Text(
+          "Your account is set to Private. You cannot create Public posts. Switch your account to Public in Account Center to change this."
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: Text("OK")
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -398,7 +430,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         title: _isEditing ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) : null,
         centerTitle: false,
         actions: [
-          // --- VISIBILITY DROPDOWN (PHASE 1) ---
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10.0),
             child: Container(
@@ -417,28 +448,60 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     fontSize: 13
                   ),
                   onChanged: (String? newValue) {
-                    if (newValue != null) {
+                    if (newValue == 'public_attempt' && _isAccountPrivate) {
+                      _showPrivacyRestrictionDialog();
+                      return;
+                    }
+                    if (newValue != null && newValue != 'public_attempt') {
                       setState(() => _visibility = newValue);
                     }
                   },
                   items: [
-                    DropdownMenuItem(
-                      value: 'public',
-                      child: Row(
-                        children: [
-                          Icon(Icons.public, size: 16, color: Colors.blue),
-                          SizedBox(width: 6), 
-                          Text("Public")
-                        ]
+                    // Logic: If Private, show 'Followers' (value='followers') and a dummy 'Public'
+                    // If Public, show 'Public' (value='public')
+                    
+                    if (_isAccountPrivate)
+                      DropdownMenuItem(
+                        value: 'followers',
+                        child: Row(
+                          children: [
+                            Icon(Icons.people, size: 16, color: Colors.blue),
+                            SizedBox(width: 6), 
+                            Text("Followers")
+                          ]
+                        ),
+                      )
+                    else
+                      DropdownMenuItem(
+                        value: 'public',
+                        child: Row(
+                          children: [
+                            Icon(Icons.public, size: 16, color: Colors.blue),
+                            SizedBox(width: 6), 
+                            Text("Public")
+                          ]
+                        ),
                       ),
-                    ),
+                    
+                    if (_isAccountPrivate)
+                      DropdownMenuItem(
+                        value: 'public_attempt',
+                        child: Row(
+                          children: [
+                            Icon(Icons.public, size: 16, color: Colors.grey),
+                            SizedBox(width: 6), 
+                            Text("Public", style: TextStyle(color: Colors.grey))
+                          ]
+                        ),
+                      ),
+
                     DropdownMenuItem(
                       value: 'private',
                       child: Row(
                         children: [
                           Icon(Icons.lock, size: 16, color: Colors.red),
                           SizedBox(width: 6), 
-                          Text("Only Me") // "Hide" from everyone initially
+                          Text("Only Me") 
                         ]
                       ),
                     ),
@@ -747,8 +810,7 @@ class _BackgroundUploader {
         });
       }
 
-      // Only notify followers if it's PUBLIC
-      if (visibility == 'public') {
+      if (visibility == 'public' || visibility == 'followers') {
         await _firestore.collection('users').doc(uid).collection('notifications').add({
           'type': 'upload_complete',
           'senderId': 'system', 
@@ -788,7 +850,6 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isError = false;
   String _message = "Uploading media...";
   
-  // ignore: unused_field
   String _statusText = "Uploading...";
   Timer? _autoDismissTimer;
 

@@ -208,6 +208,9 @@ class BlogPostCard extends StatefulWidget {
   final VideoPlayerController? preloadedController; 
   final bool isPinned; 
   final Function(String, bool)? onPinToggle;
+  
+  // NEW: To prevent loop when on profile page
+  final String? currentProfileUserId; 
 
   const BlogPostCard({
     super.key,
@@ -220,6 +223,7 @@ class BlogPostCard extends StatefulWidget {
     this.preloadedController,
     this.isPinned = false, 
     this.onPinToggle,
+    this.currentProfileUserId,
   });
 
   @override
@@ -406,22 +410,47 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
-  // --- TOGGLE VISIBILITY (HIDE/UNHIDE) ---
   void _toggleVisibility() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
     final currentVis = widget.postData['visibility'] ?? 'public';
-    final newVis = currentVis == 'public' ? 'private' : 'public';
+    String newVis;
     
-    // Optimistic Update (UI will update via Stream automatically, but show overlay first)
-    final msg = newVis == 'private' ? "Post hidden (Only Me)" : "Post is now Public";
-    final icon = newVis == 'private' ? Icons.visibility_off : Icons.public;
+    if (currentVis == 'private') {
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final bool isPrivateAccount = userDoc.exists && (userDoc.data()?['isPrivate'] ?? false);
+      newVis = isPrivateAccount ? 'followers' : 'public';
+    } else {
+      newVis = 'private';
+    }
+    
+    String msg;
+    IconData icon;
+    Color? color;
+    
+    if (newVis == 'private') {
+      msg = "Post hidden (Only Me)";
+      icon = Icons.visibility_off;
+    } else if (newVis == 'followers') {
+      msg = "Post visible to Followers (Account is Private)";
+      icon = Icons.people;
+      color = Colors.orange;
+    } else {
+      msg = "Post is now Public";
+      icon = Icons.public;
+    }
+    
+    if (mounted) OverlayService().showTopNotification(context, msg, icon, (){}, color: color);
     
     try {
       await _firestore.collection('posts').doc(widget.postId).update({
         'visibility': newVis,
       });
-      OverlayService().showTopNotification(context, msg, icon, (){});
     } catch (e) {
-      OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, (){}, color: Colors.red);
+      if (mounted) {
+        OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, (){}, color: Colors.red);
+      }
     }
   }
 
@@ -525,6 +554,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         return;
       }
     }
+    
+    // NEW: Check loop prevention
+    if (widget.currentProfileUserId != null && postUserId == widget.currentProfileUserId) return;
+
     Navigator.of(context).push(
       _createSlideLeftRoute(
         ProfilePage(userId: postUserId, includeScaffold: true), 
@@ -659,7 +692,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         final uploadFailed = widget.postData['uploadFailed'] == true;
         final int commentCount = widget.postData['commentCount'] ?? 0;
         
-        // --- VISIBILITY CHECK ---
         final visibility = widget.postData['visibility'] ?? 'public';
         
         if (uploadFailed) {
@@ -790,9 +822,9 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
     final theme = Theme.of(context);
     
-    // VISIBILITY CHECK
     final String visibility = widget.postData['visibility'] ?? 'public';
     final bool isPrivate = visibility == 'private';
+    final bool isFollowersOnly = visibility == 'followers';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -814,7 +846,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                   ),
                   if (isPrivate) ...[
                     SizedBox(width: 4),
-                    Icon(Icons.lock, size: 14, color: theme.hintColor), // LOCK ICON FOR PRIVATE POSTS
+                    Icon(Icons.lock, size: 14, color: theme.hintColor), 
+                  ] else if (isFollowersOnly) ...[
+                    SizedBox(width: 4),
+                    Icon(Icons.people, size: 14, color: theme.hintColor), 
                   ],
                 ],
               ),
@@ -864,14 +899,13 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           final isPrivate = (widget.postData['visibility'] ?? 'public') == 'private';
           return [
             PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
-            // TOGGLE VISIBILITY MENU ITEM
             PopupMenuItem(
               value: 'toggle_visibility', 
               child: Row(
                 children: [
                   Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
                   SizedBox(width: 12), 
-                  Text(isPrivate ? "Unhide Post (Public)" : "Hide Post (Only Me)")
+                  Text(isPrivate ? "Unhide Post" : "Hide Post (Only Me)")
                 ]
               )
             ),

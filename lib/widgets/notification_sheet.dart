@@ -155,7 +155,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
 
                   final bool isRead = data['isRead'] ?? true;
                   
-                  // --- PHASE 3: SPECIAL HANDLING FOR REQUESTS ---
                   if (data['type'] == 'follow_request') {
                     listItems.add(_FollowRequestTile(
                       notificationId: doc.id,
@@ -180,7 +179,6 @@ class _NotificationSheetState extends State<NotificationSheet> {
   }
 }
 
-// --- PHASE 3: REQUEST TILE (ACCEPT/DECLINE) ---
 class _FollowRequestTile extends StatefulWidget {
   final String notificationId;
   final Map<String, dynamic> notificationData;
@@ -203,30 +201,26 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
     try {
       final batch = _firestore.batch();
       
-      // 1. Delete Request
       final requestRef = _firestore.collection('users').doc(myUid).collection('follow_requests').doc(senderId);
       batch.delete(requestRef);
 
       if (isAccepted) {
-        // 2. Add to lists
         final myDoc = _firestore.collection('users').doc(myUid);
         final senderDoc = _firestore.collection('users').doc(senderId);
         
         batch.update(myDoc, {'followers': FieldValue.arrayUnion([senderId])});
         batch.update(senderDoc, {'following': FieldValue.arrayUnion([myUid])});
         
-        // 3. Notify sender
         final newNotif = _firestore.collection('users').doc(senderId).collection('notifications').doc();
         batch.set(newNotif, {
-          'type': 'follow', // Standard follow notif now that they follow you
+          'type': 'request_accepted', 
           'senderId': myUid,
-          'postTextSnippet': 'accepted your follow request.',
+          'postTextSnippet': 'You can now see their posts.',
           'timestamp': FieldValue.serverTimestamp(),
           'isRead': false,
         });
       }
 
-      // 4. Delete THIS notification
       final thisNotifRef = _firestore.collection('users').doc(myUid).collection('notifications').doc(widget.notificationId);
       batch.delete(thisNotifRef);
 
@@ -338,7 +332,7 @@ class _NotificationTile extends StatelessWidget {
 
     Navigator.of(context).pop(); 
 
-    if (type == 'follow') {
+    if (type == 'follow' || type == 'request_accepted') {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ProfilePage(userId: senderId, includeScaffold: true),
       ));
@@ -447,6 +441,11 @@ class _NotificationTile extends StatelessWidget {
         badgeIcon = Icons.person_add;
         badgeColor = Colors.purple;
         actionText = "followed you";
+        break;
+      case 'request_accepted': 
+        badgeIcon = Icons.check_circle; 
+        badgeColor = Colors.teal;
+        actionText = "accepted your follow request";
         break;
       default:
         badgeIcon = Icons.notifications;

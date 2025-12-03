@@ -10,7 +10,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 
-// Ensure these imports match your actual file structure
 import '../../widgets/blog_post_card.dart';
 import '../../widgets/comment_tile.dart';
 import '../../widgets/common_error_widget.dart'; 
@@ -53,6 +52,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   
   bool _isBlocked = false;
   String? _optimisticPinnedPostId; 
+  
+  // SPAM PREVENTION
+  bool _isProcessingFollow = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -316,16 +318,17 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Future<void> _followUser(bool isPrivate) async {
-    if (_user == null) return;
+    if (_user == null || _isProcessingFollow) return;
+    setState(() => _isProcessingFollow = true);
     
-    if (isPrivate) {
-      try {
+    try {
+      if (isPrivate) {
         await _firestore.collection('users').doc(_userId).collection('follow_requests').doc(_user!.uid).set({
           'timestamp': FieldValue.serverTimestamp(),
           'status': 'pending',
         });
         
-        await _firestore.collection('users').doc(_userId).collection('notifications').add({
+        await _firestore.collection('users').doc(_userId).collection('notifications').doc('request_${_user!.uid}').set({
           'type': 'follow_request',
           'senderId': _user!.uid,
           'timestamp': FieldValue.serverTimestamp(),
@@ -333,29 +336,33 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         });
         
         if(mounted) OverlayService().showTopNotification(context, "Follow request sent", Icons.send, (){}, color: Colors.blue);
-      } catch (e) {
-         if(mounted) OverlayService().showTopNotification(context, "Failed to send request", Icons.error, (){}, color: Colors.red);
-      }
-    } else {
-      try {
+      } else {
         final batch = _firestore.batch();
         final myDocRef = _firestore.collection('users').doc(_user!.uid);
         final targetDocRef = _firestore.collection('users').doc(_userId);
         batch.update(myDocRef, {'following': FieldValue.arrayUnion([_userId])});
         batch.update(targetDocRef, {'followers': FieldValue.arrayUnion([_user!.uid])});
         await batch.commit();
+        
         _firestore.collection('users').doc(_userId).collection('notifications').add({
           'type': 'follow', 'senderId': _user!.uid, 'timestamp': FieldValue.serverTimestamp(), 'isRead': false,
         });
-      } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Failed to follow", Icons.error, (){}, color: Colors.red); }
+      }
+    } catch (e) {
+       if(mounted) OverlayService().showTopNotification(context, "Failed to action: $e", Icons.error, (){}, color: Colors.red);
+    } finally {
+      if(mounted) setState(() => _isProcessingFollow = false);
     }
   }
 
   Future<void> _unfollowUser(bool isRequestOnly) async {
-    if (_user == null) return;
+    if (_user == null || _isProcessingFollow) return;
+    setState(() => _isProcessingFollow = true);
+
     try {
       if (isRequestOnly) {
         await _firestore.collection('users').doc(_userId).collection('follow_requests').doc(_user!.uid).delete();
+        await _firestore.collection('users').doc(_userId).collection('notifications').doc('request_${_user!.uid}').delete();
         if(mounted) OverlayService().showTopNotification(context, "Request cancelled", Icons.close, (){});
       } else {
         final batch = _firestore.batch();
@@ -365,7 +372,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([_user!.uid])});
         await batch.commit();
       }
-    } catch (e) { if(mounted) OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red); }
+    } catch (e) { 
+      if(mounted) OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red); 
+    } finally {
+      if(mounted) setState(() => _isProcessingFollow = false);
+    }
   }
 
   void _shareProfile(String name) { Share.share("Check out $name's profile on Sapa PNJ!"); }
@@ -561,6 +572,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
+  // --- Header Components ---
+
   Widget _buildActionMenu(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final name = data['name'] ?? '';
     return PopupMenuButton<String>(
@@ -660,14 +673,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Widget _buildFollowButton(bool isPrivate, bool amIFollowing) {
     if (amIFollowing) {
       return OutlinedButton(
-        onPressed: () => _unfollowUser(false), 
+        onPressed: _isProcessingFollow ? null : () => _unfollowUser(false), 
         child: Text("Unfollow")
       );
     }
 
     if (!isPrivate) {
       return ElevatedButton(
-        onPressed: () => _followUser(false), 
+        onPressed: _isProcessingFollow ? null : () => _followUser(false), 
         style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
         child: Text("Follow"),
       );
@@ -683,7 +696,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       builder: (context, snapshot) {
         if (snapshot.hasData && snapshot.data!.exists) {
           return OutlinedButton(
-            onPressed: () => _unfollowUser(true), 
+            onPressed: _isProcessingFollow ? null : () => _unfollowUser(true), 
             style: OutlinedButton.styleFrom(
               backgroundColor: Theme.of(context).cardColor,
               side: BorderSide(color: Theme.of(context).dividerColor),
@@ -693,7 +706,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         }
         
         return ElevatedButton(
-          onPressed: () => _followUser(true), 
+          onPressed: _isProcessingFollow ? null : () => _followUser(true), 
           style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
           child: Text("Follow"),
         );
@@ -864,6 +877,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 
                 if (visibility == 'public') return true;
                 
+                // FIXED: Allow 'followers' visibility on Profile Page if authorized
+                // Since we are already inside the authorized view of ProfilePage, 
+                // we can show 'followers' posts.
+                if (visibility == 'followers') return true;
+                
                 if (visibility == 'private' && ownerId == _auth.currentUser?.uid) return true;
                 
                 return false;
@@ -891,6 +909,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                         heroContextId: 'profile_posts',
                         isPinned: doc.id == activePinnedId,
                         onPinToggle: (id, isPinned) => _handlePinToggle(id, isPinned),
+                        currentProfileUserId: _userId,
                       );
                     },
                     childCount: visibleDocs.length,
@@ -937,15 +956,25 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   final visibility = parentData['visibility'] ?? 'public';
                   final ownerId = parentData['userId'];
                   
-                  final isVisible = (visibility == 'public') || (visibility == 'private' && ownerId == _auth.currentUser?.uid);
+                  final isVisible = (visibility == 'public') || 
+                                    (visibility == 'followers') || 
+                                    (visibility == 'private' && ownerId == _auth.currentUser?.uid);
                   
                   if (isVisible) {
                     return Theme(
                       data: Theme.of(context).copyWith(listTileTheme: ListTileThemeData(minVerticalPadding: 0, visualDensity: VisualDensity.compact, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0))),
-                      child: CommentTile(key: ValueKey(doc.id), commentId: doc.id, commentData: doc.data() as Map<String, dynamic>, postId: parentPostId, isOwner: true, showPostContext: true, heroContextId: 'profile_replies'),
+                      child: CommentTile(
+                        key: ValueKey(doc.id), 
+                        commentId: doc.id, 
+                        commentData: doc.data() as Map<String, dynamic>, 
+                        postId: parentPostId, 
+                        isOwner: true, 
+                        showPostContext: true, 
+                        heroContextId: 'profile_replies',
+                        currentProfileUserId: _userId,
+                      ),
                     );
                   }
-                  
                   return SizedBox.shrink(); 
                 },
               );
@@ -975,6 +1004,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             final ownerId = data['userId'];
             
             if (visibility == 'public') return true;
+            if (visibility == 'followers') return true; 
             if (visibility == 'private' && ownerId == _auth.currentUser?.uid) return true;
             
             return false;
@@ -990,7 +1020,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 postId: doc.id, 
                 postData: doc.data() as Map<String, dynamic>, 
                 isOwner: doc['userId'] == _auth.currentUser?.uid, 
-                heroContextId: 'profile_reposts'
+                heroContextId: 'profile_reposts',
+                currentProfileUserId: _userId,
               );
             }, childCount: visibleDocs.length)));
             slivers.add(SliverToBoxAdapter(child: SizedBox(height: 80)));

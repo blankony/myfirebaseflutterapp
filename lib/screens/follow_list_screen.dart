@@ -5,7 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../main.dart'; 
 import 'dashboard/profile_page.dart'; 
-import '../widgets/common_error_widget.dart'; // REQUIRED
+import '../widgets/common_error_widget.dart'; 
+import '../../services/overlay_service.dart'; 
 
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -30,6 +31,8 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
   List<String> _followersIds = [];
   bool _isLoading = true;
   bool _hasError = false;
+
+  bool get _isMe => _auth.currentUser?.uid == widget.userId;
 
   @override
   void initState() {
@@ -64,23 +67,59 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
     }
   }
 
-  // --- CLEANUP LOGIC ---
-  // If we detect a user doesn't exist anymore, we remove them from the array
-  // so the counts match the actual list next time.
+  // --- REMOVE FOLLOWER LOGIC ---
+  Future<void> _removeFollower(String followerId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Remove Follower?"),
+        content: Text("We won't tell them they were removed."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("Cancel")),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text("Remove", style: TextStyle(color: Colors.red))),
+        ],
+      )
+    ) ?? false;
+
+    if (!confirm) return;
+
+    try {
+      // Optimistic Update
+      setState(() {
+        _followersIds.remove(followerId);
+      });
+
+      final batch = _firestore.batch();
+      
+      // 1. Remove from my 'followers'
+      final myRef = _firestore.collection('users').doc(widget.userId);
+      batch.update(myRef, {'followers': FieldValue.arrayRemove([followerId])});
+
+      // 2. Remove me from their 'following'
+      final followerRef = _firestore.collection('users').doc(followerId);
+      batch.update(followerRef, {'following': FieldValue.arrayRemove([widget.userId])});
+
+      await batch.commit();
+      
+      if(mounted) OverlayService().showTopNotification(context, "Follower removed", Icons.person_remove, (){});
+
+    } catch (e) {
+      // Revert if failed
+      _fetchLists(); 
+      if(mounted) OverlayService().showTopNotification(context, "Failed to remove follower", Icons.error, (){}, color: Colors.red);
+    }
+  }
+
+  // Cleanup ghosts
   void _cleanupDeadUser(String deadUserId, String listType) {
-    // Only the owner of the profile can clean their own lists
-    if (_auth.currentUser?.uid != widget.userId) return;
+    if (!_isMe) return;
 
     final docRef = _firestore.collection('users').doc(widget.userId);
     
     if (listType == 'following') {
-      docRef.update({
-        'following': FieldValue.arrayRemove([deadUserId])
-      });
+      docRef.update({'following': FieldValue.arrayRemove([deadUserId])});
     } else if (listType == 'followers') {
-      docRef.update({
-        'followers': FieldValue.arrayRemove([deadUserId])
-      });
+      docRef.update({'followers': FieldValue.arrayRemove([deadUserId])});
     }
   }
 
@@ -103,7 +142,7 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          "Connections",
+          _isMe ? "My Connections" : "Connections",
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         bottom: TabBar(
@@ -132,8 +171,6 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
                 _UserList(
                   userIds: _mutualsIds, 
                   emptyMessage: "No mutual followers yet.",
-                  // Mutuals are derived, we don't strictly clean up from here to avoid double-writes,
-                  // but cleaning following/followers individually handles it.
                   listType: 'mutuals',
                   onDeadUserFound: (id) {}, 
                 ),
@@ -148,6 +185,8 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
                   emptyMessage: "No followers yet.",
                   listType: 'followers',
                   onDeadUserFound: (id) => _cleanupDeadUser(id, 'followers'),
+                  // Only pass callback if it's MY profile
+                  onRemoveAction: _isMe ? _removeFollower : null,
                 ),
               ],
             ),
@@ -160,12 +199,14 @@ class _UserList extends StatelessWidget {
   final String emptyMessage;
   final String listType;
   final Function(String) onDeadUserFound;
+  final Function(String)? onRemoveAction; // Optional remove callback
 
   const _UserList({
     required this.userIds, 
     required this.emptyMessage,
     required this.listType,
     required this.onDeadUserFound,
+    this.onRemoveAction,
   });
 
   @override
@@ -188,7 +229,8 @@ class _UserList extends StatelessWidget {
       itemBuilder: (context, index) {
         return _UserTile(
           userId: userIds[index], 
-          onDeadUser: () => onDeadUserFound(userIds[index])
+          onDeadUser: () => onDeadUserFound(userIds[index]),
+          onRemove: onRemoveAction != null ? () => onRemoveAction!(userIds[index]) : null,
         );
       },
     );
@@ -198,13 +240,17 @@ class _UserList extends StatelessWidget {
 class _UserTile extends StatelessWidget {
   final String userId;
   final VoidCallback onDeadUser;
+  final VoidCallback? onRemove; // Optional remove button
 
-  const _UserTile({required this.userId, required this.onDeadUser});
+  const _UserTile({
+    required this.userId, 
+    required this.onDeadUser,
+    this.onRemove,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentUserId = _auth.currentUser?.uid;
 
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(userId).get(),
@@ -213,13 +259,11 @@ class _UserTile extends StatelessWidget {
           return SizedBox(height: 60, child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
         }
         
-        // 1. Check if document exists
         if (!snapshot.hasData || !snapshot.data!.exists) {
-          // If not, trigger cleanup
           WidgetsBinding.instance.addPostFrameCallback((_) {
             onDeadUser();
           });
-          return SizedBox.shrink(); // Hide the deleted user from the list
+          return SizedBox.shrink();
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>?;
@@ -261,6 +305,17 @@ class _UserTile extends StatelessWidget {
                     ],
                   ),
                 ),
+                // Show Remove Button if applicable
+                if (onRemove != null)
+                  OutlinedButton(
+                    onPressed: onRemove,
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                      side: BorderSide(color: theme.dividerColor),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: Text("Remove", style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 12)),
+                  ),
               ],
             ),
           ),
@@ -268,4 +323,4 @@ class _UserTile extends StatelessWidget {
       },
     );
   }
-} 
+}

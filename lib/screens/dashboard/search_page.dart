@@ -36,7 +36,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   final FocusNode _searchFocusNode = FocusNode();
   final PredictionService _predictionService = PredictionService();
   
-  // VOICE STATE
   bool _isListening = false;
   
   late TabController _tabController;
@@ -88,7 +87,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // --- LOGIKA VOICE COMMAND ---
   Future<void> _startListening() async {
     if (voiceService.isListening) {
       await voiceService.stopListening();
@@ -403,6 +401,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 // --- FILTER PUBLIC POSTS FOR TRENDING ---
                 final allPosts = snapshot.data!.docs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
+                  // Only purely 'public' posts trend. 'followers' visibility does not trend globally.
                   return (data['visibility'] ?? 'public') == 'public';
                 }).toList();
                 // -----------------------------------------
@@ -500,6 +499,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     // --- FILTER PUBLIC POSTS FOR DISCOVERY ---
                     final publicPosts = snapshot.data!.docs.where((doc) {
                       final data = doc.data() as Map<String, dynamic>;
+                      // Discover only shows truly PUBLIC posts
                       return (data['visibility'] ?? 'public') == 'public';
                     }).toList();
                     // -----------------------------------------
@@ -597,37 +597,61 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   Widget _buildPostResults() {
     final currentUserId = _auth.currentUser?.uid;
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
-        if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
-        
-        final docs = snapshot.data?.docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final text = (data['text'] ?? '').toString().toLowerCase();
-          
-          // --- FILTER VISIBILITY ---
-          final visibility = data['visibility'] ?? 'public';
-          final ownerId = data['userId'];
-          final isVisible = (visibility == 'public') || (ownerId == currentUserId);
-          // ------------------------
+    return StreamBuilder<DocumentSnapshot>(
+      // 1. Get current user to check following list for 'followers' visibility
+      stream: currentUserId != null ? _firestore.collection('users').doc(currentUserId).snapshots() : null,
+      builder: (context, userSnapshot) {
+        List<dynamic> followingList = [];
+        if (userSnapshot.hasData && userSnapshot.data!.exists) {
+          final uData = userSnapshot.data!.data() as Map<String, dynamic>;
+          followingList = uData['following'] ?? [];
+        }
 
-          return isVisible && text.contains(_searchText);
-        }).toList() ?? [];
+        return StreamBuilder<QuerySnapshot>(
+          stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
+            if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
+            
+            final docs = snapshot.data?.docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final text = (data['text'] ?? '').toString().toLowerCase();
+              
+              // --- VISIBILITY FILTER FOR SEARCH ---
+              final visibility = data['visibility'] ?? 'public';
+              final ownerId = data['userId'];
+              
+              bool isVisible = false;
+              if (visibility == 'public') isVisible = true;
+              else if (visibility == 'followers') {
+                if (ownerId == currentUserId || followingList.contains(ownerId)) isVisible = true;
+              } else if (visibility == 'private') {
+                if (ownerId == currentUserId) isVisible = true;
+              }
+              // ------------------------------------
 
-        if (docs.isEmpty) return Center(child: Text('No posts found for "$_searchText"'));
-        
-        return ListView.builder(
-          padding: EdgeInsets.only(bottom: 100),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            return BlogPostCard(postId: docs[index].id, postData: data, isOwner: data['userId'] == currentUserId, heroContextId: 'search_results');
+              return isVisible && text.contains(_searchText);
+            }).toList() ?? [];
+
+            if (docs.isEmpty) return Center(child: Text('No posts found for "$_searchText"'));
+            
+            return ListView.builder(
+              padding: EdgeInsets.only(bottom: 100),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              itemCount: docs.length,
+              itemBuilder: (context, index) {
+                final data = docs[index].data() as Map<String, dynamic>;
+                return BlogPostCard(
+                  postId: docs[index].id, 
+                  postData: data, 
+                  isOwner: data['userId'] == currentUserId, 
+                  heroContextId: 'search_results'
+                );
+              },
+            );
           },
         );
-      },
+      }
     );
   }
 

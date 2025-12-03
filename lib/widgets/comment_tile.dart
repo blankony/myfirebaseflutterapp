@@ -22,6 +22,9 @@ class CommentTile extends StatefulWidget {
   final bool isOwner;
   final bool showPostContext; 
   final String heroContextId; 
+  
+  // NEW: To prevent loop when on profile page
+  final String? currentProfileUserId;
 
   const CommentTile({
     super.key,
@@ -31,6 +34,7 @@ class CommentTile extends StatefulWidget {
     required this.isOwner,
     this.showPostContext = false, 
     this.heroContextId = 'comment', 
+    this.currentProfileUserId,
   });
 
   @override
@@ -257,6 +261,10 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
     final commentUserId = widget.commentData['userId'];
     if (commentUserId == null) return;
     if (commentUserId == _auth.currentUser?.uid) return;
+    
+    // NEW: Check loop prevention
+    if (widget.currentProfileUserId != null && commentUserId == widget.currentProfileUserId) return;
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => ProfilePage(userId: commentUserId, includeScaffold: true), 

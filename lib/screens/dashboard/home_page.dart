@@ -64,14 +64,18 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     final String? currentUserId = _auth.currentUser?.uid;
 
     return StreamBuilder<DocumentSnapshot>(
+      // 1. Get current user data to access 'following' list
       stream: currentUserId != null 
           ? _firestore.collection('users').doc(currentUserId).snapshots() 
           : null,
       builder: (context, userSnapshot) {
         
         Map<String, dynamic> userData = {};
+        List<dynamic> followingList = [];
+        
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           userData = userSnapshot.data!.data() as Map<String, dynamic>;
+          followingList = userData['following'] ?? [];
         }
 
         return Stack(
@@ -96,21 +100,29 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
                 List<QueryDocumentSnapshot> allDocs = snapshot.data?.docs ?? [];
                 
-                // --- VISIBILITY FILTER ---
+                // --- FEED FILTERING LOGIC ---
                 final visibleDocs = allDocs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
                   final visibility = data['visibility'] ?? 'public';
                   final ownerId = data['userId'];
                   
-                  // Public posts are visible to everyone
+                  // 1. Public posts -> Visible to everyone
                   if (visibility == 'public') return true;
                   
-                  // Private posts are ONLY visible to the owner
+                  // 2. Followers-Only posts (Private Account posts)
+                  // Visible if I follow author OR I am author
+                  if (visibility == 'followers') {
+                    if (ownerId == currentUserId) return true;
+                    if (followingList.contains(ownerId)) return true;
+                    return false; // Otherwise hidden
+                  }
+                  
+                  // 3. Private (Only Me) posts -> Visible ONLY to owner
                   if (visibility == 'private' && ownerId == currentUserId) return true;
                   
                   return false;
                 }).toList();
-                // ------------------------
+                // ---------------------------
 
                 List<QueryDocumentSnapshot> finalDocs = visibleDocs;
                 if (widget.isRecommended && visibleDocs.isNotEmpty) {
