@@ -1,13 +1,11 @@
 // ignore_for_file: prefer_const_constructors
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui';
 import 'dart:async'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:myfirebaseflutterapp/widgets/side_panel.dart';
 import 'package:myfirebaseflutterapp/widgets/ai_history_drawer.dart'; 
@@ -15,12 +13,10 @@ import 'home_page.dart';
 import 'ai_assistant_page.dart';
 import 'search_page.dart';
 import 'profile_tab_page.dart';
-import 'profile_page.dart'; 
 import '../create_post_screen.dart'; 
+import '../community/community_list_tab.dart';
 import '../../main.dart'; 
-import 'package:timeago/timeago.dart' as timeago; 
 import '../../widgets/notification_sheet.dart'; 
-
 import '../../services/overlay_service.dart';
 import '../../services/notification_prefs_service.dart';
 import '../../services/ai_event_bus.dart';
@@ -49,7 +45,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ScrollController _recommendedScrollController = ScrollController();
   
-  // Cache the Home Widget to prevent rebuilds destroying scroll state
+  // Cache the Home Widget
   late Widget _persistentHomeTab;
 
   bool _isSearching = false;
@@ -68,7 +64,8 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   void initState() {
     super.initState();
     
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    
     _pageController = PageController(initialPage: _selectedIndex);
     _homePageController = PageController(initialPage: _subTabIndex);
 
@@ -79,7 +76,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           Expanded(
             child: PageView(
               controller: _homePageController,
-              allowImplicitScrolling: true, // Key for keeping both lists alive
+              allowImplicitScrolling: true, 
               onPageChanged: (index) {
                 _tabController.animateTo(index);
                 setState(() {
@@ -88,12 +85,18 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                 });
               },
               children: [
+                // TAB 1: RECENT POSTS
                 KeepAlivePage(
                   child: HomePage(
                     scrollController: _scrollController,
                     isRecommended: false,
                   ),
                 ),
+                // TAB 2: COMMUNITY
+                KeepAlivePage(
+                  child: CommunityListTab(),
+                ),
+                // TAB 3: RECOMMENDED POSTS
                 KeepAlivePage(
                   child: HomePage(
                     scrollController: _recommendedScrollController,
@@ -224,7 +227,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           String? postId = data['postId'];
 
           if (type == 'like') {
-             message = "Someone liked your post. Tap to view.";
+             message = "Someone liked your post.";
              icon = Icons.favorite;
           } else if (type == 'comment') {
              message = "Someone commented on your post.";
@@ -269,7 +272,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     if (_selectedIndex == 0) {
       if (_subTabIndex == 0) {
         _scrollToTop(_scrollController); 
-      } else if (_subTabIndex == 1) {
+      } else if (_subTabIndex == 2) { // Index 2 is now Recommended
         _scrollToTop(_recommendedScrollController);
       }
     }
@@ -392,9 +395,8 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   Widget build(BuildContext context) {
     super.build(context); 
 
-    // Use cached home tab + fresh instances for others
     final _widgetOptions = <Widget>[
-      _persistentHomeTab, // REUSE CACHED WIDGET HERE
+      _persistentHomeTab, 
       KeepAlivePage(child: AiAssistantPage()),
       KeepAlivePage(
         child: SearchPage(
@@ -455,15 +457,16 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
               bottom: _selectedIndex == 0
                   ? TabBar(
                       controller: _tabController,
-                      // ONLY scroll if the tab is already active
+                      // UPDATE TAB LOGIC
                       onTap: (index) {
                         if (_tabController.index == index) {
                           if (index == 0) _scrollToTop(_scrollController);
-                          if (index == 1) _scrollToTop(_recommendedScrollController);
+                          if (index == 2) _scrollToTop(_recommendedScrollController);
                         }
                       },
-                      tabs: [
-                        Tab(text: 'Recent Posts'),
+                      tabs: const [
+                        Tab(text: 'Recent'),
+                        Tab(text: 'Community'),
                         Tab(text: 'Recommended'),
                       ],
                     )

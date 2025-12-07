@@ -12,7 +12,7 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 class HomePage extends StatefulWidget {
   final ScrollController scrollController;
-  final bool isRecommended;
+  final bool isRecommended; // Parameter dikembalikan
 
   const HomePage({
     super.key,
@@ -59,12 +59,10 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   Widget build(BuildContext context) {
     super.build(context);
 
-    final double contentTopPadding = 160.0; 
-    final double refreshIndicatorOffset = 120.0;
+    final double contentTopPadding = 10.0; // Adjusted padding since TabBar is in Dashboard
     final String? currentUserId = _auth.currentUser?.uid;
 
     return StreamBuilder<DocumentSnapshot>(
-      // 1. Get current user data to access 'following' list
       stream: currentUserId != null 
           ? _firestore.collection('users').doc(currentUserId).snapshots() 
           : null,
@@ -78,122 +76,95 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           followingList = userData['following'] ?? [];
         }
 
-        return Stack(
-          children: [
-            StreamBuilder<QuerySnapshot>(
-              stream: _postsStream,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator());
-                }
-                
-                if (snapshot.hasError) {
-                  return Padding(
-                    padding: EdgeInsets.only(top: contentTopPadding),
-                    child: CommonErrorWidget(
-                      message: "Couldn't load posts. Please check your connection.",
-                      isConnectionError: true,
-                      onRetry: () => setState(() => _initStream()),
-                    ),
-                  );
-                }
+        return StreamBuilder<QuerySnapshot>(
+          stream: _postsStream,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator());
+            }
+            
+            if (snapshot.hasError) {
+              return Padding(
+                padding: EdgeInsets.only(top: 50),
+                child: CommonErrorWidget(
+                  message: "Couldn't load posts.",
+                  isConnectionError: true,
+                  onRetry: () => setState(() => _initStream()),
+                ),
+              );
+            }
 
-                List<QueryDocumentSnapshot> allDocs = snapshot.data?.docs ?? [];
-                
-                // --- FEED FILTERING LOGIC ---
-                final visibleDocs = allDocs.where((doc) {
+            List<QueryDocumentSnapshot> allDocs = snapshot.data?.docs ?? [];
+            
+            // --- FEED FILTERING LOGIC ---
+            final visibleDocs = allDocs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              
+              // SKIP COMMUNITY POSTS IN MAIN FEED
+              if (data['communityId'] != null) return false;
+
+              final visibility = data['visibility'] ?? 'public';
+              final ownerId = data['userId'];
+              
+              if (visibility == 'public') return true;
+              
+              if (visibility == 'followers') {
+                if (ownerId == currentUserId) return true;
+                if (followingList.contains(ownerId)) return true;
+                return false; 
+              }
+              
+              if (visibility == 'private' && ownerId == currentUserId) return true;
+              
+              return false;
+            }).toList();
+            // ---------------------------
+
+            List<QueryDocumentSnapshot> finalDocs = visibleDocs;
+            if (widget.isRecommended && visibleDocs.isNotEmpty) {
+              finalDocs = _aiService.getPersonalizedRecommendations(
+                visibleDocs,
+                userData, 
+                currentUserId ?? ''
+              );
+            }
+
+            if (finalDocs.isEmpty) {
+               return Center(
+                 child: Column(
+                   mainAxisAlignment: MainAxisAlignment.center,
+                   children: [
+                     Icon(Icons.feed_outlined, size: 64, color: Colors.grey),
+                     SizedBox(height: 16),
+                     Text("No posts yet.", style: TextStyle(color: Colors.grey)),
+                   ],
+                 ),
+               );
+            }
+
+            return RefreshIndicator(
+              onRefresh: _handleRefresh,
+              color: TwitterTheme.blue,
+              child: ListView.builder(
+                key: PageStorageKey('home_list_${widget.isRecommended ? 'rec' : 'recents'}$_refreshKey'),
+                controller: widget.scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.only(top: contentTopPadding, bottom: 100),
+                itemCount: finalDocs.length,
+                itemBuilder: (context, index) {
+                  final doc = finalDocs[index];
                   final data = doc.data() as Map<String, dynamic>;
-                  final visibility = data['visibility'] ?? 'public';
-                  final ownerId = data['userId'];
                   
-                  // 1. Public posts -> Visible to everyone
-                  if (visibility == 'public') return true;
-                  
-                  // 2. Followers-Only posts (Private Account posts)
-                  // Visible if I follow author OR I am author
-                  if (visibility == 'followers') {
-                    if (ownerId == currentUserId) return true;
-                    if (followingList.contains(ownerId)) return true;
-                    return false; // Otherwise hidden
-                  }
-                  
-                  // 3. Private (Only Me) posts -> Visible ONLY to owner
-                  if (visibility == 'private' && ownerId == currentUserId) return true;
-                  
-                  return false;
-                }).toList();
-                // ---------------------------
-
-                List<QueryDocumentSnapshot> finalDocs = visibleDocs;
-                if (widget.isRecommended && visibleDocs.isNotEmpty) {
-                  finalDocs = _aiService.getPersonalizedRecommendations(
-                    visibleDocs,
-                    userData, 
-                    currentUserId ?? ''
+                  return BlogPostCard(
+                    postId: doc.id,
+                    postData: data,
+                    isOwner: data['userId'] == currentUserId,
+                    heroContextId: widget.isRecommended ? 'home_recommended' : 'home_recent',
                   );
-                }
-
-                return RefreshIndicator(
-                  onRefresh: _handleRefresh,
-                  color: TwitterTheme.blue,
-                  edgeOffset: refreshIndicatorOffset,
-                  child: finalDocs.isNotEmpty
-                      ? ListView.builder(
-                          key: PageStorageKey('home_list_${widget.isRecommended ? 'rec' : 'recents'}$_refreshKey'),
-                          controller: widget.scrollController,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: EdgeInsets.only(top: contentTopPadding, bottom: 100),
-                          itemCount: finalDocs.length,
-                          itemBuilder: (context, index) {
-                            final doc = finalDocs[index];
-                            final data = doc.data() as Map<String, dynamic>;
-                            
-                            return Column(
-                              children: [
-                                BlogPostCard(
-                                  postId: doc.id,
-                                  postData: data,
-                                  isOwner: data['userId'] == currentUserId,
-                                  heroContextId: widget.isRecommended ? 'home_recommended' : 'home_recent',
-                                ),
-                              ],
-                            );
-                          },
-                        )
-                      : ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          children: [
-                            SizedBox(height: contentTopPadding),
-                            Container(
-                              height: 300,
-                              alignment: Alignment.center,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.auto_awesome_outlined, size: 64, color: Colors.grey),
-                                  SizedBox(height: 16),
-                                  Text(
-                                    widget.isRecommended 
-                                      ? 'No recommendations yet.' 
-                                      : 'No posts yet.', 
-                                    style: TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.bold)
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    widget.isRecommended
-                                      ? 'Interact with posts to teach our AI!'
-                                      : 'Start exploring or create a post!', 
-                                    style: TextStyle(color: Colors.grey)
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                );
-              },
-            ),
-          ],
+                },
+              ),
+            );
+          },
         );
       },
     );

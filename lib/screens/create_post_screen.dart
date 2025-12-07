@@ -61,6 +61,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   File? _selectedMediaFile;
   String? _existingMediaUrl;
   String? _mediaType;
+  
+  // --- NEW: Community ID Support ---
+  String? _communityId;
 
   bool get _isEditing => widget.postId != null;
 
@@ -70,12 +73,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _loadUserData();
     _trainAiModel();
 
-    if (_isEditing && widget.initialData != null) {
-      _postController.text = widget.initialData!['text'] ?? '';
-      _existingMediaUrl = widget.initialData!['mediaUrl'];
-      _mediaType = widget.initialData!['mediaType'];
-      _visibility = widget.initialData!['visibility'] ?? 'public';
-      _checkCanPost();
+    // Handle Initial Data (For Editing OR Creating in Community)
+    if (widget.initialData != null) {
+      // 1. Check for Community ID
+      _communityId = widget.initialData!['communityId'];
+      
+      // 2. If Editing, load existing data
+      if (_isEditing) {
+        _postController.text = widget.initialData!['text'] ?? '';
+        _existingMediaUrl = widget.initialData!['mediaUrl'];
+        _mediaType = widget.initialData!['mediaType'];
+        _visibility = widget.initialData!['visibility'] ?? 'public';
+        _checkCanPost();
+      } 
+      // 3. If Creating New in Community, force public visibility
+      else if (_communityId != null) {
+        _visibility = 'public';
+      }
     }
   }
 
@@ -230,8 +244,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           _profileImageUrl = data['profileImageUrl'];
           _isAccountPrivate = data['isPrivate'] ?? false;
           
-          // Initial visibility setup based on account type
-          if (!_isEditing) {
+          // Initial visibility setup based on account type (Only if not in community mode)
+          if (!_isEditing && _communityId == null) {
             _visibility = _isAccountPrivate ? 'followers' : 'public';
           }
         });
@@ -344,10 +358,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final bool isEditing = _isEditing;
     final String? postId = widget.postId;
     
-    // IMPORTANT: If account is private and visibility is 'public', force it to 'followers'
-    // This prevents the bug where private posts appear as "public" data
+    // IMPORTANT: Visibility Logic
     String finalVisibility = _visibility;
-    if (_isAccountPrivate && _visibility == 'public') {
+    
+    // 1. If Community Post -> Always Public (so members can see)
+    if (_communityId != null) {
+        finalVisibility = 'public';
+    } 
+    // 2. If Private Account & Public selected -> Force Followers
+    else if (_isAccountPrivate && _visibility == 'public') {
       finalVisibility = 'followers';
     }
 
@@ -379,6 +398,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         avatarIconId: uIcon,
         avatarHex: uHex,
         profileImageUrl: uProfileImg,
+        communityId: _communityId, // PASS COMMUNITY ID
       );
     }
   }
@@ -427,89 +447,90 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           icon: Icon(Icons.close, color: theme.primaryColor),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: _isEditing ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) : null,
+        title: _isEditing 
+            ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) 
+            : (_communityId != null ? Text("New Community Post", style: TextStyle(fontSize: 16)) : null),
         centerTitle: false,
         actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10.0),
-            child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _visibility,
-                  icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
-                  style: TextStyle(
-                    color: theme.textTheme.bodyLarge?.color, 
-                    fontWeight: FontWeight.bold, 
-                    fontSize: 13
-                  ),
-                  onChanged: (String? newValue) {
-                    if (newValue == 'public_attempt' && _isAccountPrivate) {
-                      _showPrivacyRestrictionDialog();
-                      return;
-                    }
-                    if (newValue != null && newValue != 'public_attempt') {
-                      setState(() => _visibility = newValue);
-                    }
-                  },
-                  items: [
-                    // Logic: If Private, show 'Followers' (value='followers') and a dummy 'Public'
-                    // If Public, show 'Public' (value='public')
-                    
-                    if (_isAccountPrivate)
-                      DropdownMenuItem(
-                        value: 'followers',
-                        child: Row(
-                          children: [
-                            Icon(Icons.people, size: 16, color: Colors.blue),
-                            SizedBox(width: 6), 
-                            Text("Followers")
-                          ]
-                        ),
-                      )
-                    else
-                      DropdownMenuItem(
-                        value: 'public',
-                        child: Row(
-                          children: [
-                            Icon(Icons.public, size: 16, color: Colors.blue),
-                            SizedBox(width: 6), 
-                            Text("Public")
-                          ]
-                        ),
-                      ),
-                    
-                    if (_isAccountPrivate)
-                      DropdownMenuItem(
-                        value: 'public_attempt',
-                        child: Row(
-                          children: [
-                            Icon(Icons.public, size: 16, color: Colors.grey),
-                            SizedBox(width: 6), 
-                            Text("Public", style: TextStyle(color: Colors.grey))
-                          ]
-                        ),
-                      ),
-
-                    DropdownMenuItem(
-                      value: 'private',
-                      child: Row(
-                        children: [
-                          Icon(Icons.lock, size: 16, color: Colors.red),
-                          SizedBox(width: 6), 
-                          Text("Only Me") 
-                        ]
-                      ),
+          // Visibility Dropdown - Hide if posting to Community (always public/visible to members)
+          if (_communityId == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10.0),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _visibility,
+                    icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
+                    style: TextStyle(
+                      color: theme.textTheme.bodyLarge?.color, 
+                      fontWeight: FontWeight.bold, 
+                      fontSize: 13
                     ),
-                  ],
+                    onChanged: (String? newValue) {
+                      if (newValue == 'public_attempt' && _isAccountPrivate) {
+                        _showPrivacyRestrictionDialog();
+                        return;
+                      }
+                      if (newValue != null && newValue != 'public_attempt') {
+                        setState(() => _visibility = newValue);
+                      }
+                    },
+                    items: [
+                      if (_isAccountPrivate)
+                        DropdownMenuItem(
+                          value: 'followers',
+                          child: Row(
+                            children: [
+                              Icon(Icons.people, size: 16, color: Colors.blue),
+                              SizedBox(width: 6), 
+                              Text("Followers")
+                            ]
+                          ),
+                        )
+                      else
+                        DropdownMenuItem(
+                          value: 'public',
+                          child: Row(
+                            children: [
+                              Icon(Icons.public, size: 16, color: Colors.blue),
+                              SizedBox(width: 6), 
+                              Text("Public")
+                            ]
+                          ),
+                        ),
+                      
+                      if (_isAccountPrivate)
+                        DropdownMenuItem(
+                          value: 'public_attempt',
+                          child: Row(
+                            children: [
+                              Icon(Icons.public, size: 16, color: Colors.grey),
+                              SizedBox(width: 6), 
+                              Text("Public", style: TextStyle(color: Colors.grey))
+                            ]
+                          ),
+                        ),
+
+                      DropdownMenuItem(
+                        value: 'private',
+                        child: Row(
+                          children: [
+                            Icon(Icons.lock, size: 16, color: Colors.red),
+                            SizedBox(width: 6), 
+                            Text("Only Me") 
+                          ]
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
           
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -687,6 +708,7 @@ class _BackgroundUploader {
     required int avatarIconId,
     required String avatarHex,
     required String? profileImageUrl,
+    required String? communityId, // Added parameter
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -716,6 +738,7 @@ class _BackgroundUploader {
       avatarIconId: avatarIconId,
       avatarHex: avatarHex,
       profileImageUrl: profileImageUrl,
+      communityId: communityId, // Pass it
       onProgress: (status) {
         overlayKey.currentState?.updateStatus(status);
       },
@@ -748,6 +771,7 @@ class _BackgroundUploader {
     required int avatarIconId,
     required String avatarHex,
     required String? profileImageUrl,
+    required String? communityId, // Added parameter
     required Function(String) onProgress,
     required VoidCallback onSuccess,
     required Function(dynamic) onFailure,
@@ -781,18 +805,21 @@ class _BackgroundUploader {
         }
       }
 
+      // Base Data
+      final Map<String, dynamic> postData = {
+        'text': text,
+        'mediaUrl': finalMediaUrl,
+        'mediaType': mediaType,
+        'visibility': visibility, 
+        'isUploading': false,
+      };
+
       if (isEditing && postId != null) {
-        await _firestore.collection('posts').doc(postId).update({
-          'text': text,
-          'mediaUrl': finalMediaUrl,
-          'mediaType': mediaType,
-          'visibility': visibility, 
-          'isUploading': false,
-          'editedAt': FieldValue.serverTimestamp(),
-        });
+        postData['editedAt'] = FieldValue.serverTimestamp();
+        await _firestore.collection('posts').doc(postId).update(postData);
       } else {
-        await _firestore.collection('posts').add({
-          'text': text,
+        // Full new document data
+        postData.addAll({
           'timestamp': FieldValue.serverTimestamp(),
           'userId': uid,
           'userName': userName,
@@ -803,11 +830,15 @@ class _BackgroundUploader {
           'likes': {},
           'commentCount': 0,
           'repostedBy': [],
-          'mediaUrl': finalMediaUrl,
-          'mediaType': mediaType,
-          'visibility': visibility, 
-          'isUploading': false,
         });
+
+        // Handle Community ID
+        if (communityId != null) {
+          postData['communityId'] = communityId;
+          postData['visibility'] = 'public'; // Force public for community visibility
+        }
+
+        await _firestore.collection('posts').add(postData);
       }
 
       if (visibility == 'public' || visibility == 'followers') {
@@ -972,7 +1003,7 @@ class _UploadCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Dismissible(
-      key: ValueKey("upload_card_dismiss"),
+      key: UniqueKey(),
       direction: DismissDirection.horizontal,
       onDismissed: (_) => onDismiss(),
       child: Material(
