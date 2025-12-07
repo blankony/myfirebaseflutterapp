@@ -1,4 +1,5 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:ui'; // REQUIRED FOR BLUR
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,154 +13,219 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 class HomePage extends StatefulWidget {
   final ScrollController scrollController;
-  final bool isRecommended; // Parameter dikembalikan
+  final ScrollController recommendedScrollController;
 
   const HomePage({
     super.key,
     required this.scrollController,
-    this.isRecommended = false,
+    required this.recommendedScrollController,
   });
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
-  late Stream<QuerySnapshot> _postsStream;
-  String _refreshKey = ''; 
-  final PredictionService _aiService = PredictionService(); 
+class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  // Kita butuh controller lokal untuk NestedScrollView
+  final ScrollController _localScrollController = ScrollController(); 
+  bool _isScrolled = false;
 
   @override
   void initState() {
     super.initState();
-    _initStream();
-  }
-
-  void _initStream() {
-    _postsStream = _firestore
-        .collection('posts')
-        .orderBy('timestamp', descending: true)
-        .limit(100) 
-        .snapshots();
-  }
-
-  Future<void> _handleRefresh() async {
-    await Future.delayed(Duration(seconds: 1));
-    if (mounted) {
-      setState(() {
-        _refreshKey = DateTime.now().toString();
-      });
-    }
+    _tabController = TabController(length: 2, vsync: this);
+    
+    // Listener untuk efek blur saat scroll
+    _localScrollController.addListener(() {
+      if (_localScrollController.hasClients) {
+        bool scrolled = _localScrollController.offset > 0;
+        if (scrolled != _isScrolled) {
+          setState(() => _isScrolled = scrolled);
+        }
+      }
+    });
   }
 
   @override
   bool get wantKeepAlive => true;
 
   @override
+  void dispose() {
+    _tabController.dispose();
+    _localScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     super.build(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
-    final double contentTopPadding = 10.0; // Adjusted padding since TabBar is in Dashboard
-    final String? currentUserId = _auth.currentUser?.uid;
+    return NestedScrollView(
+      controller: _localScrollController,
+      headerSliverBuilder: (context, innerBoxIsScrolled) {
+        return [
+          // --- 1. SLIVER APP BAR (UNTUK EFEK BLUR & RESIZE) ---
+          SliverAppBar(
+            pinned: true,
+            floating: true,
+            snap: true,
+            elevation: 0,
+            backgroundColor: Colors.transparent, // Transparan agar blur terlihat
+            automaticallyImplyLeading: false, // Hilangkan back button default (karena ini tab)
+            toolbarHeight: 0, // Sembunyikan toolbar (karena App Bar utama ada di HomeDashboard)
+            collapsedHeight: 0,
+            expandedHeight: 0, // Kita buat 0 karena App Bar dihandle Dashboard, kita hanya butuh TabBar yang Sticky
+            
+            // --- TAB BAR YANG STICKY & BLURRY ---
+            bottom: PreferredSize(
+              preferredSize: Size.fromHeight(48),
+              child: ClipRRect( // Clip agar blur tidak bocor
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0), // EFEK BLUR
+                  child: Container(
+                    color: theme.scaffoldBackgroundColor.withOpacity(0.85), // Semi-transparan
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: TwitterTheme.blue,
+                      unselectedLabelColor: theme.hintColor,
+                      indicatorColor: TwitterTheme.blue,
+                      indicatorSize: TabBarIndicatorSize.label,
+                      tabs: const [
+                        Tab(text: 'Recent'),
+                        Tab(text: 'Recommended'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ];
+      },
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _PostFeedList(
+            scrollController: widget.scrollController,
+            feedType: 'recent',
+            refreshOffset: 60, // Tambah offset agar loading spinner tidak ketutup tab bar
+          ),
+          _PostFeedList(
+            scrollController: widget.recommendedScrollController,
+            feedType: 'recommended',
+            refreshOffset: 60,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PostFeedList extends StatefulWidget {
+  final ScrollController scrollController;
+  final String feedType;
+  final double refreshOffset;
+
+  const _PostFeedList({required this.scrollController, required this.feedType, required this.refreshOffset});
+
+  @override
+  State<_PostFeedList> createState() => _PostFeedListState();
+}
+
+class _PostFeedListState extends State<_PostFeedList> with AutomaticKeepAliveClientMixin {
+  final PredictionService _aiService = PredictionService(); 
+  late Stream<QuerySnapshot> _stream;
+  String _refreshKey = '';
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _stream = _firestore.collection('posts')
+        .orderBy('timestamp', descending: true)
+        .limit(50)
+        .snapshots();
+  }
+
+  Future<void> _refresh() async {
+    await Future.delayed(Duration(seconds: 1));
+    if(mounted) setState(() => _refreshKey = DateTime.now().toString());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final user = _auth.currentUser;
+    final bool isRec = widget.feedType == 'recommended';
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: currentUserId != null 
-          ? _firestore.collection('users').doc(currentUserId).snapshots() 
-          : null,
-      builder: (context, userSnapshot) {
-        
+      stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
+      builder: (context, userSnap) {
         Map<String, dynamic> userData = {};
-        List<dynamic> followingList = [];
-        
-        if (userSnapshot.hasData && userSnapshot.data!.exists) {
-          userData = userSnapshot.data!.data() as Map<String, dynamic>;
-          followingList = userData['following'] ?? [];
+        if (userSnap.hasData && userSnap.data!.exists) {
+          userData = userSnap.data!.data() as Map<String, dynamic>;
         }
 
         return StreamBuilder<QuerySnapshot>(
-          stream: _postsStream,
+          stream: _stream,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return Center(child: CircularProgressIndicator());
+              // Shimmer loading placeholder bisa ditaruh di sini
+              return Center(child: CircularProgressIndicator()); 
             }
             
-            if (snapshot.hasError) {
-              return Padding(
-                padding: EdgeInsets.only(top: 50),
-                child: CommonErrorWidget(
-                  message: "Couldn't load posts.",
-                  isConnectionError: true,
-                  onRetry: () => setState(() => _initStream()),
-                ),
-              );
-            }
+            if (snapshot.hasError) return CommonErrorWidget(message: "Error loading posts");
 
-            List<QueryDocumentSnapshot> allDocs = snapshot.data?.docs ?? [];
+            final allDocs = snapshot.data?.docs ?? [];
             
-            // --- FEED FILTERING LOGIC ---
-            final visibleDocs = allDocs.where((doc) {
+            List<QueryDocumentSnapshot> docs = allDocs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
+              if (data['communityId'] != null) return false; 
               
-              // SKIP COMMUNITY POSTS IN MAIN FEED
-              if (data['communityId'] != null) return false;
-
-              final visibility = data['visibility'] ?? 'public';
-              final ownerId = data['userId'];
-              
-              if (visibility == 'public') return true;
-              
-              if (visibility == 'followers') {
-                if (ownerId == currentUserId) return true;
-                if (followingList.contains(ownerId)) return true;
-                return false; 
+              final vis = data['visibility'] ?? 'public';
+              if (vis == 'public') return true;
+              if (vis == 'followers' && user != null) {
+                final following = List.from(userData['following'] ?? []);
+                return data['userId'] == user.uid || following.contains(data['userId']);
               }
-              
-              if (visibility == 'private' && ownerId == currentUserId) return true;
-              
-              return false;
+              return vis == 'private' && data['userId'] == user?.uid;
             }).toList();
-            // ---------------------------
 
-            List<QueryDocumentSnapshot> finalDocs = visibleDocs;
-            if (widget.isRecommended && visibleDocs.isNotEmpty) {
-              finalDocs = _aiService.getPersonalizedRecommendations(
-                visibleDocs,
-                userData, 
-                currentUserId ?? ''
-              );
+            if (isRec && docs.isNotEmpty) {
+              docs = _aiService.getPersonalizedRecommendations(docs, userData, user?.uid ?? '');
             }
 
-            if (finalDocs.isEmpty) {
+            if (docs.isEmpty) {
                return Center(
                  child: Column(
                    mainAxisAlignment: MainAxisAlignment.center,
                    children: [
-                     Icon(Icons.feed_outlined, size: 64, color: Colors.grey),
+                     Icon(Icons.feed_outlined, size: 64, color: Colors.grey.withOpacity(0.5)),
                      SizedBox(height: 16),
-                     Text("No posts yet.", style: TextStyle(color: Colors.grey)),
+                     Text("No posts to show", style: TextStyle(color: Colors.grey)),
                    ],
                  ),
                );
             }
 
             return RefreshIndicator(
-              onRefresh: _handleRefresh,
-              color: TwitterTheme.blue,
+              onRefresh: _refresh,
+              edgeOffset: widget.refreshOffset, // Offset agar spinner di bawah tab bar
               child: ListView.builder(
-                key: PageStorageKey('home_list_${widget.isRecommended ? 'rec' : 'recents'}$_refreshKey'),
+                key: PageStorageKey('${widget.feedType}_$_refreshKey'),
                 controller: widget.scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: EdgeInsets.only(top: contentTopPadding, bottom: 100),
-                itemCount: finalDocs.length,
+                padding: EdgeInsets.only(top: 10, bottom: 100),
+                itemCount: docs.length,
                 itemBuilder: (context, index) {
-                  final doc = finalDocs[index];
-                  final data = doc.data() as Map<String, dynamic>;
-                  
                   return BlogPostCard(
-                    postId: doc.id,
-                    postData: data,
-                    isOwner: data['userId'] == currentUserId,
-                    heroContextId: widget.isRecommended ? 'home_recommended' : 'home_recent',
+                    postId: docs[index].id,
+                    postData: docs[index].data() as Map<String, dynamic>,
+                    isOwner: docs[index]['userId'] == user?.uid,
                   );
                 },
               ),

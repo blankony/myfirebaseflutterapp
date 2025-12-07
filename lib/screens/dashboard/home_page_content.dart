@@ -14,44 +14,20 @@ class HomePageContent extends StatefulWidget {
   State<HomePageContent> createState() => _HomePageContentState();
 }
 
-class _HomePageContentState extends State<HomePageContent> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
+class _HomePageContentState extends State<HomePageContent> {
+  final ScrollController _recommendedScrollController = ScrollController();
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _recommendedScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TabBar(
-          controller: _tabController,
-          tabs: [
-            Tab(text: 'Recent Posts'),
-            Tab(text: 'Recommended'),
-          ],
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              HomePage(
-                scrollController: widget.scrollController,
-              ),
-              Center(child: Text("Recommended Posts")), // Placeholder
-            ],
-          ),
-        ),
-      ],
+    return HomePage(
+      scrollController: widget.scrollController,
+      recommendedScrollController: _recommendedScrollController,
     );
   }
 }

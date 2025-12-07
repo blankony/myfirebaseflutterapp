@@ -235,16 +235,14 @@ class _SidePanelState extends State<SidePanel> {
                     Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
                   }
                 ),
-                // --- MENU BARU: COMMUNITY ---
                 ListTile(
                   leading: Icon(Icons.groups_2_outlined), 
                   title: Text('Community'), 
                   onTap: () {
-                    Navigator.pop(context); // Tutup drawer
-                    widget.onCommunitySelected(); // Pindah ke tab community
+                    Navigator.pop(context);
+                    widget.onCommunitySelected();
                   }
                 ),
-                // ----------------------------
                 ListTile(
                   leading: Icon(Icons.bookmark_border), 
                   title: Text('Saved'), 

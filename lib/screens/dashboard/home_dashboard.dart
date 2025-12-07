@@ -14,7 +14,7 @@ import 'ai_assistant_page.dart';
 import 'search_page.dart';
 import 'profile_tab_page.dart';
 import '../create_post_screen.dart'; 
-import '../community/community_list_tab.dart'; // REQUIRED IMPORT
+import '../community/community_list_tab.dart'; 
 import '../../main.dart'; 
 import '../../widgets/notification_sheet.dart'; 
 import '../../services/overlay_service.dart';
@@ -34,11 +34,8 @@ class HomeDashboard extends StatefulWidget {
 
 class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   int _selectedIndex = 0;
-  int _subTabIndex = 0; // 0: Recent, 1: Community, 2: Recommended
   
-  late TabController _tabController;
   late final PageController _pageController;
-  late final PageController _homePageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
   // Persistent Scroll Controllers
@@ -64,65 +61,15 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   void initState() {
     super.initState();
     
-    // 3 Tabs: Recent, Community, Recommended
-    _tabController = TabController(length: 3, vsync: this);
-    
     _pageController = PageController(initialPage: _selectedIndex);
-    _homePageController = PageController(initialPage: _subTabIndex);
 
-    // Initialize the Persistent Home Widget ONCE
+    // Initialize Home with 2 Tabs (Recent & Recommended)
     _persistentHomeTab = KeepAlivePage(
-      child: Column(
-        children: [
-          Expanded(
-            child: PageView(
-              controller: _homePageController,
-              allowImplicitScrolling: true, 
-              onPageChanged: (index) {
-                _tabController.animateTo(index);
-                setState(() {
-                  _subTabIndex = index;
-                  PageStorage.of(context).writeState(context, _subTabIndex, identifier: 'home_sub_tab_index');
-                });
-              },
-              children: [
-                // TAB 1: RECENT POSTS
-                KeepAlivePage(
-                  child: HomePage(
-                    scrollController: _scrollController,
-                    isRecommended: false,
-                  ),
-                ),
-                // TAB 2: COMMUNITY
-                KeepAlivePage(
-                  child: CommunityListTab(),
-                ),
-                // TAB 3: RECOMMENDED POSTS
-                KeepAlivePage(
-                  child: HomePage(
-                    scrollController: _recommendedScrollController,
-                    isRecommended: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+      child: HomePage(
+        scrollController: _scrollController,
+        recommendedScrollController: _recommendedScrollController,
       ),
     );
-
-    _tabController.addListener(() {
-      if (_tabController.indexIsChanging) {
-        _homePageController.animateToPage(
-          _tabController.index,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-        if (mounted) setState(() {
-          _subTabIndex = _tabController.index;
-        });
-      }
-    });
 
     _scrollController.addListener(() {
       if (mounted) PageStorage.of(context).writeState(context, _scrollController.offset, identifier: 'scroll_pos_0');
@@ -161,16 +108,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
       _selectedIndex = savedIndex;
       if (_pageController.hasClients) {
         _pageController.jumpToPage(_selectedIndex);
-      }
-      restoredAnyState = true;
-    }
-
-    final int? savedSubIndex = PageStorage.of(context).readState(context, identifier: 'home_sub_tab_index') as int?;
-    if (savedSubIndex != null) {
-      _subTabIndex = savedSubIndex;
-      _tabController.index = _subTabIndex; 
-      if (_homePageController.hasClients) {
-         _homePageController.jumpToPage(_subTabIndex);
       }
       restoredAnyState = true;
     }
@@ -250,7 +187,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
               if (postId != null) {
                  Navigator.push(context, _AnimatedRoute(page: PostDetailScreen(postId: postId)));
               } else if (type == 'follow') {
-                _onItemTapped(3); 
+                _onItemTapped(4); // Profile is now index 4
               }
             }
           );
@@ -259,23 +196,15 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     });
   }
 
-  void _scrollToTop(ScrollController controller) {
-    if (controller.hasClients) {
-      controller.animateTo(
-        0.0,
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeOutQuart,
-      );
+  void _scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 600), curve: Curves.easeOutQuart);
     }
   }
 
   void _onLogoTapped() {
     if (_selectedIndex == 0) {
-      if (_subTabIndex == 0) {
-        _scrollToTop(_scrollController); 
-      } else if (_subTabIndex == 2) {
-        _scrollToTop(_recommendedScrollController);
-      }
+      _scrollToTop();
     }
   }
 
@@ -285,9 +214,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     _entranceController.dispose(); 
     _scrollController.dispose();
     _recommendedScrollController.dispose();
-    _tabController.dispose();
     _pageController.dispose();
-    _homePageController.dispose();
     super.dispose();
   }
 
@@ -330,10 +257,14 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 
   List<Widget> _appBarActions(BuildContext context) {
+    // Actions based on NEW Index
+    // 0: Home, 1: Community, 2: AI, 3: Search, 4: Profile
     switch (_selectedIndex) {
-      case 0:
+      case 0: // Home
         return [ _NotificationButton(onPressed: _showNotificationPopup) ];
-      case 1:
+      case 1: // Community
+        return []; // Community has its own controls usually
+      case 2: // AI Assistant
         return [
           IconButton(
             icon: const Icon(Icons.history), 
@@ -343,14 +274,14 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             },
           ),
         ];
-      case 2:
+      case 3: // Search
         return [
           IconButton(
             icon: _isSearching ? Icon(Icons.close) : Icon(Icons.search),
             onPressed: () { setState(() { _isSearching = !_isSearching; }); },
           ),
         ];
-      case 3:
+      case 4: // Profile
         return []; 
       default:
         return [];
@@ -358,21 +289,15 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 
   void _onItemTapped(int index) {
-    if (index == 2) {
-      if (_selectedIndex == 2) {
-        setState(() {
-          _isSearching = !_isSearching;
-        });
+    if (index == 3) { // Search is now index 3
+      if (_selectedIndex == 3) {
+        setState(() { _isSearching = !_isSearching; });
       } else {
-        setState(() {
-          _isSearching = false;
-        });
+        setState(() { _isSearching = false; });
       }
     } else {
-      if (_selectedIndex == 2) {
-        setState(() {
-          _isSearching = false;
-        });
+      if (_selectedIndex == 3) {
+        setState(() { _isSearching = false; });
       }
     }
 
@@ -396,37 +321,38 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   Widget build(BuildContext context) {
     super.build(context); 
 
+    // --- NEW TAB STRUCTURE ---
     final _widgetOptions = <Widget>[
-      _persistentHomeTab, 
-      KeepAlivePage(child: AiAssistantPage()),
+      _persistentHomeTab, // Index 0: Home
+      KeepAlivePage(child: CommunityListTab()), // Index 1: Community
+      KeepAlivePage(child: AiAssistantPage()), // Index 2: AI
       KeepAlivePage(
         child: SearchPage(
           isSearching: _isSearching,
           onSearchPressed: () { setState(() { _isSearching = !_isSearching; }); },
         ),
-      ),
-      ProfileTabPage(), 
+      ), // Index 3: Search
+      ProfileTabPage(), // Index 4: Profile
     ];
 
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     final navBarBgColor = isDarkMode 
         ? Color(0xFF15202B).withOpacity(0.85) 
         : Colors.white.withOpacity(0.85);      
-
     final inactiveIconColor = isDarkMode ? Colors.white : const Color.fromARGB(170, 0, 0, 0);
     final activeIconColor = TwitterTheme.blue;
 
-    // Logic: Sembunyikan FAB jika di Tab AI, Search, ATAU jika sedang di SubTab Community
-    // Karena Community punya tombol Create sendiri
-    bool showMainFab = _selectedIndex == 0 && _subTabIndex != 1;
+    // Show Main FAB only on Home (Index 0)
+    // Community (Index 1) has its own FAB
+    bool showMainFab = _selectedIndex == 0;
 
     return Scaffold(
       key: _scaffoldKey,
       extendBody: true,
       extendBodyBehindAppBar: true,
       
-      endDrawer: _selectedIndex == 1 
+      // AI Drawer only on Index 2 (AI)
+      endDrawer: _selectedIndex == 2 
           ? AiHistoryDrawer(
               onNewChat: () {
                  aiPageEventBus.fire(AiPageEvent(type: AiEventType.newChat));
@@ -437,8 +363,8 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             ) 
           : null,
 
-      appBar: _selectedIndex == 3
-          ? null
+      appBar: _selectedIndex == 4
+          ? null // No AppBar on Profile
           : AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
@@ -459,23 +385,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
               ),
               centerTitle: true,
               actions: _appBarActions(context),
-              bottom: _selectedIndex == 0
-                  ? TabBar(
-                      controller: _tabController,
-                      // UPDATE TAB LOGIC
-                      onTap: (index) {
-                        if (_tabController.index == index) {
-                          if (index == 0) _scrollToTop(_scrollController);
-                          if (index == 2) _scrollToTop(_recommendedScrollController);
-                        }
-                      },
-                      tabs: const [
-                        Tab(text: 'Recent'),
-                        Tab(text: 'Community'),
-                        Tab(text: 'Recommended'),
-                      ],
-                    )
-                  : null,
               flexibleSpace: ClipRect(
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
@@ -487,15 +396,10 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             ),
       drawer: SidePanel(
         onProfileSelected: () {
-          _onItemTapped(3);
+          _onItemTapped(4); // Switch to Profile (Index 4)
         },
-        // ADDED: Callback from SidePanel to switch to Community Tab
         onCommunitySelected: () {
-          _onItemTapped(0); // Go to Home
-          // Delay to allow page switch, then switch sub-tab
-          Future.delayed(Duration(milliseconds: 150), () {
-            if (mounted) _tabController.animateTo(1);
-          });
+          _onItemTapped(1); // Switch to Community (Index 1)
         },
       ),
       
@@ -559,6 +463,12 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                   inactiveColor: inactiveIconColor,
                 ),
                 BottomNavyBarItem(
+                  icon: Icon(Icons.groups), // Community Icon
+                  title: Text('Community'),
+                  activeColor: activeIconColor,
+                  inactiveColor: inactiveIconColor,
+                ),
+                BottomNavyBarItem(
                   icon: Icon(Icons.assistant),
                   title: Text('AI Assistant'),
                   activeColor: activeIconColor,
@@ -617,7 +527,6 @@ class _AppBarAvatarState extends State<_AppBarAvatar> {
           ? FirebaseFirestore.instance.collection('users').doc(_currentUserId).snapshots()
           : null,
       builder: (context, snapshot) {
-        
         int iconId = 0;
         String? colorHex;
         String? profileImageUrl; 
@@ -654,8 +563,7 @@ class _NotificationButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      return IconButton(
-          icon: Icon(Icons.notifications_none), onPressed: onPressed);
+      return IconButton(icon: Icon(Icons.notifications_none), onPressed: onPressed);
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -667,28 +575,20 @@ class _NotificationButton extends StatelessWidget {
           .limit(1)
           .snapshots(),
       builder: (context, snapshot) {
-        final bool hasUnread =
-            snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+        final bool hasUnread = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
 
         return Stack(
           children: [
             IconButton(
-              icon: Icon(
-                hasUnread ? Icons.notifications : Icons.notifications_none,
-              ),
+              icon: Icon(hasUnread ? Icons.notifications : Icons.notifications_none),
               onPressed: onPressed,
             ),
             if (hasUnread)
               Positioned(
-                top: 10,
-                right: 10,
+                top: 10, right: 10,
                 child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: TwitterTheme.blue,
-                    shape: BoxShape.circle,
-                  ),
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(color: TwitterTheme.blue, shape: BoxShape.circle),
                 ),
               ),
           ],
@@ -753,10 +653,7 @@ class CustomAnimatedBottomBar extends StatelessWidget {
         color: backgroundColor, 
         boxShadow: [
           if (showElevation)
-            const BoxShadow(
-              color: Colors.black12,
-              blurRadius: 2,
-            ),
+            const BoxShadow(color: Colors.black12, blurRadius: 2),
         ],
       ),
       child: SafeArea(
