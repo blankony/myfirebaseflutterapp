@@ -20,13 +20,18 @@ class CommunityListTab extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Colors.transparent, 
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen()));
-        },
-        label: Text("Create"),
-        icon: Icon(Icons.add),
-        backgroundColor: TwitterTheme.blue,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 100.0), // Naikkan agar tidak tertutup nav bar
+        child: FloatingActionButton.extended(
+          onPressed: () {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen()));
+          },
+          label: Text("Create Community"),
+          icon: Icon(Icons.add),
+          backgroundColor: TwitterTheme.blue,
+          elevation: 4,
+        ),
       ),
       body: Column(
         children: [
