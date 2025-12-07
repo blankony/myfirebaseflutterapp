@@ -22,7 +22,7 @@ class CommunityListTab extends StatelessWidget {
       backgroundColor: Colors.transparent, 
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 100.0), // Naikkan agar tidak tertutup nav bar
+        padding: const EdgeInsets.only(bottom: 100.0),
         child: FloatingActionButton.extended(
           onPressed: () {
             Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen()));
@@ -35,7 +35,6 @@ class CommunityListTab extends StatelessWidget {
       ),
       body: Column(
         children: [
-          // Stream Builder untuk List
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance

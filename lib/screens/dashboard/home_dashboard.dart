@@ -14,7 +14,7 @@ import 'ai_assistant_page.dart';
 import 'search_page.dart';
 import 'profile_tab_page.dart';
 import '../create_post_screen.dart'; 
-import '../community/community_list_tab.dart';
+import '../community/community_list_tab.dart'; // REQUIRED IMPORT
 import '../../main.dart'; 
 import '../../widgets/notification_sheet.dart'; 
 import '../../services/overlay_service.dart';
@@ -34,7 +34,7 @@ class HomeDashboard extends StatefulWidget {
 
 class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   int _selectedIndex = 0;
-  int _subTabIndex = 0; 
+  int _subTabIndex = 0; // 0: Recent, 1: Community, 2: Recommended
   
   late TabController _tabController;
   late final PageController _pageController;
@@ -64,6 +64,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   void initState() {
     super.initState();
     
+    // 3 Tabs: Recent, Community, Recommended
     _tabController = TabController(length: 3, vsync: this);
     
     _pageController = PageController(initialPage: _selectedIndex);
@@ -272,7 +273,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     if (_selectedIndex == 0) {
       if (_subTabIndex == 0) {
         _scrollToTop(_scrollController); 
-      } else if (_subTabIndex == 2) { // Index 2 is now Recommended
+      } else if (_subTabIndex == 2) {
         _scrollToTop(_recommendedScrollController);
       }
     }
@@ -416,6 +417,10 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     final inactiveIconColor = isDarkMode ? Colors.white : const Color.fromARGB(170, 0, 0, 0);
     final activeIconColor = TwitterTheme.blue;
 
+    // Logic: Sembunyikan FAB jika di Tab AI, Search, ATAU jika sedang di SubTab Community
+    // Karena Community punya tombol Create sendiri
+    bool showMainFab = _selectedIndex == 0 && _subTabIndex != 1;
+
     return Scaffold(
       key: _scaffoldKey,
       extendBody: true,
@@ -484,9 +489,17 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         onProfileSelected: () {
           _onItemTapped(3);
         },
+        // ADDED: Callback from SidePanel to switch to Community Tab
+        onCommunitySelected: () {
+          _onItemTapped(0); // Go to Home
+          // Delay to allow page switch, then switch sub-tab
+          Future.delayed(Duration(milliseconds: 150), () {
+            if (mounted) _tabController.animateTo(1);
+          });
+        },
       ),
       
-      floatingActionButton: (_selectedIndex == 1 || _selectedIndex == 2)
+      floatingActionButton: !showMainFab
           ? null
           : Padding(
               padding: const EdgeInsets.only(bottom: 20.0), 

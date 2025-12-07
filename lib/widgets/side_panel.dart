@@ -4,20 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart'; 
-import 'package:shared_preferences/shared_preferences.dart'; // REQUIRED
+import 'package:shared_preferences/shared_preferences.dart'; 
 import '../main.dart';
 import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
-import '../screens/saved_posts_screen.dart'; // REQUIRED
+import '../screens/saved_posts_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
 class SidePanel extends StatefulWidget {
   final VoidCallback onProfileSelected;
+  final VoidCallback onCommunitySelected; // Callback Baru
 
   const SidePanel({
     super.key,
     required this.onProfileSelected,
+    required this.onCommunitySelected, // Wajib diisi
   });
 
   @override
@@ -225,18 +227,40 @@ class _SidePanelState extends State<SidePanel> {
               Divider(height: 1, thickness: 1),
               
               Expanded(child: ListView(padding: EdgeInsets.zero, children: [
-                ListTile(leading: Icon(Icons.account_circle_outlined), title: Text('Account Center'), onTap: () {
-                  Navigator.pop(context); 
-                  Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
-                }),
-                ListTile(leading: Icon(Icons.bookmark_border), title: Text('Saved'), onTap: () {
-                  Navigator.pop(context); 
-                  Navigator.of(context).push(_createSlideUpRoute(SavedPostsScreen()));
-                }),
-                ListTile(leading: Icon(Icons.settings_outlined), title: Text('More Settings'), onTap: () {
-                  Navigator.pop(context); 
-                  Navigator.of(context).push(_createSlideUpRoute(SettingsPage()));
-                }),
+                ListTile(
+                  leading: Icon(Icons.account_circle_outlined), 
+                  title: Text('Account Center'), 
+                  onTap: () {
+                    Navigator.pop(context); 
+                    Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
+                  }
+                ),
+                // --- MENU BARU: COMMUNITY ---
+                ListTile(
+                  leading: Icon(Icons.groups_2_outlined), 
+                  title: Text('Community'), 
+                  onTap: () {
+                    Navigator.pop(context); // Tutup drawer
+                    widget.onCommunitySelected(); // Pindah ke tab community
+                  }
+                ),
+                // ----------------------------
+                ListTile(
+                  leading: Icon(Icons.bookmark_border), 
+                  title: Text('Saved'), 
+                  onTap: () {
+                    Navigator.pop(context); 
+                    Navigator.of(context).push(_createSlideUpRoute(SavedPostsScreen()));
+                  }
+                ),
+                ListTile(
+                  leading: Icon(Icons.settings_outlined), 
+                  title: Text('More Settings'), 
+                  onTap: () {
+                    Navigator.pop(context); 
+                    Navigator.of(context).push(_createSlideUpRoute(SettingsPage()));
+                  }
+                ),
               ])),
               
               Divider(height: 1),
@@ -268,7 +292,6 @@ class _ThemeSwitchTileState extends State<_ThemeSwitchTile> {
   }
   
   void _handleChange(bool value) async {
-    // SAVE TO PREFS
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_dark_mode', value);
 
