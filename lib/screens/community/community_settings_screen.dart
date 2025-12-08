@@ -89,13 +89,14 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
       final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 70);
       if (pickedFile == null) return;
 
+      // NOTE: Pastikan Activity UCrop sudah ada di AndroidManifest.xml
       final croppedFile = await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
         compressQuality: 70,
-        aspectRatio: CropAspectRatio(ratioX: 1, ratioY: 1),
+        aspectRatio: CropAspectRatio(ratioX: 1, ratioY: 1), // Force Square
         uiSettings: [
           AndroidUiSettings(
-            toolbarTitle: 'Crop Icon',
+            toolbarTitle: 'Crop Community Icon',
             toolbarColor: TwitterTheme.blue,
             toolbarWidgetColor: Colors.white,
             initAspectRatio: CropAspectRatioPreset.square,
@@ -136,8 +137,9 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
 
     await showDialog(
       context: context,
+      barrierDismissible: false, // Prevent accidental close
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setState) {
+        builder: (context, setDialogState) {
           return AlertDialog(
             title: Text("Edit Community Info"),
             content: Column(
@@ -169,7 +171,8 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
               ElevatedButton(
                 onPressed: isUpdating ? null : () async {
                   if (nameController.text.trim().isEmpty) return;
-                  setState(() => isUpdating = true);
+                  
+                  setDialogState(() => isUpdating = true); // Update dialog state
                   
                   try {
                     await FirebaseFirestore.instance
@@ -185,7 +188,8 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                       OverlayService().showTopNotification(context, "Info updated!", Icons.check_circle, (){}, color: Colors.green);
                     }
                   } catch (e) {
-                    setState(() => isUpdating = false);
+                    setDialogState(() => isUpdating = false);
+                    if (mounted) OverlayService().showTopNotification(context, "Failed: $e", Icons.error, (){}, color: Colors.red);
                   }
                 },
                 style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
@@ -300,8 +304,76 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
 
           return Column(
             children: [
-              // --- HEADER & AVATAR ---
-              _buildHeader(context, name, imageUrl, data),
+              // --- HEADER & AVATAR & EDIT BUTTON (DIPERBAIKI) ---
+              Container(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                alignment: Alignment.center,
+                child: Column(
+                  children: [
+                    // AVATAR DENGAN FUNGSI TAP
+                    GestureDetector(
+                      onTap: (widget.isOwner || widget.isAdmin) ? _showImageSourceSelection : null,
+                      child: Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 50,
+                            backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                            backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
+                            child: imageUrl == null 
+                                ? Text(name[0].toUpperCase(), style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: TwitterTheme.blue)) 
+                                : null,
+                          ),
+                          
+                          // LOADING INDICATOR SAAT UPLOAD
+                          if (_isUploadingImage)
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black45,
+                                  shape: BoxShape.circle
+                                ),
+                                child: Center(child: CircularProgressIndicator(color: Colors.white)),
+                              ),
+                            ),
+
+                          // KAMERA ICON (Overlay)
+                          if ((widget.isOwner || widget.isAdmin) && !_isUploadingImage)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: TwitterTheme.blue,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 3),
+                                ),
+                                child: Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    
+                    SizedBox(height: 16),
+                    
+                    // TOMBOL "Edit Info" (Design Pill/Capsule)
+                    if (widget.isOwner || widget.isAdmin)
+                      ElevatedButton.icon(
+                        onPressed: () => _showEditDialog(data),
+                        icon: Icon(Icons.edit, size: 16),
+                        label: Text("Edit Info"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                          foregroundColor: TwitterTheme.blue,
+                          elevation: 0,
+                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          shape: StadiumBorder(),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
 
               // --- TAB BAR ---
               Container(
@@ -350,75 +422,16 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
               if (widget.isOwner)
                 Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _isDeleting ? null : _deleteCommunity,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade50,
-                        foregroundColor: Colors.red,
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        elevation: 0,
-                      ),
-                      icon: _isDeleting 
-                          ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red))
-                          : Icon(Icons.delete_forever),
-                      label: Text(_isDeleting ? "Deleting..." : "Delete Community"),
-                    ),
+                  child: TextButton(
+                    onPressed: _isDeleting ? null : _deleteCommunity,
+                    child: _isDeleting 
+                        ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.red, strokeWidth: 2))
+                        : Text("Delete Community", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                   ),
                 ),
             ],
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildHeader(BuildContext context, String name, String? imageUrl, Map<String, dynamic> data) {
-    return Container(
-      padding: EdgeInsets.symmetric(vertical: 20),
-      child: Column(
-        children: [
-          Stack(
-            children: [
-              CircleAvatar(
-                radius: 45,
-                backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-                backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
-                child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
-              ),
-              if (widget.isOwner || widget.isAdmin)
-                Positioned(
-                  bottom: 0, right: 0,
-                  child: GestureDetector(
-                    onTap: _showImageSourceSelection,
-                    child: Container(
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: TwitterTheme.blue, shape: BoxShape.circle, border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)),
-                      child: _isUploadingImage ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Icon(Icons.camera_alt, size: 14, color: Colors.white),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          SizedBox(height: 12),
-          if (widget.isOwner || widget.isAdmin)
-            InkWell(
-              onTap: () => _showEditDialog(data),
-              borderRadius: BorderRadius.circular(20),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.edit, size: 14, color: TwitterTheme.blue),
-                    SizedBox(width: 6),
-                    Text("Edit Info", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }
