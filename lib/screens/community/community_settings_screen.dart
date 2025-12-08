@@ -6,7 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart'; 
 import 'package:image_cropper/image_cropper.dart'; 
 import '../../services/overlay_service.dart';
-import '../../services/cloudinary_service.dart'; // Import Cloudinary
+import '../../services/cloudinary_service.dart'; 
 import '../../main.dart';
 
 class CommunitySettingsScreen extends StatefulWidget {
@@ -27,13 +27,26 @@ class CommunitySettingsScreen extends StatefulWidget {
   State<CommunitySettingsScreen> createState() => _CommunitySettingsScreenState();
 }
 
-class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
-  final CloudinaryService _cloudinaryService = CloudinaryService(); // Instance Service
-  bool _isDeleting = false;
-  bool _isUploadingImage = false; // State untuk loading upload gambar
-
-  // --- 1. IMAGE UPLOAD LOGIC (BARU) ---
+class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with SingleTickerProviderStateMixin {
+  final CloudinaryService _cloudinaryService = CloudinaryService();
+  late TabController _tabController;
   
+  bool _isDeleting = false;
+  bool _isUploadingImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  // --- 1. IMAGE UPLOAD LOGIC ---
   void _showImageSourceSelection() {
     showModalBottomSheet(
       context: context,
@@ -76,11 +89,10 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
       final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 70);
       if (pickedFile == null) return;
 
-      // Crop Image (Square for Avatar)
       final croppedFile = await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
         compressQuality: 70,
-        aspectRatio: CropAspectRatio(ratioX: 1, ratioY: 1), // Force Square
+        aspectRatio: CropAspectRatio(ratioX: 1, ratioY: 1),
         uiSettings: [
           AndroidUiSettings(
             toolbarTitle: 'Crop Icon',
@@ -97,11 +109,9 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
 
       setState(() => _isUploadingImage = true);
 
-      // Upload to Cloudinary
       final String? downloadUrl = await _cloudinaryService.uploadImage(File(croppedFile.path));
 
       if (downloadUrl != null) {
-        // Update Firestore
         await FirebaseFirestore.instance
             .collection('communities')
             .doc(widget.communityId)
@@ -159,7 +169,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
               ElevatedButton(
                 onPressed: isUpdating ? null : () async {
                   if (nameController.text.trim().isEmpty) return;
-                  
                   setState(() => isUpdating = true);
                   
                   try {
@@ -191,29 +200,50 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
     );
   }
 
-  // --- ROLES LOGIC ---
+  // --- 3. APPROVE / DECLINE LOGIC ---
+  Future<void> _handleRequest(String userId, bool isAccepted) async {
+    final docRef = FirebaseFirestore.instance.collection('communities').doc(widget.communityId);
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      batch.update(docRef, {'pendingMembers': FieldValue.arrayRemove([userId])});
+      
+      if (isAccepted) {
+        batch.update(docRef, {'members': FieldValue.arrayUnion([userId])});
+      }
+      
+      await batch.commit();
+      OverlayService().showTopNotification(
+        context, 
+        isAccepted ? "Member approved" : "Request declined", 
+        isAccepted ? Icons.check_circle : Icons.remove_circle_outline, 
+        (){}
+      );
+    } catch (e) {
+      OverlayService().showTopNotification(context, "Failed to process", Icons.error, (){}, color: Colors.red);
+    }
+  }
+
+  // --- 4. ROLES LOGIC ---
   Future<void> _updateRole(String targetUid, String action) async {
     final docRef = FirebaseFirestore.instance.collection('communities').doc(widget.communityId);
     try {
       if (action == 'promote') {
         await docRef.update({'admins': FieldValue.arrayUnion([targetUid])});
-        OverlayService().showTopNotification(context, "User promoted to Admin", Icons.check_circle, (){});
       } else if (action == 'demote') {
         await docRef.update({'admins': FieldValue.arrayRemove([targetUid])});
-        OverlayService().showTopNotification(context, "User demoted to Member", Icons.arrow_downward, (){});
       } else if (action == 'kick') {
         final batch = FirebaseFirestore.instance.batch();
         batch.update(docRef, {'members': FieldValue.arrayRemove([targetUid])});
         batch.update(docRef, {'admins': FieldValue.arrayRemove([targetUid])});
         await batch.commit();
-        OverlayService().showTopNotification(context, "User kicked", Icons.remove_circle, (){}, color: Colors.red);
       }
+      OverlayService().showTopNotification(context, "Updated successfully", Icons.check_circle, (){});
     } catch (e) {
       OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red);
     }
   }
 
-  // --- DELETE COMMUNITY LOGIC ---
+  // --- 5. DELETE COMMUNITY LOGIC ---
   Future<void> _deleteCommunity() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -261,126 +291,65 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
           final List members = data['members'] ?? [];
+          final List pendingMembers = data['pendingMembers'] ?? [];
           final List admins = data['admins'] ?? [];
           final String ownerId = data['ownerId'];
           
-          // Data untuk Header
           final String name = data['name'] ?? 'Community';
           final String? imageUrl = data['imageUrl'];
 
           return Column(
             children: [
-              // --- HEADER BARU: FOTO PROFIL COMMUNITY ---
+              // --- HEADER & AVATAR ---
+              _buildHeader(context, name, imageUrl, data),
+
+              // --- TAB BAR ---
               Container(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                alignment: Alignment.center,
-                child: Stack(
-                  children: [
-                    // Avatar Image
-                    CircleAvatar(
-                      radius: 50,
-                      backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-                      backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
-                      child: imageUrl == null 
-                          ? Text(name[0].toUpperCase(), style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: TwitterTheme.blue)) 
-                          : null,
-                    ),
-                    
-                    // Edit Icon Overlay (Hanya untuk Admin/Owner)
-                    if (widget.isOwner || widget.isAdmin)
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: GestureDetector(
-                          onTap: _showImageSourceSelection, // Trigger Upload
-                          child: Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: TwitterTheme.blue,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 3),
-                            ),
-                            child: _isUploadingImage 
-                                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                : Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                          ),
-                        ),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor))),
+                child: TabBar(
+                  controller: _tabController,
+                  labelColor: TwitterTheme.blue,
+                  unselectedLabelColor: Colors.grey,
+                  tabs: [
+                    Tab(text: "Members (${members.length})"),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text("Requests"),
+                          if (pendingMembers.isNotEmpty) ...[
+                            SizedBox(width: 6),
+                            Container(
+                              padding: EdgeInsets.all(4),
+                              decoration: BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                              child: Text(
+                                "${pendingMembers.length}", 
+                                style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)
+                              ),
+                            )
+                          ]
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),
-              
-              // --- BAGIAN EDIT INFO TEXT ---
-              if (widget.isOwner || widget.isAdmin)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: Card(
-                    elevation: 0,
-                    color: Theme.of(context).cardColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Theme.of(context).dividerColor)
-                    ),
-                    child: ListTile(
-                      leading: Icon(Icons.edit, color: TwitterTheme.blue),
-                      title: Text("Edit Name & Description"),
-                      trailing: Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                      onTap: () => _showEditDialog(data),
-                    ),
-                  ),
-                ),
 
-              // LABEL MEMBERS
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text("MEMBERS (${members.length})", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey, letterSpacing: 1.2)),
-                ),
-              ),
-
-              // MEMBER LIST
+              // --- TAB VIEW ---
               Expanded(
-                child: ListView.separated(
-                  padding: EdgeInsets.zero,
-                  itemCount: members.length,
-                  separatorBuilder: (context, index) => Divider(height: 1, indent: 70),
-                  itemBuilder: (context, index) {
-                    final memberId = members[index];
-                    return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance.collection('users').doc(memberId).get(),
-                      builder: (context, userSnap) {
-                        if (!userSnap.hasData) return SizedBox.shrink();
-                        final userData = userSnap.data!.data() as Map<String, dynamic>? ?? {};
-                        
-                        final bool isTargetOwner = memberId == ownerId;
-                        final bool isTargetAdmin = admins.contains(memberId);
-                        
-                        String roleLabel = "Member";
-                        Color roleColor = Colors.grey;
-                        if (isTargetOwner) { roleLabel = "Owner"; roleColor = Colors.red; }
-                        else if (isTargetAdmin) { roleLabel = "Admin"; roleColor = Colors.blue; }
-
-                        return ListTile(
-                          contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                          leading: CircleAvatar(
-                            backgroundImage: userData['profileImageUrl'] != null ? CachedNetworkImageProvider(userData['profileImageUrl']) : null,
-                            child: userData['profileImageUrl'] == null ? Icon(Icons.person) : null,
-                          ),
-                          title: Text(userData['name'] ?? "Unknown"),
-                          subtitle: Text(roleLabel, style: TextStyle(color: roleColor, fontWeight: FontWeight.bold, fontSize: 12)),
-                          trailing: _buildActionMenu(memberId, isTargetOwner, isTargetAdmin),
-                        );
-                      },
-                    );
-                  },
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildMemberList(members, admins, ownerId),
+                    _buildRequestList(pendingMembers),
+                  ],
                 ),
               ),
 
-              // DELETE BUTTON (Only for Owner)
+              // --- DELETE BUTTON ---
               if (widget.isOwner)
                 Padding(
-                  padding: const EdgeInsets.all(24.0),
+                  padding: const EdgeInsets.all(16.0),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -388,13 +357,11 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red.shade50,
                         foregroundColor: Colors.red,
-                        padding: EdgeInsets.symmetric(vertical: 16),
+                        padding: EdgeInsets.symmetric(vertical: 12),
                         elevation: 0,
-                        side: BorderSide(color: Colors.red.withOpacity(0.5)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       icon: _isDeleting 
-                          ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red))
+                          ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red))
                           : Icon(Icons.delete_forever),
                       label: Text(_isDeleting ? "Deleting..." : "Delete Community"),
                     ),
@@ -407,26 +374,152 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
     );
   }
 
+  Widget _buildHeader(BuildContext context, String name, String? imageUrl, Map<String, dynamic> data) {
+    return Container(
+      padding: EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        children: [
+          Stack(
+            children: [
+              CircleAvatar(
+                radius: 45,
+                backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
+                child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
+              ),
+              if (widget.isOwner || widget.isAdmin)
+                Positioned(
+                  bottom: 0, right: 0,
+                  child: GestureDetector(
+                    onTap: _showImageSourceSelection,
+                    child: Container(
+                      padding: EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: TwitterTheme.blue, shape: BoxShape.circle, border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)),
+                      child: _isUploadingImage ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Icon(Icons.camera_alt, size: 14, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          SizedBox(height: 12),
+          if (widget.isOwner || widget.isAdmin)
+            InkWell(
+              onTap: () => _showEditDialog(data),
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.edit, size: 14, color: TwitterTheme.blue),
+                    SizedBox(width: 6),
+                    Text("Edit Info", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemberList(List members, List admins, String ownerId) {
+    if (members.isEmpty) return Center(child: Text("No members"));
+    
+    return ListView.builder(
+      itemCount: members.length,
+      itemBuilder: (context, index) {
+        final memberId = members[index];
+        return FutureBuilder<DocumentSnapshot>(
+          future: FirebaseFirestore.instance.collection('users').doc(memberId).get(),
+          builder: (context, userSnap) {
+            if (!userSnap.hasData) return SizedBox.shrink();
+            final userData = userSnap.data!.data() as Map<String, dynamic>? ?? {};
+            
+            final bool isTargetOwner = memberId == ownerId;
+            final bool isTargetAdmin = admins.contains(memberId);
+            
+            String roleLabel = "Member";
+            Color roleColor = Colors.grey;
+            if (isTargetOwner) { roleLabel = "Owner"; roleColor = Colors.red; }
+            else if (isTargetAdmin) { roleLabel = "Admin"; roleColor = Colors.blue; }
+
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundImage: userData['profileImageUrl'] != null ? CachedNetworkImageProvider(userData['profileImageUrl']) : null,
+                child: userData['profileImageUrl'] == null ? Icon(Icons.person) : null,
+              ),
+              title: Text(userData['name'] ?? "Unknown"),
+              subtitle: Text(roleLabel, style: TextStyle(color: roleColor, fontWeight: FontWeight.bold, fontSize: 12)),
+              trailing: _buildActionMenu(memberId, isTargetOwner, isTargetAdmin),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildRequestList(List requests) {
+    if (requests.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inbox, size: 60, color: Colors.grey.withOpacity(0.3)),
+            SizedBox(height: 16),
+            Text("No pending requests", style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: requests.length,
+      itemBuilder: (context, index) {
+        final userId = requests[index];
+        return FutureBuilder<DocumentSnapshot>(
+          future: FirebaseFirestore.instance.collection('users').doc(userId).get(),
+          builder: (context, userSnap) {
+            if (!userSnap.hasData) return SizedBox.shrink();
+            final userData = userSnap.data!.data() as Map<String, dynamic>? ?? {};
+
+            return Card(
+              margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundImage: userData['profileImageUrl'] != null ? CachedNetworkImageProvider(userData['profileImageUrl']) : null,
+                  child: userData['profileImageUrl'] == null ? Icon(Icons.person) : null,
+                ),
+                title: Text(userData['name'] ?? "Unknown"),
+                subtitle: Text("Wants to join"),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(icon: Icon(Icons.close, color: Colors.red), onPressed: () => _handleRequest(userId, false)),
+                    IconButton(icon: Icon(Icons.check, color: Colors.green), onPressed: () => _handleRequest(userId, true)),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget? _buildActionMenu(String targetId, bool isTargetOwner, bool isTargetAdmin) {
     if (isTargetOwner) return null; 
-
     List<PopupMenuEntry<String>> actions = [];
 
     if (widget.isOwner) {
-      if (isTargetAdmin) {
-        actions.add(PopupMenuItem(value: 'demote', child: Text("Demote to Member")));
-      } else {
-        actions.add(PopupMenuItem(value: 'promote', child: Text("Promote to Admin")));
-      }
+      if (isTargetAdmin) actions.add(PopupMenuItem(value: 'demote', child: Text("Demote to Member")));
+      else actions.add(PopupMenuItem(value: 'promote', child: Text("Promote to Admin")));
       actions.add(PopupMenuItem(value: 'kick', child: Text("Kick User", style: TextStyle(color: Colors.red))));
     } else if (widget.isAdmin) {
-      if (!isTargetAdmin) {
-        actions.add(PopupMenuItem(value: 'kick', child: Text("Kick User", style: TextStyle(color: Colors.red))));
-      }
+      if (!isTargetAdmin) actions.add(PopupMenuItem(value: 'kick', child: Text("Kick User", style: TextStyle(color: Colors.red))));
     }
 
     if (actions.isEmpty) return null;
-
     return PopupMenuButton<String>(
       onSelected: (value) => _updateRole(targetId, value),
       itemBuilder: (context) => actions,

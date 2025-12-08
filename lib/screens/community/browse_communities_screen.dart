@@ -10,17 +10,24 @@ import 'community_detail_screen.dart';
 class BrowseCommunitiesScreen extends StatelessWidget {
   const BrowseCommunitiesScreen({super.key});
 
-  Future<void> _joinCommunity(BuildContext context, String communityId) async {
+  Future<void> _requestToJoin(BuildContext context, String communityId, List pendingMembers) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    // Cek apakah sudah request sebelumnya
+    if (pendingMembers.contains(user.uid)) {
+      OverlayService().showTopNotification(context, "Request already sent", Icons.info, (){}, color: Colors.orange);
+      return;
+    }
+
     try {
+      // Masukkan ke array 'pendingMembers', BUKAN 'members'
       await FirebaseFirestore.instance.collection('communities').doc(communityId).update({
-        'members': FieldValue.arrayUnion([user.uid])
+        'pendingMembers': FieldValue.arrayUnion([user.uid])
       });
-      OverlayService().showTopNotification(context, "Joined successfully!", Icons.check_circle, (){}, color: Colors.green);
+      OverlayService().showTopNotification(context, "Request sent!", Icons.send, (){}, color: Colors.blue);
     } catch (e) {
-      OverlayService().showTopNotification(context, "Failed to join", Icons.error, (){}, color: Colors.red);
+      OverlayService().showTopNotification(context, "Failed to send request", Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -40,8 +47,8 @@ class BrowseCommunitiesScreen extends StatelessWidget {
             return Center(child: CircularProgressIndicator());
           }
 
-          // Filter: Hanya tampilkan komunitas yang USER BELUM JOIN
           final allDocs = snapshot.data?.docs ?? [];
+          // Filter: Tampilkan komunitas yang USER BELUM JOIN
           final notJoinedDocs = allDocs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final List members = (data['members'] is List) ? data['members'] : [];
@@ -62,6 +69,8 @@ class BrowseCommunitiesScreen extends StatelessWidget {
               final String name = data['name'] ?? 'Unnamed';
               final String? imageUrl = data['imageUrl'];
               final int memberCount = (data['members'] is List) ? (data['members'] as List).length : 0;
+              final List pendingMembers = (data['pendingMembers'] is List) ? data['pendingMembers'] : [];
+              final bool isPending = pendingMembers.contains(user?.uid);
 
               return Card(
                 margin: EdgeInsets.only(bottom: 12),
@@ -76,16 +85,21 @@ class BrowseCommunitiesScreen extends StatelessWidget {
                   ),
                   title: Text(name, style: TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text("$memberCount members"),
-                  trailing: ElevatedButton(
-                    onPressed: () => _joinCommunity(context, doc.id),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: TwitterTheme.blue,
-                      foregroundColor: Colors.white,
-                      shape: StadiumBorder(),
-                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    ),
-                    child: Text("Join"),
-                  ),
+                  trailing: isPending
+                    ? OutlinedButton(
+                        onPressed: null, // Disabled
+                        child: Text("Pending"),
+                      )
+                    : ElevatedButton(
+                        onPressed: () => _requestToJoin(context, doc.id, pendingMembers),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: TwitterTheme.blue,
+                          foregroundColor: Colors.white,
+                          shape: StadiumBorder(),
+                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        ),
+                        child: Text("Join"),
+                      ),
                   onTap: () {
                     Navigator.push(context, MaterialPageRoute(
                       builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)

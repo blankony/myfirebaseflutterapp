@@ -7,7 +7,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
 import 'community_settings_screen.dart'; 
 import '../create_post_screen.dart'; 
-import '../../services/overlay_service.dart'; // Add this
+import '../../services/overlay_service.dart';
 
 class CommunityDetailScreen extends StatefulWidget {
   final String communityId;
@@ -25,24 +25,46 @@ class CommunityDetailScreen extends StatefulWidget {
 
 class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   
-  Future<void> _toggleJoin(bool isMember) async {
+  Future<void> _handleJoinAction(bool isMember, bool isPending) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
       if (isMember) {
-        // LEAVE
+        // LEAVE (Langsung keluar)
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text("Leave Community?"),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("Cancel")),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text("Leave", style: TextStyle(color: Colors.red))),
+            ],
+          )
+        ) ?? false;
+
+        if (!confirm) return;
+
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
-          'members': FieldValue.arrayRemove([user.uid])
+          'members': FieldValue.arrayRemove([user.uid]),
+          'admins': FieldValue.arrayRemove([user.uid]) // Hapus admin privilege jika ada
         });
-        if(mounted) OverlayService().showTopNotification(context, "Left community", Icons.output, (){});
-        Navigator.pop(context); // Keluar dari halaman setelah leave
+        if(mounted) {
+          OverlayService().showTopNotification(context, "Left community", Icons.output, (){});
+          Navigator.pop(context);
+        }
+      } else if (isPending) {
+        // CANCEL REQUEST
+        await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
+          'pendingMembers': FieldValue.arrayRemove([user.uid])
+        });
+        if(mounted) OverlayService().showTopNotification(context, "Request cancelled", Icons.close, (){});
       } else {
-        // JOIN
+        // SEND REQUEST (Masuk ke pendingMembers)
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
-          'members': FieldValue.arrayUnion([user.uid])
+          'pendingMembers': FieldValue.arrayUnion([user.uid])
         });
-        if(mounted) OverlayService().showTopNotification(context, "Joined community!", Icons.check_circle, (){}, color: Colors.green);
+        if(mounted) OverlayService().showTopNotification(context, "Request sent to Admin", Icons.send, (){}, color: Colors.blue);
       }
     } catch (e) {
       if(mounted) OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red);
@@ -53,11 +75,9 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     
-    // Gunakan StreamBuilder untuk detail agar update member realtime
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('communities').doc(widget.communityId).snapshots(),
       builder: (context, snapshot) {
-        // Gunakan data realtime jika ada, jika tidak pakai data awal
         final data = snapshot.hasData && snapshot.data!.exists 
             ? snapshot.data!.data() as Map<String, dynamic> 
             : widget.communityData;
@@ -65,10 +85,12 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         final ownerId = data['ownerId'];
         final List admins = (data['admins'] is List) ? data['admins'] : [];
         final List members = (data['members'] is List) ? data['members'] : [];
+        final List pendingMembers = (data['pendingMembers'] is List) ? data['pendingMembers'] : [];
         
         final bool isOwner = user?.uid == ownerId;
         final bool isAdmin = admins.contains(user?.uid);
         final bool isMember = members.contains(user?.uid);
+        final bool isPending = pendingMembers.contains(user?.uid);
         final bool canModerate = isOwner || isAdmin;
 
         return Scaffold(
@@ -77,7 +99,20 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
             actions: [
               if (canModerate)
                 IconButton(
-                  icon: Icon(Icons.settings_outlined),
+                  icon: Stack(
+                    children: [
+                      Icon(Icons.settings_outlined),
+                      // Tampilkan dot merah jika ada pending request
+                      if (pendingMembers.isNotEmpty)
+                        Positioned(
+                          right: 0, top: 0,
+                          child: Container(
+                            width: 8, height: 8,
+                            decoration: BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                          ),
+                        )
+                    ],
+                  ),
                   onPressed: () {
                     Navigator.push(context, MaterialPageRoute(
                       builder: (_) => CommunitySettingsScreen(
@@ -92,7 +127,6 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
             ],
           ),
           
-          // FAB hanya muncul jika sudah jadi MEMBER
           floatingActionButton: isMember ? FloatingActionButton(
             onPressed: () {
               Navigator.push(context, MaterialPageRoute(
@@ -136,26 +170,35 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                       ],
                     ),
                     SizedBox(height: 16),
-                    // TOMBOL JOIN / LEAVE
+                    
+                    // TOMBOL ACTION
                     SizedBox(
                       width: double.infinity,
                       child: isOwner 
-                        ? OutlinedButton(onPressed: null, child: Text("You are Owner")) // Owner ga bisa leave
+                        ? OutlinedButton(onPressed: null, child: Text("You are Owner"))
                         : ElevatedButton(
-                            onPressed: () => _toggleJoin(isMember),
+                            onPressed: () => _handleJoinAction(isMember, isPending),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isMember ? Colors.red.withOpacity(0.1) : TwitterTheme.blue,
-                              foregroundColor: isMember ? Colors.red : Colors.white,
+                              backgroundColor: isMember 
+                                  ? Colors.red.withOpacity(0.1) 
+                                  : (isPending ? Colors.grey.shade300 : TwitterTheme.blue),
+                              foregroundColor: isMember 
+                                  ? Colors.red 
+                                  : (isPending ? Colors.grey.shade700 : Colors.white),
                               elevation: 0,
                             ),
-                            child: Text(isMember ? "Leave Community" : "Join Community"),
+                            child: Text(
+                              isMember 
+                                ? "Leave Community" 
+                                : (isPending ? "Request Pending (Tap to Cancel)" : "Request to Join")
+                            ),
                           ),
                     ),
                   ],
                 ),
               ),
               
-              // FEED
+              // FEED (Hanya tampil jika member)
               Expanded(
                 child: isMember 
                   ? StreamBuilder<QuerySnapshot>(
@@ -174,16 +217,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                           itemCount: docs.length,
                           itemBuilder: (context, index) {
                             final post = docs[index];
-                            final postData = post.data() as Map<String, dynamic>;
-                            
-                            final bool isPostOwner = postData['userId'] == user?.uid;
-                            final bool showDeleteOption = isPostOwner || canModerate;
-
+                            final pData = post.data() as Map<String, dynamic>;
+                            final bool isPostOwner = pData['userId'] == user?.uid;
                             return BlogPostCard(
                               postId: post.id,
-                              postData: postData,
-                              isOwner: showDeleteOption,
-                              heroContextId: 'community_${widget.communityId}', 
+                              postData: pData,
+                              isOwner: isPostOwner || canModerate,
+                              heroContextId: 'community_${widget.communityId}',
                             );
                           },
                         );
