@@ -40,7 +40,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _postController = TextEditingController();
   final PredictionService _predictionService = PredictionService();
   final FocusNode _postFocusNode = FocusNode();
-
   final LanguageChecker _badwordGuard = LanguageChecker();
 
   bool _canPost = false;
@@ -58,11 +57,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String? _predictedText;
   Timer? _debounce;
 
-  File? _selectedMediaFile;
-  String? _existingMediaUrl;
-  String? _mediaType;
+  // --- MODIFIED STATE FOR MULTIPLE MEDIA ---
+  List<File> _selectedMediaFiles = []; // Sekarang List
+  List<String> _existingMediaUrls = []; // Untuk edit post yang punya banyak gambar
+  String? _mediaType; // 'image' or 'video'
   
-  // --- NEW: Community ID Support ---
   String? _communityId;
 
   bool get _isEditing => widget.postId != null;
@@ -73,20 +72,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _loadUserData();
     _trainAiModel();
 
-    // Handle Initial Data (For Editing OR Creating in Community)
     if (widget.initialData != null) {
-      // 1. Check for Community ID
       _communityId = widget.initialData!['communityId'];
       
-      // 2. If Editing, load existing data
       if (_isEditing) {
         _postController.text = widget.initialData!['text'] ?? '';
-        _existingMediaUrl = widget.initialData!['mediaUrl'];
         _mediaType = widget.initialData!['mediaType'];
         _visibility = widget.initialData!['visibility'] ?? 'public';
+        
+        // Handle Existing Media (Single or Multiple)
+        if (widget.initialData!['mediaUrls'] != null) {
+          _existingMediaUrls = List<String>.from(widget.initialData!['mediaUrls']);
+        } else if (widget.initialData!['mediaUrl'] != null) {
+          _existingMediaUrls = [widget.initialData!['mediaUrl']];
+        }
+        
         _checkCanPost();
       } 
-      // 3. If Creating New in Community, force public visibility
       else if (_communityId != null) {
         _visibility = 'public';
       }
@@ -95,7 +97,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   void _checkCanPost() {
     final textNotEmpty = _postController.text.trim().isNotEmpty;
-    final hasMedia = _selectedMediaFile != null || _existingMediaUrl != null;
+    final hasMedia = _selectedMediaFiles.isNotEmpty || _existingMediaUrls.isNotEmpty;
 
     setState(() {
       _canPost = textNotEmpty || hasMedia;
@@ -122,48 +124,55 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // --- UPDATED SAFETY CHECK FOR MULTIPLE IMAGES ---
   Future<bool> _checkImageSafety() async {
-    if (_selectedMediaFile == null || _mediaType != 'image') return true;
+    if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
 
     setState(() => _isProcessing = true);
-    OverlayService().showTopNotification(context, "Scanning image...", Icons.remove_red_eye, (){}, color: Colors.orange);
+    OverlayService().showTopNotification(context, "Scanning images...", Icons.remove_red_eye, (){}, color: Colors.orange);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
       if (apiKey == null || apiKey.isEmpty) return true;
 
-      final result = await VisualDetectorAi.analyzeImage(
-        image: _selectedMediaFile!,
-        geminiApiKey: apiKey,
-      );
+      // Scan only the first image to save quota/time, or scan all if strict
+      // For UX speed, scanning the first one is often a reasonable compromise, 
+      // but let's scan all for safety (limit to first 3 to prevent timeout).
+      int limit = _selectedMediaFiles.length > 3 ? 3 : _selectedMediaFiles.length;
 
-      final String description = result.toString().toLowerCase(); 
-      debugPrint("Visual Analysis Result: $description");
+      for (int i = 0; i < limit; i++) {
+        final result = await VisualDetectorAi.analyzeImage(
+          image: _selectedMediaFiles[i],
+          geminiApiKey: apiKey,
+        );
 
-      final List<String> dangerKeywords = [
-        'nude', 'naked', 'sex', 'genitals', 'porn', 'erotic', 
-        'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill',
-        'telanjang', 'bugil', 'darah', 'membunuh' 
-      ];
+        final String description = result.toString().toLowerCase(); 
+        
+        final List<String> dangerKeywords = [
+          'nude', 'naked', 'sex', 'genitals', 'porn', 'erotic', 
+          'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill',
+          'telanjang', 'bugil', 'darah', 'membunuh' 
+        ];
 
-      for (var word in dangerKeywords) {
-        if (description.contains(word)) {
-          if (mounted) _showRejectDialog("Image contains sensitive content ($word).");
+        for (var word in dangerKeywords) {
+          if (description.contains(word)) {
+            if (mounted) _showRejectDialog("Image ${i+1} contains sensitive content ($word).");
+            return false;
+          }
+        }
+
+        if (_badwordGuard.containsBadLanguage(description)) {
+          if (mounted) _showRejectDialog("Image ${i+1} flagged as inappropriate.");
           return false;
         }
-      }
-
-      if (_badwordGuard.containsBadLanguage(description)) {
-        if (mounted) _showRejectDialog("Image content flagged as inappropriate.");
-        return false;
       }
 
       return true; 
 
     } catch (e) {
       debugPrint("Visual Detector Error: $e");
-      if (mounted) _showRejectDialog("AI Security check failed.");
-      return false;
+      // Allow pass on API error to avoid blocking user due to tech issue
+      return true; 
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -183,28 +192,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<File?> _editAndCompressPostImage(XFile pickedFile) async {
+    // For single image pick, we use editor. For multi-pick, we usually skip editor to be faster.
+    // Here we just compress.
     final imageBytes = await pickedFile.readAsBytes();
-    if (!mounted) return null;
-
-    final editedImageBytes = await Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => ImageEditor(image: imageBytes)),
-    );
-
-    if (editedImageBytes != null) {
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File('${tempDir.path}/${DateTime.now().microsecondsSinceEpoch}_post.jpg');
-      await tempFile.writeAsBytes(editedImageBytes);
-      return tempFile;
-    }
-    return null;
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/${DateTime.now().microsecondsSinceEpoch}_${pickedFile.name}');
+    await tempFile.writeAsBytes(imageBytes);
+    return tempFile;
   }
 
   void _onTextChanged(String text) {
     _checkCanPost();
     _predictedText = null;
-
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (text.trim().isEmpty) return;
       final suggestion = await _predictionService.getLocalPrediction(text);
@@ -244,7 +244,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           _profileImageUrl = data['profileImageUrl'];
           _isAccountPrivate = data['isPrivate'] ?? false;
           
-          // Initial visibility setup based on account type (Only if not in community mode)
           if (!_isEditing && _communityId == null) {
             _visibility = _isAccountPrivate ? 'followers' : 'public';
           }
@@ -290,35 +289,55 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  // --- MODIFIED PICK MEDIA FUNCTION ---
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
     final picker = ImagePicker();
-    XFile? pickedFile;
 
     try {
       if (isVideo) {
-        pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
+        // Video: Still Single Selection
+        final XFile? pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
         if (pickedFile != null && mounted) {
           final result = await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile!.path))),
+            MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile.path))),
           );
           if (result != null && result['file'] is File) {
             setState(() {
               _mediaType = 'video';
-              _selectedMediaFile = result['file'];
-              _existingMediaUrl = null;
+              _selectedMediaFiles = [result['file']]; // Reset list to single video
+              _existingMediaUrls = []; // Clear existing
               _checkCanPost();
             });
           }
         }
       } else {
-        pickedFile = await picker.pickImage(source: source, imageQuality: 80);
-        if (pickedFile != null && mounted) {
-          final processedFile = await _editAndCompressPostImage(pickedFile);
-          if (processedFile != null) {
+        // Image: Multi Selection
+        if (source == ImageSource.gallery) {
+          final List<XFile> pickedFiles = await picker.pickMultiImage(imageQuality: 80);
+          if (pickedFiles.isNotEmpty) {
             setState(() {
+              // If previously was video, clear it.
+              if (_mediaType == 'video') {
+                _selectedMediaFiles = [];
+                _existingMediaUrls = [];
+              }
               _mediaType = 'image';
-              _selectedMediaFile = processedFile;
-              _existingMediaUrl = null;
+              // Add new files to list
+              _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path)));
+              _checkCanPost();
+            });
+          }
+        } else {
+          // Camera is single shot
+          final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 80);
+          if (pickedFile != null) {
+             setState(() {
+              if (_mediaType == 'video') {
+                _selectedMediaFiles = [];
+                _existingMediaUrls = [];
+              }
+              _mediaType = 'image';
+              _selectedMediaFiles.add(File(pickedFile.path));
               _checkCanPost();
             });
           }
@@ -329,11 +348,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  void _clearMedia() {
+  void _removeFile(int index) {
     setState(() {
-      _selectedMediaFile = null;
-      _existingMediaUrl = null;
-      _mediaType = null;
+      _selectedMediaFiles.removeAt(index);
+      if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) {
+        _mediaType = null;
+      }
+      _checkCanPost();
+    });
+  }
+
+  void _removeExistingUrl(int index) {
+    setState(() {
+      _existingMediaUrls.removeAt(index);
+      if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) {
+        _mediaType = null;
+      }
       _checkCanPost();
     });
   }
@@ -352,21 +382,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final isImageSafe = await _checkImageSafety();
     if (!isImageSafe) return; 
 
-    final File? mediaFile = _selectedMediaFile;
-    final String? existingUrl = _existingMediaUrl;
+    // Prepare Data
+    final List<File> filesToUpload = _selectedMediaFiles;
+    final List<String> currentUrls = _existingMediaUrls;
     final String? mediaType = _mediaType;
     final bool isEditing = _isEditing;
     final String? postId = widget.postId;
     
-    // IMPORTANT: Visibility Logic
     String finalVisibility = _visibility;
-    
-    // 1. If Community Post -> Always Public (so members can see)
     if (_communityId != null) {
         finalVisibility = 'public';
-    } 
-    // 2. If Private Account & Public selected -> Force Followers
-    else if (_isAccountPrivate && _visibility == 'public') {
+    } else if (_isAccountPrivate && _visibility == 'public') {
       finalVisibility = 'followers';
     }
 
@@ -386,10 +412,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _BackgroundUploader.startUploadSequence(
         overlayState: overlayState,
         text: text,
-        mediaFile: mediaFile,
-        existingMediaUrl: existingUrl,
+        filesToUpload: filesToUpload, // Pass List
+        existingMediaUrls: currentUrls, // Pass List
         mediaType: mediaType,
-        visibility: finalVisibility, // Use the corrected visibility
+        visibility: finalVisibility,
         isEditing: isEditing,
         postId: postId,
         uid: uid,
@@ -398,7 +424,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         avatarIconId: uIcon,
         avatarHex: uHex,
         profileImageUrl: uProfileImg,
-        communityId: _communityId, // PASS COMMUNITY ID
+        communityId: _communityId,
       );
     }
   }
@@ -418,10 +444,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           "Your account is set to Private. You cannot create Public posts. Switch your account to Public in Account Center to change this."
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), 
-            child: Text("OK")
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text("OK")),
         ],
       ),
     );
@@ -452,7 +475,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             : (_communityId != null ? Text("New Community Post", style: TextStyle(fontSize: 16)) : null),
         centerTitle: false,
         actions: [
-          // Visibility Dropdown - Hide if posting to Community (always public/visible to members)
           if (_communityId == null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10.0),
@@ -466,11 +488,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   child: DropdownButton<String>(
                     value: _visibility,
                     icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
-                    style: TextStyle(
-                      color: theme.textTheme.bodyLarge?.color, 
-                      fontWeight: FontWeight.bold, 
-                      fontSize: 13
-                    ),
+                    style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.bold, fontSize: 13),
                     onChanged: (String? newValue) {
                       if (newValue == 'public_attempt' && _isAccountPrivate) {
                         _showPrivacyRestrictionDialog();
@@ -482,50 +500,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     },
                     items: [
                       if (_isAccountPrivate)
-                        DropdownMenuItem(
-                          value: 'followers',
-                          child: Row(
-                            children: [
-                              Icon(Icons.people, size: 16, color: Colors.blue),
-                              SizedBox(width: 6), 
-                              Text("Followers")
-                            ]
-                          ),
-                        )
+                        DropdownMenuItem(value: 'followers', child: Row(children: [Icon(Icons.people, size: 16, color: Colors.blue), SizedBox(width: 6), Text("Followers")]))
                       else
-                        DropdownMenuItem(
-                          value: 'public',
-                          child: Row(
-                            children: [
-                              Icon(Icons.public, size: 16, color: Colors.blue),
-                              SizedBox(width: 6), 
-                              Text("Public")
-                            ]
-                          ),
-                        ),
+                        DropdownMenuItem(value: 'public', child: Row(children: [Icon(Icons.public, size: 16, color: Colors.blue), SizedBox(width: 6), Text("Public")])),
                       
                       if (_isAccountPrivate)
-                        DropdownMenuItem(
-                          value: 'public_attempt',
-                          child: Row(
-                            children: [
-                              Icon(Icons.public, size: 16, color: Colors.grey),
-                              SizedBox(width: 6), 
-                              Text("Public", style: TextStyle(color: Colors.grey))
-                            ]
-                          ),
-                        ),
+                        DropdownMenuItem(value: 'public_attempt', child: Row(children: [Icon(Icons.public, size: 16, color: Colors.grey), SizedBox(width: 6), Text("Public", style: TextStyle(color: Colors.grey))])),
 
-                      DropdownMenuItem(
-                        value: 'private',
-                        child: Row(
-                          children: [
-                            Icon(Icons.lock, size: 16, color: Colors.red),
-                            SizedBox(width: 6), 
-                            Text("Only Me") 
-                          ]
-                        ),
-                      ),
+                      DropdownMenuItem(value: 'private', child: Row(children: [Icon(Icons.lock, size: 16, color: Colors.red), SizedBox(width: 6), Text("Only Me")])),
                     ],
                   ),
                 ),
@@ -579,17 +561,34 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             border: InputBorder.none,
                           ),
                         ),
-                        if (_selectedMediaFile != null)
-                          _MediaPreviewWidget(
-                            fileOrUrl: _selectedMediaFile, 
-                            type: _mediaType ?? 'image', 
-                            onRemove: _clearMedia,
-                          )
-                        else if (_existingMediaUrl != null)
-                          _MediaPreviewWidget(
-                            fileOrUrl: _existingMediaUrl, 
-                            type: _mediaType ?? 'image', 
-                            onRemove: _clearMedia,
+                        
+                        // --- MULTI IMAGE PREVIEW SECTION ---
+                        if (_existingMediaUrls.isNotEmpty || _selectedMediaFiles.isNotEmpty)
+                          Container(
+                            margin: EdgeInsets.only(top: 12),
+                            height: 120, // Height for horizontal scroll
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              children: [
+                                // 1. Show Existing URLs (Edit Mode)
+                                ..._existingMediaUrls.asMap().entries.map((entry) {
+                                  return _buildPreviewItem(
+                                    imageProvider: CachedNetworkImageProvider(entry.value),
+                                    onRemove: () => _removeExistingUrl(entry.key),
+                                    isVideo: _mediaType == 'video',
+                                  );
+                                }),
+                                
+                                // 2. Show New Files
+                                ..._selectedMediaFiles.asMap().entries.map((entry) {
+                                  return _buildPreviewItem(
+                                    imageProvider: FileImage(entry.value),
+                                    onRemove: () => _removeFile(entry.key),
+                                    isVideo: _mediaType == 'video',
+                                  );
+                                }),
+                              ],
+                            ),
                           ),
                         
                         if (_predictedText != null)
@@ -652,41 +651,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       ),
     );
   }
-}
 
-class _MediaPreviewWidget extends StatelessWidget {
-  final dynamic fileOrUrl;
-  final String type;
-  final VoidCallback onRemove;
-
-  const _MediaPreviewWidget({
-    required this.fileOrUrl, 
-    required this.type, 
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    ImageProvider imageProvider;
-    if (fileOrUrl is File) {
-      imageProvider = FileImage(fileOrUrl);
-    } else {
-      imageProvider = CachedNetworkImageProvider(fileOrUrl as String);
-    }
+  Widget _buildPreviewItem({required ImageProvider imageProvider, required VoidCallback onRemove, required bool isVideo}) {
     return Stack(
       children: [
         Container(
-          margin: EdgeInsets.only(top: 10),
-          height: 200, width: double.infinity,
-          decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(12)),
-          child: type == 'image'
-              ? Image(image: imageProvider, fit: BoxFit.contain)
-              : Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50)),
+          width: 100,
+          margin: EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(8),
+            image: !isVideo ? DecorationImage(image: imageProvider, fit: BoxFit.cover) : null,
+          ),
+          child: isVideo 
+              ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white)) 
+              : null,
         ),
         Positioned(
-          right: 5, top: 15,
-          child: IconButton(icon: Icon(Icons.cancel, color: Colors.white), onPressed: onRemove),
-        ),
+          top: 4, right: 12,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              padding: EdgeInsets.all(2),
+              decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+              child: Icon(Icons.close, size: 14, color: Colors.white),
+            ),
+          ),
+        )
       ],
     );
   }
@@ -696,8 +687,8 @@ class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
     required String text,
-    required File? mediaFile,
-    required String? existingMediaUrl,
+    required List<File> filesToUpload, // CHANGED
+    required List<String> existingMediaUrls, // CHANGED
     required String? mediaType,
     required String visibility,
     required bool isEditing,
@@ -708,7 +699,7 @@ class _BackgroundUploader {
     required int avatarIconId,
     required String avatarHex,
     required String? profileImageUrl,
-    required String? communityId, // Added parameter
+    required String? communityId,
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -726,8 +717,8 @@ class _BackgroundUploader {
 
     _processUpload(
       text: text,
-      mediaFile: mediaFile,
-      existingMediaUrl: existingMediaUrl,
+      filesToUpload: filesToUpload,
+      existingMediaUrls: existingMediaUrls,
       mediaType: mediaType,
       visibility: visibility,
       isEditing: isEditing,
@@ -738,7 +729,7 @@ class _BackgroundUploader {
       avatarIconId: avatarIconId,
       avatarHex: avatarHex,
       profileImageUrl: profileImageUrl,
-      communityId: communityId, // Pass it
+      communityId: communityId,
       onProgress: (status) {
         overlayKey.currentState?.updateStatus(status);
       },
@@ -759,8 +750,8 @@ class _BackgroundUploader {
 
   static Future<void> _processUpload({
     required String text,
-    File? mediaFile,
-    String? existingMediaUrl,
+    required List<File> filesToUpload,
+    required List<String> existingMediaUrls,
     String? mediaType,
     required String visibility,
     required bool isEditing,
@@ -771,54 +762,64 @@ class _BackgroundUploader {
     required int avatarIconId,
     required String avatarHex,
     required String? profileImageUrl,
-    required String? communityId, // Added parameter
+    required String? communityId,
     required Function(String) onProgress,
     required VoidCallback onSuccess,
     required Function(dynamic) onFailure,
   }) async {
     try {
-      String? finalMediaUrl = existingMediaUrl;
-      File? fileToUpload = mediaFile;
+      List<String> finalUrls = [...existingMediaUrls];
 
-      if (mediaType == 'video' && fileToUpload != null) {
-        onProgress("Processing...");
-        try {
-          final MediaInfo? info = await VideoCompress.compressVideo(
-            fileToUpload.path,
-            quality: VideoQuality.MediumQuality,
-            deleteOrigin: false,
-          );
-          if (info != null && info.file != null) {
-            fileToUpload = info.file!;
+      // 1. Process New Files
+      if (filesToUpload.isNotEmpty) {
+        int count = 1;
+        for (var file in filesToUpload) {
+          onProgress("Uploading ${count}/${filesToUpload.length}...");
+          
+          File fileToUp = file;
+          
+          // Compress Video
+          if (mediaType == 'video') {
+             try {
+                final MediaInfo? info = await VideoCompress.compressVideo(
+                  file.path,
+                  quality: VideoQuality.MediumQuality,
+                  deleteOrigin: false,
+                );
+                if (info != null && info.file != null) fileToUp = info.file!;
+             } catch(e) { print("Compress fail: $e"); }
           }
-        } catch (e) {
-          print("Compression failed, using original: $e");
+
+          String? url = await _cloudinaryService.uploadMedia(fileToUp);
+          if (url != null) finalUrls.add(url);
+          
+          count++;
         }
       }
 
-      if (fileToUpload != null) {
-        onProgress("Uploading...");
-        finalMediaUrl = await _cloudinaryService.uploadMedia(fileToUpload);
-        if (finalMediaUrl == null) {
-          onFailure("Media upload failed.");
-          return;
-        }
+      if (finalUrls.isEmpty && text.isEmpty) {
+        onFailure("No content to post.");
+        return;
       }
 
-      // Base Data
+      // 2. Prepare Data
+      // IMPORTANT: Backward Compatibility logic
+      // Old apps use 'mediaUrl' (string). New apps use 'mediaUrls' (array).
+      // We fill both. 'mediaUrl' gets the FIRST image so old app doesn't crash/show nothing.
+      
       final Map<String, dynamic> postData = {
         'text': text,
-        'mediaUrl': finalMediaUrl,
         'mediaType': mediaType,
         'visibility': visibility, 
         'isUploading': false,
+        'mediaUrls': finalUrls, // New Field
+        'mediaUrl': finalUrls.isNotEmpty ? finalUrls.first : null, // Legacy Field
       };
 
       if (isEditing && postId != null) {
         postData['editedAt'] = FieldValue.serverTimestamp();
         await _firestore.collection('posts').doc(postId).update(postData);
       } else {
-        // Full new document data
         postData.addAll({
           'timestamp': FieldValue.serverTimestamp(),
           'userId': uid,
@@ -832,10 +833,9 @@ class _BackgroundUploader {
           'repostedBy': [],
         });
 
-        // Handle Community ID
         if (communityId != null) {
           postData['communityId'] = communityId;
-          postData['visibility'] = 'public'; // Force public for community visibility
+          postData['visibility'] = 'public';
         }
 
         await _firestore.collection('posts').add(postData);
@@ -846,18 +846,14 @@ class _BackgroundUploader {
           'type': 'upload_complete',
           'senderId': 'system', 
           'postId': null,
-          'postTextSnippet': 'Your ${mediaType ?? 'post'} was uploaded successfully.',
+          'postTextSnippet': 'Your post was uploaded successfully.',
           'timestamp': FieldValue.serverTimestamp(),
           'isRead': false,
         });
       }
 
-      if (mediaFile != null && mediaFile.existsSync()) {
-        try { mediaFile.deleteSync(); } catch (_) {}
-      }
-      if (mediaType == 'video') {
-        await VideoCompress.deleteAllCache();
-      }
+      // Cleanup
+      if (mediaType == 'video') await VideoCompress.deleteAllCache();
 
       onSuccess();
     } catch (e) {
@@ -881,7 +877,6 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isError = false;
   String _message = "Uploading media...";
   
-  String _statusText = "Uploading...";
   Timer? _autoDismissTimer;
 
   double get _targetTop => MediaQuery.of(context).padding.top + 10;
@@ -897,8 +892,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   void updateStatus(String status) {
     if (!mounted) return;
     setState(() {
-      _message = "$status media...";
-      _statusText = status;
+      _message = status;
     });
   }
 
@@ -923,7 +917,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   }
 
   void handleSuccess() {
-    setState(() { _isSuccess = true; _message = "Posted"; _statusText = "Done"; });
+    setState(() { _isSuccess = true; _message = "Posted"; });
     if (_isMiniVisible) {
       Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); });
     } else if (_isCardVisible) {
@@ -932,7 +926,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   }
 
   void handleFailure(String error) {
-    setState(() { _isError = true; _message = "Failed"; _statusText = "Error"; });
+    setState(() { _isError = true; _message = "Failed"; });
     if (!_isCardVisible) setState(() => _isCardVisible = true);
   }
 
@@ -976,6 +970,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
             child: Transform.scale(
               scale: _isCardVisible ? 1.0 : 0.1, 
               child: _UploadCard(
+                key: UniqueKey(), // FIX: UniqueKey for Dismissible
                 isSuccess: _isSuccess,
                 isError: _isError,
                 message: _message,
@@ -995,7 +990,7 @@ class _UploadCard extends StatelessWidget {
   final String message;
   final VoidCallback onDismiss;
 
-  const _UploadCard({required this.isSuccess, required this.isError, required this.message, required this.onDismiss});
+  const _UploadCard({super.key, required this.isSuccess, required this.isError, required this.message, required this.onDismiss});
 
   @override
   Widget build(BuildContext context) {

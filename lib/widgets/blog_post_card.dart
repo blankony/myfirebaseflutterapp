@@ -18,7 +18,7 @@ import '../services/moderation_service.dart';
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-// --- DUMB WIDGET: Just renders the controller it is given ---
+// --- DUMB WIDGET: Video Player ---
 class _VideoPlayerWidget extends StatelessWidget {
   final VideoPlayerController controller;
   
@@ -29,7 +29,7 @@ class _VideoPlayerWidget extends StatelessWidget {
     if (!controller.value.isInitialized) {
       return Container(
         color: Colors.black,
-        height: 200,
+        height: 300,
         width: double.infinity,
         child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
       );
@@ -37,21 +37,16 @@ class _VideoPlayerWidget extends StatelessWidget {
 
     return Container(
       color: Colors.black,
-      height: 200,
+      constraints: BoxConstraints(maxHeight: 400), // Limit height
       width: double.infinity,
       child: Stack(
-        fit: StackFit.expand,
         alignment: Alignment.center,
         children: [
-          FittedBox(
-            fit: BoxFit.cover,
-            child: SizedBox(
-              width: controller.value.size.width,
-              height: controller.value.size.height,
-              child: VideoPlayer(controller),
-            ),
+          AspectRatio(
+            aspectRatio: controller.value.aspectRatio,
+            child: VideoPlayer(controller),
           ),
-          Container(color: Colors.black.withOpacity(0.4)),
+          Container(color: Colors.black.withOpacity(0.3)),
           Center(
             child: Container(
               padding: EdgeInsets.all(12),
@@ -69,8 +64,9 @@ class _VideoPlayerWidget extends StatelessWidget {
   }
 }
 
-class _PostMediaPreview extends StatelessWidget {
-  final String mediaUrl;
+// --- SMART WIDGET: Media Preview (Handles Single/Multi Image & Video) ---
+class _PostMediaPreview extends StatefulWidget {
+  final List<String> mediaUrls; // Changed to List
   final String? mediaType;
   final String text;
   final Map<String, dynamic> postData; 
@@ -79,7 +75,7 @@ class _PostMediaPreview extends StatelessWidget {
   final VideoPlayerController? videoController; 
 
   const _PostMediaPreview({
-    required this.mediaUrl,
+    required this.mediaUrls,
     this.mediaType,
     required this.text,
     required this.postData, 
@@ -87,6 +83,13 @@ class _PostMediaPreview extends StatelessWidget {
     required this.heroContextId,
     this.videoController,
   });
+
+  @override
+  State<_PostMediaPreview> createState() => _PostMediaPreviewState();
+}
+
+class _PostMediaPreviewState extends State<_PostMediaPreview> {
+  int _currentIndex = 0; // To track carousel page
 
   String? _getVideoId(String url) {
     if (url.contains('youtube.com') || url.contains('youtu.be')) {
@@ -98,24 +101,24 @@ class _PostMediaPreview extends StatelessWidget {
   
   String? _extractLinkInText() {
     final linkRegExp = RegExp(r'(https?:\/\/[^\s]+)');
-    final match = linkRegExp.firstMatch(text);
+    final match = linkRegExp.firstMatch(widget.text);
     return match?.group(0);
   }
 
-  void _navigateToViewer(BuildContext context, {String? url, String? type}) {
-     final String heroTag = '${heroContextId}_${postId}_${url ?? mediaUrl}';
+  void _navigateToViewer(BuildContext context, String url) {
+     final String heroTag = '${widget.heroContextId}_${widget.postId}_$url';
 
      Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
         barrierColor: Colors.black, 
         pageBuilder: (_, __, ___) => ImageViewerScreen(
-          imageUrl: url ?? mediaUrl, 
-          mediaType: type ?? mediaType,
-          postData: postData, 
-          postId: postId,
+          imageUrl: url, 
+          mediaType: widget.mediaType,
+          postData: widget.postData, 
+          postId: widget.postId,
           heroTag: heroTag, 
-          videoController: videoController,
+          videoController: widget.videoController,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -128,44 +131,96 @@ class _PostMediaPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    if (mediaUrl.isNotEmpty) {
-      final String heroTag = '${heroContextId}_${postId}_$mediaUrl';
-
-      return AspectRatio( 
-        aspectRatio: 4 / 3,
-        child: GestureDetector(
-          onTap: () => _navigateToViewer(context, type: mediaType),
-          child: Hero(
-            tag: heroTag,
-            transitionOnUserGestures: true,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: (mediaType == 'video' && videoController != null)
-                  ? _VideoPlayerWidget(controller: videoController!)
-                  : CachedNetworkImage( 
-                      imageUrl: mediaUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) => Container(
-                          color: theme.dividerColor.withOpacity(0.5),
-                          child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
-                        ),
-                      errorWidget: (context, url, error) => Container(
-                          color: Colors.red.withOpacity(0.1),
-                          child: Center(child: Text('Failed to load media.', style: TextStyle(color: Colors.red))),
-                        ),
-                    ),
-            ),
+    // 1. Handle Video (Single)
+    if (widget.mediaType == 'video' && widget.mediaUrls.isNotEmpty && widget.videoController != null) {
+       return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: GestureDetector(
+            onTap: () => _navigateToViewer(context, widget.mediaUrls.first),
+            child: _VideoPlayerWidget(controller: widget.videoController!),
           ),
+       );
+    }
+
+    // 2. Handle Images (Single or Multi)
+    if (widget.mediaUrls.isNotEmpty) {
+      final bool isMulti = widget.mediaUrls.length > 1;
+
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            // CAROUSEL OR SINGLE IMAGE
+            isMulti 
+            ? AspectRatio(
+                aspectRatio: 1.0, // Square aspect for multi-image carousel
+                child: PageView.builder(
+                  itemCount: widget.mediaUrls.length,
+                  onPageChanged: (index) {
+                    setState(() => _currentIndex = index);
+                  },
+                  itemBuilder: (context, index) {
+                    final url = widget.mediaUrls[index];
+                    return GestureDetector(
+                      onTap: () => _navigateToViewer(context, url),
+                      child: Hero(
+                        tag: '${widget.heroContextId}_${widget.postId}_$url',
+                        child: CachedNetworkImage(
+                          imageUrl: url,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(color: theme.dividerColor.withOpacity(0.1)),
+                          errorWidget: (context, url, error) => Icon(Icons.error),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              )
+            : AspectRatio(
+                aspectRatio: 4 / 3, // Default aspect for single image
+                child: GestureDetector(
+                  onTap: () => _navigateToViewer(context, widget.mediaUrls.first),
+                  child: Hero(
+                    tag: '${widget.heroContextId}_${widget.postId}_${widget.mediaUrls.first}',
+                    child: CachedNetworkImage( 
+                      imageUrl: widget.mediaUrls.first,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(color: theme.dividerColor.withOpacity(0.1)),
+                      errorWidget: (context, url, error) => Icon(Icons.error),
+                    ),
+                  ),
+                ),
+              ),
+
+            // PAGE INDICATOR (If Multi)
+            if (isMulti)
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    "${_currentIndex + 1}/${widget.mediaUrls.length}",
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+          ],
         ),
       );
     } 
     
+    // 3. Handle YouTube Links (Fallback)
     final externalLink = _extractLinkInText();
     final youtubeId = externalLink != null ? _getVideoId(externalLink) : null;
     
     if (youtubeId != null) {
       return AspectRatio( 
-        aspectRatio: 4 / 3,
+        aspectRatio: 16 / 9,
         child: GestureDetector(
           onTap: () async {
             final url = Uri.parse(externalLink!);
@@ -185,7 +240,7 @@ class _PostMediaPreview extends StatelessWidget {
                 children: [
                   Icon(Icons.ondemand_video, color: Colors.white, size: 50),
                   SizedBox(height: 8),
-                  Text('Tap to watch on YouTube', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  Text('Watch on YouTube', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -208,8 +263,6 @@ class BlogPostCard extends StatefulWidget {
   final VideoPlayerController? preloadedController; 
   final bool isPinned; 
   final Function(String, bool)? onPinToggle;
-  
-  // NEW: To prevent loop when on profile page
   final String? currentProfileUserId; 
 
   const BlogPostCard({
@@ -268,15 +321,20 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   void _initVideoController() {
-    final mediaUrl = widget.postData['mediaUrl'];
-    final mediaType = widget.postData['mediaType'];
+    // Check for both old 'mediaUrl' and new 'mediaUrls'
+    final String? singleUrl = widget.postData['mediaUrl'];
+    final List<dynamic> urls = widget.postData['mediaUrls'] ?? [];
+    final String? mediaType = widget.postData['mediaType'];
 
-    if (mediaType == 'video' && mediaUrl != null) {
+    // We assume video is still single file for now
+    final String? videoUrl = (urls.isNotEmpty) ? urls.first : singleUrl;
+
+    if (mediaType == 'video' && videoUrl != null) {
       if (widget.preloadedController != null) {
         _videoController = widget.preloadedController;
         _isVideoOwner = false;
       } else {
-        _videoController = VideoPlayerController.networkUrl(Uri.parse(mediaUrl))
+        _videoController = VideoPlayerController.networkUrl(Uri.parse(videoUrl))
           ..initialize().then((_) {
             final duration = _videoController!.value.duration;
             final targetPosition = duration.inSeconds > 10 ? Duration(seconds: 10) : duration;
@@ -296,7 +354,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.didUpdateWidget(oldWidget);
     if (oldWidget.postData != widget.postData) {
       _syncState();
-      
+      // Simple check if media changed
       if (oldWidget.postData['mediaUrl'] != widget.postData['mediaUrl']) {
         if (_isVideoOwner) {
           _videoController?.dispose();
@@ -386,7 +444,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   void _handleBookmarkToggle(bool isCurrentlyBookmarked) async {
     final user = _auth.currentUser;
     if (user == null) return;
-    
     if (hapticNotifier.value) HapticFeedback.lightImpact();
     
     final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
@@ -399,9 +456,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
     try {
       if (!isCurrentlyBookmarked) {
-        await docRef.set({
-          'timestamp': FieldValue.serverTimestamp(),
-        });
+        await docRef.set({'timestamp': FieldValue.serverTimestamp()});
       } else {
         await docRef.delete();
       }
@@ -489,28 +544,20 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final user = _auth.currentUser;
     if (user == null) return;
     final bool newPinState = !_localIsPinned;
-    setState(() {
-      _localIsPinned = newPinState; 
-    });
+    setState(() { _localIsPinned = newPinState; });
     if (widget.onPinToggle != null) {
       widget.onPinToggle!(widget.postId, newPinState);
     }
     try {
       if (!newPinState) { 
-        await _firestore.collection('users').doc(user.uid).update({
-          'pinnedPostId': FieldValue.delete(),
-        });
+        await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': FieldValue.delete()});
         if(mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
       } else { 
-        await _firestore.collection('users').doc(user.uid).update({
-          'pinnedPostId': widget.postId,
-        });
+        await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': widget.postId});
         if(mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
       }
     } catch (e) {
-      setState(() {
-        _localIsPinned = !newPinState;
-      });
+      setState(() { _localIsPinned = !newPinState; });
       if (widget.onPinToggle != null) widget.onPinToggle!(widget.postId, !newPinState);
       if(mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, (){}, color: Colors.red);
     }
@@ -554,8 +601,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         return;
       }
     }
-    
-    // NEW: Check loop prevention
     if (widget.currentProfileUserId != null && postUserId == widget.currentProfileUserId) return;
 
     Navigator.of(context).push(
@@ -685,14 +730,19 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
         final theme = Theme.of(context);
         final text = widget.postData['text'] ?? '';
-        final mediaUrl = widget.postData['mediaUrl'];
         final mediaType = widget.postData['mediaType'];
         final isUploading = widget.postData['isUploading'] == true;
         final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
         final uploadFailed = widget.postData['uploadFailed'] == true;
         final int commentCount = widget.postData['commentCount'] ?? 0;
         
-        final visibility = widget.postData['visibility'] ?? 'public';
+        // --- MULTI-IMAGE LOGIC ---
+        List<String> mediaUrls = [];
+        if (widget.postData['mediaUrls'] != null) {
+          mediaUrls = List<String>.from(widget.postData['mediaUrls']);
+        } else if (widget.postData['mediaUrl'] != null) {
+          mediaUrls = [widget.postData['mediaUrl']];
+        }
         
         if (uploadFailed) {
           return Container(
@@ -720,14 +770,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                       children: [
                         Icon(Icons.push_pin, size: 14, color: theme.hintColor),
                         SizedBox(width: 4),
-                        Text(
-                          "Pinned Post", 
-                          style: TextStyle(
-                            fontSize: 12, 
-                            fontWeight: FontWeight.bold,
-                            color: theme.hintColor
-                          )
-                        ),
+                        Text("Pinned Post", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.hintColor)),
                       ],
                     ),
                   ),
@@ -754,11 +797,11 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                             ),
                           if (isUploading)
                             _buildUploadStatus(uploadProgress)
-                          else if (mediaUrl != null || (text.contains('http') && !widget.isDetailView))
+                          else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
                             Padding(
                               padding: const EdgeInsets.only(top: 12.0),
                               child: _PostMediaPreview(
-                                mediaUrl: mediaUrl ?? '',
+                                mediaUrls: mediaUrls, // Pass List
                                 mediaType: mediaType,
                                 text: text,
                                 postData: widget.postData, 
@@ -899,26 +942,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           final isPrivate = (widget.postData['visibility'] ?? 'public') == 'private';
           return [
             PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
-            PopupMenuItem(
-              value: 'toggle_visibility', 
-              child: Row(
-                children: [
-                  Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
-                  SizedBox(width: 12), 
-                  Text(isPrivate ? "Unhide Post" : "Hide Post (Only Me)")
-                ]
-              )
-            ),
-            PopupMenuItem(
-              value: 'pin', 
-              child: Row(
-                children: [
-                  Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), 
-                  SizedBox(width: 12), 
-                  Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")
-                ]
-              )
-            ),
+            PopupMenuItem(value: 'toggle_visibility', child: Row(children: [Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(isPrivate ? "Unhide Post" : "Hide Post (Only Me)")])),
+            PopupMenuItem(value: 'pin', child: Row(children: [Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")])),
             PopupMenuDivider(),
             PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post", style: TextStyle(color: Colors.red))])),
           ];
@@ -939,21 +964,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('bookmarks')
-          .doc(widget.postId)
-          .snapshots(),
+      stream: _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId).snapshots(),
       builder: (context, snapshot) {
         final bool isBookmarked = snapshot.hasData && snapshot.data!.exists;
-        
-        return _buildActionButton(
-          isBookmarked ? Icons.bookmark : Icons.bookmark_border, 
-          null, 
-          isBookmarked ? TwitterTheme.blue : null, 
-          () => _handleBookmarkToggle(isBookmarked) 
-        );
+        return _buildActionButton(isBookmarked ? Icons.bookmark : Icons.bookmark_border, null, isBookmarked ? TwitterTheme.blue : null, () => _handleBookmarkToggle(isBookmarked));
       },
     );
   }
