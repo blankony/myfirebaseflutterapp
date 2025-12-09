@@ -74,7 +74,6 @@ class PredictionService {
 
   // --- 4. TRENDING ALGORITHM (Document Frequency + Deduplication) ---
   List<Map<String, dynamic>> analyzeTrendingTopics(List<QueryDocumentSnapshot> posts) {
-    // Map Phrase -> Set of unique Post IDs (Document Frequency)
     final Map<String, Set<String>> phraseDocMap = {};
     
     final Set<String> stopWords = {
@@ -89,18 +88,14 @@ class PredictionService {
       final text = (data['text'] ?? '').toString().toLowerCase();
       final postId = doc.id;
       
-      // Clean: Keep alphanumeric, spaces, and hashtags
       final cleanText = text.replaceAll(RegExp(r'[^\w\s#]'), '');
       final words = cleanText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
 
       for (int i = 0; i < words.length; i++) {
-        // A. Hashtags (Always count)
         if (words[i].startsWith('#')) {
           phraseDocMap.putIfAbsent(words[i], () => {}).add(postId);
         }
 
-        // B. N-Grams (2 and 3 words)
-        // Only consider if not stop words
         if (i < words.length - 1) {
           if (!stopWords.contains(words[i]) && !stopWords.contains(words[i+1])) {
              String bigram = "${words[i]} ${words[i+1]}";
@@ -108,36 +103,27 @@ class PredictionService {
           }
         }
         if (i < words.length - 2) {
-          // Allow middle stop words for sentences like "tomorrow is monday"
           String trigram = "${words[i]} ${words[i+1]} ${words[i+2]}";
           phraseDocMap.putIfAbsent(trigram, () => {}).add(postId);
         }
       }
     }
 
-    // Convert to List and Filter Noise
     var candidates = phraseDocMap.entries
         .map((e) => {'tag': e.key, 'count': e.value.length})
-        // Filter: Must appear in at least 2 different posts (unless hashtag)
         .where((e) => (e['count'] as int) > 1 || (e['tag'] as String).startsWith('#'))
         .toList();
 
-    // Sort: Primary by Count (Desc), Secondary by Length (Desc) 
-    // We prefer longer phrases if counts are equal
     candidates.sort((a, b) {
       int countCompare = (b['count'] as int).compareTo(a['count'] as int);
       if (countCompare != 0) return countCompare;
       return (b['tag'] as String).length.compareTo((a['tag'] as String).length);
     });
 
-    // Deduplication (Subset Removal)
-    // If "Tomorrow is Monday" is accepted, ignore "is Monday"
     final List<Map<String, dynamic>> finalTrends = [];
     
     for (var candidate in candidates) {
       String tag = candidate['tag'] as String;
-      
-      // Check if this tag is a substring of any already accepted trend
       bool isRedundant = false;
       for (var accepted in finalTrends) {
         String acceptedTag = accepted['tag'] as String;
@@ -157,8 +143,7 @@ class PredictionService {
     return finalTrends;
   }
 
-  // --- 5. DISCOVER ALGORITHM (Exploration & Novelty) ---
-  // Prioritizes: Viral Content, Users NOT followed, Randomness
+  // --- 5. DISCOVER ALGORITHM ---
   List<QueryDocumentSnapshot> getDiscoverRecommendations(
     List<QueryDocumentSnapshot> allPosts, 
     String currentUserId,
@@ -170,41 +155,33 @@ class PredictionService {
       final data = doc.data() as Map<String, dynamic>;
       final authorId = data['userId'];
       
-      // Filter 1: Strictly exclude own posts
       if (authorId == currentUserId) continue;
-      
-      // Filter 2: Strictly exclude people I already follow (This is for discovery!)
       if (followingList.contains(authorId)) continue;
 
       double score = 0.0;
 
-      // Factor 1: Engagement (Viral Factor)
       final int likes = (data['likes'] as Map?)?.length ?? 0;
       final int comments = data['commentCount'] ?? 0;
-      score += (likes * 2.0) + (comments * 3.0); // Heavy weight on engagement
+      score += (likes * 2.0) + (comments * 3.0); 
 
-      // Factor 2: Recency (Lower weight than Recommended, allow evergreen viral posts)
       final Timestamp? ts = data['timestamp'];
       if (ts != null) {
         final hoursAgo = DateTime.now().difference(ts.toDate()).inHours;
-        if (hoursAgo < 24) score += 20; // Bonus for today's viral hits
-        else score += (100.0 / (hoursAgo + 5)); // Gentle decay
+        if (hoursAgo < 24) score += 20; 
+        else score += (100.0 / (hoursAgo + 5)); 
       }
 
-      // Factor 3: Media Bonus (Visuals are better for discovery)
       if (data['mediaUrl'] != null) score += 15.0;
 
       scoredPosts.add({'doc': doc, 'score': score});
     }
 
-    // Sort Descending
     scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
 
     return scoredPosts.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
   }
 
-  // --- 6. RECOMMENDED ALGORITHM (Relevance & Familiarity) ---
-  // Prioritizes: Friends, Interests, Recent
+  // --- 6. RECOMMENDED ALGORITHM ---
   List<QueryDocumentSnapshot> getPersonalizedRecommendations(
     List<QueryDocumentSnapshot> allPosts, 
     Map<String, dynamic> userProfile,
@@ -233,10 +210,8 @@ class PredictionService {
 
       double score = 0.0; 
 
-      // 1. Social (+50) - Strong bias for friends
       if (following.contains(authorId)) score += 50.0;
 
-      // 2. Relevance (+30) - Bias for my major
       final text = (data['text'] ?? '').toString().toLowerCase();
       for (var keyword in interests) {
         if (text.contains(keyword)) {
@@ -245,7 +220,6 @@ class PredictionService {
         }
       }
 
-      // 3. Recency (High Decay) - We want *fresh* news from friends
       final Timestamp? ts = data['timestamp'];
       if (ts != null) {
         final hoursAgo = DateTime.now().difference(ts.toDate()).inHours;
@@ -257,5 +231,41 @@ class PredictionService {
 
     scoredPosts.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
     return scoredPosts.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
+  }
+
+  // --- 7. COMMUNITY RECOMMENDATIONS (Social Score) ---
+  List<QueryDocumentSnapshot> getRecommendedCommunities(
+    List<QueryDocumentSnapshot> allCommunities,
+    String currentUserId,
+    List<dynamic> followingList
+  ) {
+    List<Map<String, dynamic>> scored = [];
+
+    for (var doc in allCommunities) {
+      final data = doc.data() as Map<String, dynamic>;
+      final List followers = data['followers'] ?? [];
+
+      // Skip if already a member
+      if (followers.contains(currentUserId)) continue;
+
+      double score = 0.0;
+
+      // Score +10 for every person I follow who is in this community
+      int mutualsCount = 0;
+      for (var uid in followingList) {
+        if (followers.contains(uid)) mutualsCount++;
+      }
+      score += (mutualsCount * 10.0);
+
+      // Score +1 for total popularity
+      score += (followers.length * 0.5);
+
+      scored.add({'doc': doc, 'score': score});
+    }
+
+    // Sort descending by score
+    scored.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+    return scored.map((e) => e['doc'] as QueryDocumentSnapshot).toList();
   }
 }

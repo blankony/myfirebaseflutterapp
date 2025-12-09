@@ -9,10 +9,11 @@ import 'package:image_cropper/image_cropper.dart';
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
 import 'community_settings_screen.dart'; 
+import 'community_members_screen.dart'; // NEW IMPORT
 import '../create_post_screen.dart'; 
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../image_viewer_screen.dart'; // Added for viewing images
+import '../image_viewer_screen.dart'; 
 
 class CommunityDetailScreen extends StatefulWidget {
   final String communityId;
@@ -38,13 +39,11 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
 
     try {
       if (isFollowing) {
-        // UNFOLLOW
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
           'followers': FieldValue.arrayRemove([user.uid]),
         });
         if(mounted) OverlayService().showTopNotification(context, "Unfollowed", Icons.remove_circle_outline, (){});
       } else {
-        // FOLLOW
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
           'followers': FieldValue.arrayUnion([user.uid])
         });
@@ -55,7 +54,6 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     }
   }
 
-  // --- IMAGE VIEWING LOGIC ---
   void _openFullImage(BuildContext context, String url, String heroTag) {
     Navigator.of(context).push(
       PageRouteBuilder(
@@ -73,9 +71,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     );
   }
 
-  // --- IMAGE OPTIONS MENU (View / Change) ---
   void _showImageOptions(BuildContext context, String? url, bool isBanner, bool hasControl) {
-    // If no image and no control, do nothing
     if (url == null && !hasControl) return;
 
     showModalBottomSheet(
@@ -118,7 +114,6 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     );
   }
 
-  // --- IMAGE UPLOAD LOGIC ---
   Future<void> _pickAndUploadImage({required bool isBanner}) async {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
@@ -290,9 +285,26 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                         SizedBox(height: 12),
                         Row(
                           children: [
-                            Icon(Icons.group, size: 16, color: theme.hintColor),
-                            SizedBox(width: 4),
-                            Text("${followers.length} Followers", style: TextStyle(fontWeight: FontWeight.bold)),
+                            // UPDATED: Clickable Followers Count
+                            InkWell(
+                              onTap: () {
+                                Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => CommunityMembersScreen(
+                                    communityId: widget.communityId, 
+                                    communityData: data,
+                                    isStaff: hasFullControl
+                                  )
+                                ));
+                              },
+                              child: Row(
+                                children: [
+                                  Icon(Icons.group, size: 16, color: theme.hintColor),
+                                  SizedBox(width: 4),
+                                  Text("${followers.length} Followers", style: TextStyle(fontWeight: FontWeight.bold)),
+                                  Icon(Icons.arrow_forward_ios, size: 12, color: theme.hintColor),
+                                ],
+                              ),
+                            ),
                             Spacer(),
                             if (!canPost)
                               ElevatedButton(

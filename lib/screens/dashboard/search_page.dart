@@ -8,6 +8,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/common_error_widget.dart';
 import '../../main.dart';
 import '../dashboard/profile_page.dart';
+import '../community/community_detail_screen.dart'; // NEW
 import '../../services/prediction_service.dart';
 import '../../services/overlay_service.dart';
 import '../../services/voice_service.dart';
@@ -50,7 +51,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // CHANGED length to 3 to include Communities
+    _tabController = TabController(length: 3, vsync: this);
     _micAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
@@ -66,7 +68,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (widget.isSearching && !oldWidget.isSearching) {
       _tabController.index = 0;
-      // Request focus only if explicitly entering search mode
       Future.delayed(Duration(milliseconds: 100), () {
         if(mounted && widget.isSearching) FocusScope.of(context).requestFocus(_searchFocusNode);
       });
@@ -77,7 +78,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       _searchText = '';
       _searchSuggestion = null;
       _stopListening();
-      FocusScope.of(context).unfocus(); // Explicitly unfocus
+      FocusScope.of(context).unfocus(); 
     }
   }
 
@@ -122,10 +123,11 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         else if (lowerQuery.startsWith("search for ")) finalQuery = finalQuery.substring(11);
         else if (lowerQuery.startsWith("buka ")) finalQuery = finalQuery.substring(5);
 
-        if (lowerQuery.contains("profil") || lowerQuery.contains("dosen") ||
-            lowerQuery.contains("user") || lowerQuery.contains("orang")) {
+        if (lowerQuery.contains("profil") || lowerQuery.contains("user")) {
           _tabController.animateTo(1); 
-        } else if (lowerQuery.contains("post") || lowerQuery.contains("berita")) {
+        } else if (lowerQuery.contains("komunitas") || lowerQuery.contains("community")) {
+          _tabController.animateTo(2); 
+        } else {
           _tabController.animateTo(0); 
         }
 
@@ -270,7 +272,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
                   child: Container(
                     color: theme.scaffoldBackgroundColor,
-                    // FIX: Ensure TextField is not built/focused if not searching
                     child: widget.isSearching 
                         ? SingleChildScrollView(
                             physics: const NeverScrollableScrollPhysics(),
@@ -283,10 +284,10 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                     child: TextField(
                                       controller: _searchController,
                                       focusNode: _searchFocusNode,
-                                      autofocus: false, // Managed manually
+                                      autofocus: false, 
                                       readOnly: _isListening, 
                                       decoration: InputDecoration(
-                                        hintText: _isListening ? 'Mendengarkan...' : 'Tahan mic untuk bicara...',
+                                        hintText: _isListening ? 'Listening...' : 'Search PNJ...',
                                         hintStyle: TextStyle(
                                           color: _isListening ? TwitterTheme.blue : theme.hintColor,
                                           fontStyle: _isListening ? FontStyle.italic : FontStyle.normal,
@@ -362,7 +363,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                               ],
                             ),
                           )
-                        : SizedBox.shrink(), // Render nothing if not searching
+                        : SizedBox.shrink(),
                   ),
                 ),
               ),
@@ -374,10 +375,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   Widget _buildExplorePage(ThemeData theme) {
-    // ... [Rest of _buildExplorePage remains unchanged] ...
-    // Note: Re-include the full code from previous response for this section to be complete.
-    // Assuming context is maintained or file is fully replaced.
-    // For brevity in this diff, I am including the full _buildExplorePage below.
     return RefreshIndicator(
       notificationPredicate: (notification) => !_isListening,
       onRefresh: () async {
@@ -474,6 +471,104 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   ],
                 );
               },
+            ),
+
+            Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
+
+            // --- NEW: RECOMMENDED COMMUNITIES SECTION ---
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.groups_outlined, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text("Communities for You", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                ],
+              ),
+            ),
+
+            StreamBuilder<DocumentSnapshot>(
+              stream: _auth.currentUser != null ? _firestore.collection('users').doc(_auth.currentUser!.uid).snapshots() : null,
+              builder: (context, userSnapshot) {
+                List<dynamic> followingList = [];
+                if (userSnapshot.hasData && userSnapshot.data!.exists) {
+                  final uData = userSnapshot.data!.data() as Map<String, dynamic>;
+                  followingList = uData['following'] ?? [];
+                }
+
+                return StreamBuilder<QuerySnapshot>(
+                  stream: _firestore.collection('communities').limit(50).snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Error loading communities"));
+                    if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+
+                    final allCommunities = snapshot.data!.docs;
+                    
+                    final recommended = _predictionService.getRecommendedCommunities(
+                      allCommunities, 
+                      _auth.currentUser?.uid ?? '', 
+                      followingList
+                    );
+
+                    if (recommended.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text("No new communities to recommend right now.", style: TextStyle(color: Colors.grey)),
+                      );
+                    }
+
+                    return SizedBox(
+                      height: 160,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: recommended.length > 10 ? 10 : recommended.length,
+                        itemBuilder: (context, index) {
+                          final doc = recommended[index];
+                          final data = doc.data() as Map<String, dynamic>;
+                          final name = data['name'] ?? 'Community';
+                          final imageUrl = data['imageUrl'];
+                          final membersCount = (data['followers'] as List?)?.length ?? 0;
+
+                          return Container(
+                            width: 140,
+                            margin: EdgeInsets.all(4),
+                            child: Card(
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)
+                                  ));
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 28,
+                                        backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                                        backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
+                                        child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
+                                      ),
+                                      SizedBox(height: 8),
+                                      Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
+                                      Text("$membersCount members", style: TextStyle(fontSize: 11, color: Colors.grey)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  }
+                );
+              }
             ),
 
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
@@ -586,22 +681,22 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             labelColor: theme.primaryColor,
             unselectedLabelColor: theme.hintColor,
             indicatorColor: theme.primaryColor,
-            tabs: const [Tab(text: 'Posts'), Tab(text: 'Users')],
+            tabs: const [Tab(text: 'Posts'), Tab(text: 'Users'), Tab(text: 'Communities')], // Added Tab
           ),
         ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: [_buildPostResults(), _buildUserResults()],
+            children: [_buildPostResults(), _buildUserResults(), _buildCommunityResults()], // Added View
           ),
         ),
       ],
     );
   }
 
+  // --- EXISTING POST & USER RESULTS METHODS (UNCHANGED) ---
   Widget _buildPostResults() {
     final currentUserId = _auth.currentUser?.uid;
-
     return StreamBuilder<DocumentSnapshot>(
       stream: currentUserId != null ? _firestore.collection('users').doc(currentUserId).snapshots() : null,
       builder: (context, userSnapshot) {
@@ -610,20 +705,16 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           final uData = userSnapshot.data!.data() as Map<String, dynamic>;
           followingList = uData['following'] ?? [];
         }
-
         return StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
             if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
-            
             final docs = snapshot.data?.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
               final text = (data['text'] ?? '').toString().toLowerCase();
-              
               final visibility = data['visibility'] ?? 'public';
               final ownerId = data['userId'];
-              
               bool isVisible = false;
               if (visibility == 'public') isVisible = true;
               else if (visibility == 'followers') {
@@ -631,24 +722,16 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               } else if (visibility == 'private') {
                 if (ownerId == currentUserId) isVisible = true;
               }
-
               return isVisible && text.contains(_searchText);
             }).toList() ?? [];
-
             if (docs.isEmpty) return Center(child: Text('No posts found for "$_searchText"'));
-            
             return ListView.builder(
               padding: EdgeInsets.only(bottom: 100),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               itemCount: docs.length,
               itemBuilder: (context, index) {
                 final data = docs[index].data() as Map<String, dynamic>;
-                return BlogPostCard(
-                  postId: docs[index].id, 
-                  postData: data, 
-                  isOwner: data['userId'] == currentUserId, 
-                  heroContextId: 'search_results'
-                );
+                return BlogPostCard(postId: docs[index].id, postData: data, isOwner: data['userId'] == currentUserId, heroContextId: 'search_results');
               },
             );
           },
@@ -680,6 +763,55 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             final userId = docs[index].id;
             if (userId == myUid) return SizedBox.shrink();
             return _UserSearchTile(userId: userId, userData: data, currentUserId: myUid);
+          },
+        );
+      },
+    );
+  }
+
+  // --- NEW: COMMUNITY RESULTS ---
+  Widget _buildCommunityResults() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore.collection('communities').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
+        if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
+
+        final docs = snapshot.data?.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final name = (data['name'] ?? '').toString().toLowerCase();
+          final desc = (data['description'] ?? '').toString().toLowerCase();
+          return name.contains(_searchText) || desc.contains(_searchText);
+        }).toList() ?? [];
+
+        if (docs.isEmpty) return Center(child: Text('No communities found for "$_searchText"'));
+
+        return ListView.builder(
+          padding: EdgeInsets.only(bottom: 100),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            final String name = data['name'] ?? 'Community';
+            final String? imageUrl = data['imageUrl'];
+            final int memberCount = (data['followers'] as List?)?.length ?? 0;
+
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
+                backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                child: imageUrl == null ? Icon(Icons.groups, color: TwitterTheme.blue) : null,
+              ),
+              title: Text(name, style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text("$memberCount members"),
+              trailing: Icon(Icons.arrow_forward_ios, size: 14),
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)
+                ));
+              },
+            );
           },
         );
       },

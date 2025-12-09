@@ -63,6 +63,7 @@ dependencies:
   badword_guard: ^1.0.0
   visual_detector_ai: ^1.0.0
   webview_flutter: ^4.13.0
+  flutter_colorpicker: ^1.1.0
 
 
 dev_dependencies:

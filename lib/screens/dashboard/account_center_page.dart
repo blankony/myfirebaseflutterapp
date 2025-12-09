@@ -8,6 +8,7 @@ import '../edit_profile_screen.dart';
 import '../change_password_screen.dart';
 import '../../auth_gate.dart'; 
 import '../../services/overlay_service.dart';
+import '../ktm_verification_screen.dart'; // REQUIRED
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -21,6 +22,25 @@ class AccountCenterPage extends StatefulWidget {
 
 class _AccountCenterPageState extends State<AccountCenterPage> {
   bool _isDeleting = false; 
+  User? _currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshUser();
+  }
+
+  /// Forces a reload of the Firebase User to get the latest emailVerified status
+  Future<void> _refreshUser() async {
+    _currentUser = _auth.currentUser;
+    if (_currentUser != null) {
+      await _currentUser!.reload();
+      setState(() {
+        // Update local reference after reload
+        _currentUser = _auth.currentUser;
+      });
+    }
+  }
 
   Route _createSlideRightRoute(Widget page) {
     return PageRouteBuilder(
@@ -38,7 +58,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     );
   }
 
-  // --- Step 1: Prompt Password ---
   Future<void> _promptPasswordForDeletion() async {
     final TextEditingController passwordController = TextEditingController();
     String? errorMessage;
@@ -135,7 +154,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     );
   }
 
-  // --- Step 2: Final Confirmation ---
   Future<void> _showFinalDeleteConfirmation() async {
     final didConfirm = await showDialog<bool>(
       context: context,
@@ -164,7 +182,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     }
   }
 
-  // --- Step 3: Execution ---
   Future<void> _performAccountDeletion() async {
     setState(() {
       _isDeleting = true;
@@ -231,6 +248,8 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final user = _auth.currentUser; // Use fresh instance
+    final bool isEmailVerified = user?.emailVerified ?? false;
     
     return Stack(
       children: [
@@ -243,10 +262,108 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Text(
-                  "Profile & Security",
+                  "Verification Status",
                   style: theme.textTheme.titleMedium?.copyWith(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
                 ),
               ),
+
+              // --- 1. EMAIL VERIFICATION ---
+              ListTile(
+                leading: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isEmailVerified ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                    shape: BoxShape.circle
+                  ),
+                  child: Icon(
+                    isEmailVerified ? Icons.email : Icons.mark_email_unread, 
+                    color: isEmailVerified ? Colors.green : Colors.orange,
+                    size: 20,
+                  ),
+                ),
+                title: Text('Email Verification'),
+                subtitle: Text(isEmailVerified ? 'Verified' : 'Action Required'),
+                trailing: isEmailVerified 
+                  ? Icon(Icons.check_circle, color: Colors.green)
+                  : TextButton(
+                      child: Text("Verify"),
+                      onPressed: () async {
+                        try {
+                          await user?.sendEmailVerification();
+                          OverlayService().showTopNotification(context, "Verification email sent", Icons.email, (){});
+                        } catch (e) {
+                          OverlayService().showTopNotification(context, "Please wait before retrying.", Icons.timer, (){}, color: Colors.orange);
+                        }
+                      },
+                    ),
+              ),
+
+              // --- 2. KTM VERIFICATION (Only shows if Email Verified) ---
+              if (isEmailVerified)
+                StreamBuilder<DocumentSnapshot>(
+                  stream: _firestore.collection('users').doc(user!.uid).snapshots(),
+                  builder: (context, snapshot) {
+                    String status = 'none';
+                    if (snapshot.hasData && snapshot.data!.exists) {
+                      final data = snapshot.data!.data() as Map<String, dynamic>;
+                      status = data['verificationStatus'] ?? 'none';
+                    }
+
+                    String title = "Student ID (KTM)";
+                    String subtitle = "Verify to get blue checkmark";
+                    IconData icon = Icons.badge_outlined;
+                    Color color = Colors.grey;
+                    Widget? trailing;
+
+                    if (status == 'verified') {
+                      subtitle = "Verified Student";
+                      color = Colors.green;
+                      icon = Icons.verified_user;
+                      trailing = Icon(Icons.check_circle, color: Colors.green);
+                    } else if (status == 'pending') {
+                      subtitle = "Under Review";
+                      color = Colors.orange;
+                      icon = Icons.hourglass_top;
+                      trailing = Text("Pending", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold));
+                    } else if (status == 'rejected') {
+                      subtitle = "Verification Rejected. Try again.";
+                      color = Colors.red;
+                      icon = Icons.error_outline;
+                      trailing = Icon(Icons.arrow_forward_ios, size: 16);
+                    } else {
+                      // None
+                      trailing = Icon(Icons.arrow_forward_ios, size: 16);
+                    }
+
+                    return ListTile(
+                      leading: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.1),
+                          shape: BoxShape.circle
+                        ),
+                        child: Icon(icon, color: color, size: 20),
+                      ),
+                      title: Text(title),
+                      subtitle: Text(subtitle),
+                      trailing: trailing,
+                      onTap: (status == 'verified' || status == 'pending') 
+                        ? null 
+                        : () => Navigator.push(context, MaterialPageRoute(builder: (_) => KtmVerificationScreen())),
+                    );
+                  },
+                ),
+
+              Divider(height: 32),
+
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  "Profile & Settings",
+                  style: theme.textTheme.titleMedium?.copyWith(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
+                ),
+              ),
+              
               ListTile(
                 leading: Icon(Icons.edit_outlined),
                 title: Text('Edit Profile'),
@@ -257,7 +374,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                 },
               ),
               
-              // --- PRIVATE ACCOUNT TOGGLE ---
               _PrivacySwitchTile(),
               
               ListTile(
@@ -368,7 +484,6 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
   }
 }
 
-// --- PRIVACY SWITCH WIDGET WITH CONFIRMATION & ROBUST BATCH UPDATE ---
 class _PrivacySwitchTile extends StatefulWidget {
   @override
   State<_PrivacySwitchTile> createState() => _PrivacySwitchTileState();
@@ -423,42 +538,33 @@ class _PrivacySwitchTileState extends State<_PrivacySwitchTile> {
         setState(() => _isUpdating = true);
         
         try {
-          // 1. Update User Profile
           await FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
               .update({'isPrivate': !isCurrentlyPrivate});
 
-          // 2. Batch Update Existing Posts (ROBUST VERSION)
-          // We fetch ALL posts by the user to catch those without visibility field too.
           final batch = FirebaseFirestore.instance.batch();
           final postsQuery = await FirebaseFirestore.instance
               .collection('posts')
               .where('userId', isEqualTo: user.uid)
               .get();
 
-          // Target: If switching to Private -> 'followers'. If switching to Public -> 'public'.
           final String targetNewVisibility = isCurrentlyPrivate ? 'public' : 'followers';
 
           int batchCount = 0;
           for (var doc in postsQuery.docs) {
             final data = doc.data();
-            final currentVis = data['visibility'] ?? 'public'; // Default to public if null
+            final currentVis = data['visibility'] ?? 'public'; 
 
-            // CRITICAL: Do NOT touch posts that are 'private' (Only Me)
             if (currentVis != 'private') {
-              // Optimization: Only update if it's different
               if (currentVis != targetNewVisibility) {
                 batch.update(doc.reference, {'visibility': targetNewVisibility});
                 batchCount++;
               }
             }
             
-            // Firestore batch limit safety (simple)
             if (batchCount >= 450) {
               await batch.commit();
-              // In a real app, restart batch here. 
-              // For simplicity, we assume user has < 450 posts or it handles most of them.
             }
           }
           

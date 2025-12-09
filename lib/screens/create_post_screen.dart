@@ -96,7 +96,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<void> _checkEmailVerification() async {
     final user = _auth.currentUser;
     if (user != null) {
-      await user.reload(); 
+      // FIX: Wrap reload in try-catch to handle offline state
+      try {
+        await user.reload(); 
+      } catch (e) {
+        // Ignore offline error, rely on cached status
+      }
+
       if (!user.emailVerified) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           showDialog(
@@ -759,7 +765,7 @@ class _BackgroundUploader {
   static Future<void> _processUpload(
     String text, List<File> files, List<String> urls, String? type, String vis, bool edit, String? pid,
     String uid, String uName, String uEmail, int icon, String hex, String? img, String? comId,
-    String? comName, String? comIcon, bool? comVerified, bool isCommunityIdentity, // Fixed Name
+    String? comName, String? comIcon, bool? comVerified, bool isCommunityIdentity, 
     Function(String) onProgress, VoidCallback onSuccess, Function(dynamic) onFailure,
   ) async {
     try {

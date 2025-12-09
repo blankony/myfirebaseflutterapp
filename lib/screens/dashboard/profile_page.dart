@@ -65,6 +65,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     _user = _auth.currentUser;
     _userId = widget.userId ?? _user!.uid;
     
+    // Force reload user data to get fresh emailVerified status on init
+    _user?.reload();
+
     _checkBlockedStatus();
 
     _tabController = TabController(
@@ -449,6 +452,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Future<void> _handleRefresh() async {
+    // FIX: Force reload to update emailVerified status from server
+    try {
+      await _user?.reload();
+    } catch (_) {}
     await Future.delayed(Duration(seconds: 1));
     if (mounted) setState(() {}); 
   }
@@ -729,6 +736,22 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final String verificationStatus = data['verificationStatus'] ?? 'none';
     final bool isVerified = verificationStatus == 'verified';
     final bool isPending = verificationStatus == 'pending';
+    
+    // VERIFICATION FLOW LOGIC
+    // 1. Email must be verified first.
+    // 2. Then KTM verification.
+    bool showEmailVerifyBtn = false;
+    bool showKtmVerifyBtn = false;
+
+    if (isMyProfile) {
+      // Check current auth user email status
+      if (_user != null && !_user!.emailVerified) {
+        showEmailVerifyBtn = true;
+      } else if (!isVerified && !isPending) {
+        // Only show KTM verify if Email IS verified AND KTM not yet verified/pending
+        showKtmVerifyBtn = true;
+      }
+    }
 
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -749,35 +772,59 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         ),
         Text(handle, style: theme.textTheme.titleSmall),
         
-        if (isMyProfile && !isVerified)
+        // --- VERIFICATION BUTTONS ---
+        if (showEmailVerifyBtn)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: InkWell(
-              onTap: isPending 
-                ? () => OverlayService().showTopNotification(context, "Verification is under review.", Icons.access_time, (){}, color: Colors.orange)
-                : () => Navigator.push(context, MaterialPageRoute(builder: (_) => KtmVerificationScreen())),
+              onTap: () async {
+                try {
+                  await _user!.sendEmailVerification();
+                  if(mounted) OverlayService().showTopNotification(context, "Verification email sent", Icons.mark_email_read, (){});
+                } catch (e) {
+                  if(mounted) OverlayService().showTopNotification(context, "Please wait before retrying.", Icons.timer, (){}, color: Colors.orange);
+                }
+              },
               child: Container(
                 padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isPending ? Colors.orange.withOpacity(0.1) : TwitterTheme.blue.withOpacity(0.1),
+                  color: Colors.red.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: isPending ? Colors.orange : TwitterTheme.blue),
+                  border: Border.all(color: Colors.red),
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(isPending ? Icons.hourglass_top : Icons.verified_outlined, size: 16, color: isPending ? Colors.orange : TwitterTheme.blue),
-                    SizedBox(width: 6),
-                    Text(
-                      isPending ? "Verification Pending" : "Get Verified", 
-                      style: TextStyle(color: isPending ? Colors.orange : TwitterTheme.blue, fontWeight: FontWeight.bold, fontSize: 12)
-                    ),
-                  ],
+                  mainAxisSize: MainAxisSize.min, 
+                  children: const [
+                    Icon(Icons.warning, size: 16, color: Colors.red), 
+                    SizedBox(width: 6), 
+                    Text("Verify Email", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12))
+                  ]
                 ),
               ),
             ),
+          )
+        else if (isPending)
+           Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.orange)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: const [Icon(Icons.hourglass_top, size: 16, color: Colors.orange), SizedBox(width: 6), Text("Verification Pending", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12))]),
+            ),
+          )
+        else if (showKtmVerifyBtn)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: InkWell(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => KtmVerificationScreen())),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: TwitterTheme.blue)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: const [Icon(Icons.verified_outlined, size: 16, color: TwitterTheme.blue), SizedBox(width: 6), Text("Get Verified Badge", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold, fontSize: 12))]),
+              ),
+            ),
           ),
-
+        
         SizedBox(height: 8),
         if (!_isBlocked) ...[
           Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge),
@@ -916,9 +963,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               final visibleDocs = allDocs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
                 
-                // NEW: Hide community identity posts on personal profile
+                // --- NEW FILTER: HIDE OFFICIAL COMMUNITY POSTS FROM PERSONAL PROFILE ---
                 final bool isCommunityIdentityPost = data['isCommunityPost'] ?? false;
                 if (isCommunityIdentityPost) return false;
+                // ---------------------------------------------------------------------
 
                 final visibility = data['visibility'] ?? 'public';
                 final ownerId = data['userId'];
