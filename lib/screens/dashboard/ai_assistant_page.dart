@@ -426,7 +426,6 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
           _messages.add(ChatMessage(text: aiText, isUser: false, timestamp: DateTime.now()));
         });
         _scrollToBottom();
-        _speak(aiText);
         if (user != null) await _saveMessageToFirestore(user.uid, aiText, false);
       }
     } catch (e) {

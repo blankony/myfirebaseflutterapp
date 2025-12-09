@@ -6,7 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import '../screens/post_detail_screen.dart'; 
 import '../screens/dashboard/profile_page.dart'; 
-import '../screens/community/community_detail_screen.dart'; // REQUIRED IMPORT
+import '../screens/community/community_detail_screen.dart'; 
 import '../screens/image_viewer_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
 import '../main.dart';
@@ -594,7 +594,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         _createSlideLeftRoute(
           CommunityDetailScreen(
             communityId: communityId,
-            communityData: {}, 
+            communityData: {}, // Fetch inside screen
           ), 
         ),
       );
@@ -811,7 +811,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                             Padding(
                               padding: const EdgeInsets.only(top: 12.0),
                               child: _PostMediaPreview(
-                                mediaUrls: mediaUrls, // Pass List
+                                mediaUrls: mediaUrls, 
                                 mediaType: mediaType,
                                 text: text,
                                 postData: widget.postData, 
@@ -839,25 +839,25 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   // --- UPDATED AVATAR LOGIC ---
   Widget _buildAvatar(BuildContext context) {
-    // 1. COMMUNITY POST
-    if (widget.postData['communityId'] != null) {
-       final String? comImg = widget.postData['communityIcon']; 
-       // Fallback logic
-       final String? fallbackImg = widget.postData['profileImageUrl'];
-       final String? displayImg = comImg ?? fallbackImg;
+    // Determine which image to show based on post type
+    final bool isCommunityPost = widget.postData['isCommunityPost'] ?? false;
+    final String? communityId = widget.postData['communityId'];
 
+    if (communityId != null && isCommunityPost) {
+       // Official Community Post: Show Community Icon
+       final String? comImg = widget.postData['communityIcon']; 
        return GestureDetector(
          onTap: _navigateToSource,
          child: CircleAvatar(
            radius: 24,
            backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-           backgroundImage: displayImg != null ? CachedNetworkImageProvider(displayImg) : null,
-           child: displayImg == null ? Icon(Icons.groups, size: 26, color: TwitterTheme.blue) : null,
+           backgroundImage: comImg != null ? CachedNetworkImageProvider(comImg) : null,
+           child: comImg == null ? Icon(Icons.groups, size: 26, color: TwitterTheme.blue) : null,
          ),
        );
     }
 
-    // 2. USER POST
+    // Otherwise (Personal Post or User Post in Community): Show User Avatar
     final String authorId = widget.postData['userId'];
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(authorId).snapshots(),
@@ -877,7 +877,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
         final Color avatarBgColor = AvatarHelper.getColor(colorHex);
         return GestureDetector(
-           onTap: _navigateToSource,
+           onTap: _navigateToSource, // FIXED: Now defined
           child: CircleAvatar(
             radius: 24,
             backgroundColor: profileImageUrl != null ? Colors.transparent : avatarBgColor,
@@ -893,13 +893,16 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Widget _buildPostHeader(BuildContext context) {
     final theme = Theme.of(context);
     final timeAgo = _formatTimestamp(widget.postData['timestamp'] as Timestamp?);
+    
+    // Check context
+    final String? communityId = widget.postData['communityId'];
+    final bool isCommunityPost = widget.postData['isCommunityPost'] ?? false;
+    final bool isVerified = widget.postData['communityVerified'] ?? false;
 
-    // 1. COMMUNITY POST
-    if (widget.postData['communityId'] != null) {
+    // 1. OFFICIAL COMMUNITY POST
+    if (communityId != null && isCommunityPost) {
        final String comName = widget.postData['communityName'] ?? 'Community';
-       // We show the real user's name as "Posted by..."
        final String userName = widget.postData['userName'] ?? 'Member'; 
-       final bool isVerified = widget.postData['communityVerified'] ?? false;
        
        return Column(
          crossAxisAlignment: CrossAxisAlignment.start,
@@ -911,10 +914,13 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                  child: Row(
                    children: [
                      Flexible(
-                       child: Text(
-                         comName, 
-                         style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
-                         overflow: TextOverflow.ellipsis
+                       child: GestureDetector(
+                         onTap: _navigateToSource,
+                         child: Text(
+                           comName, 
+                           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
+                           overflow: TextOverflow.ellipsis
+                         ),
                        )
                      ),
                      if (isVerified) ...[
@@ -927,7 +933,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
              ],
            ),
-           // "Posted by User" Line
            Padding(
              padding: const EdgeInsets.only(top: 2.0),
              child: Row(
@@ -947,8 +952,60 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
          ],
        );
     }
+    
+    // 2. PERSONAL POST IN COMMUNITY
+    if (communityId != null && !isCommunityPost) {
+      final String userName = widget.postData['userName'] ?? 'User';
+      final String comName = widget.postData['communityName'] ?? 'Community';
+      
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+             children: [
+               Expanded(
+                 child: Row(
+                   children: [
+                     Flexible(
+                       child: GestureDetector(
+                         onTap: _navigateToSource,
+                         child: Text(
+                           userName, 
+                           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
+                           overflow: TextOverflow.ellipsis
+                         ),
+                       )
+                     ),
+                   ],
+                 ),
+               ),
+               Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
+             ],
+          ),
+          Padding(
+             padding: const EdgeInsets.only(top: 2.0),
+             child: Row(
+               children: [
+                 Flexible(
+                   child: Text(
+                     "in $comName", 
+                     style: TextStyle(color: theme.hintColor, fontSize: 11, fontWeight: FontWeight.bold),
+                     overflow: TextOverflow.ellipsis
+                   ),
+                 ),
+                 if (widget.isOwner) ...[
+                    SizedBox(width: 8),
+                    SizedBox(width: 16, height: 16, child: _buildOptionsButton()),
+                 ]
+               ],
+             ),
+          )
+        ],
+      );
+    }
 
-    // 2. STANDARD USER POST
+    // 3. STANDARD USER POST
     final String userName = widget.postData['userName'] ?? 'User';
     final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
     final String visibility = widget.postData['visibility'] ?? 'public';
@@ -967,11 +1024,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Flexible(
-                    child: Text(
-                      userName, 
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
-                      overflow: TextOverflow.ellipsis
-                    ),
+                    child: GestureDetector(
+                      onTap: _navigateToSource,
+                      child: Text(
+                        userName, 
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
+                        overflow: TextOverflow.ellipsis
+                      ),
+                    )
                   ),
                   if (isPrivate) ...[
                     SizedBox(width: 4),

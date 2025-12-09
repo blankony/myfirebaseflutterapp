@@ -23,6 +23,7 @@ final CloudinaryService _cloudinaryService = CloudinaryService();
 
 class CreatePostScreen extends StatefulWidget {
   final String? postId;
+  // initialData may contain 'communityId', 'communityName', 'communityIcon'
   final Map<String, dynamic>? initialData;
 
   const CreatePostScreen({
@@ -47,20 +48,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String _visibility = 'public'; 
   bool _isAccountPrivate = false; 
 
-  // Identity State
-  String _displayName = 'Anonymous User';
-  String _userEmail = 'anon@mail.com';
-  String? _displayAvatarUrl;
-  int _avatarIconId = 0;
-  String _avatarHex = '';
+  // User Identity State
+  String _myUserName = 'Anonymous';
+  String _myUserEmail = '';
+  String? _myAvatarUrl;
+  int _myAvatarIconId = 0;
+  String _myAvatarHex = '';
   
-  // Community Broadcasting State
+  // Community Context
   String? _communityId;
   String? _communityName;
   String? _communityIcon;
-  bool _communityVerified = false; // NEW: Track verification status
-  bool _isBroadcasting = false;
-  bool _isRestricted = false; 
+  bool _communityVerified = false;
+  
+  // Posting Mode Logic
+  bool _isCommunityContext = false; // True if inside a community
+  bool _hasOfficialAuthority = false; // True if Admin/Editor/Owner
+  bool _postAsCommunity = false; // The Toggle State
+  bool _isRestricted = false; // If true, cannot post at all
 
   String? _predictedText;
   Timer? _debounce;
@@ -77,19 +82,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _loadIdentity(); 
     _trainAiModel();
 
-    if (widget.initialData != null) {
-      if (_isEditing) {
-        _postController.text = widget.initialData!['text'] ?? '';
-        _mediaType = widget.initialData!['mediaType'];
-        _visibility = widget.initialData!['visibility'] ?? 'public';
-        
-        if (widget.initialData!['mediaUrls'] != null) {
-          _existingMediaUrls = List<String>.from(widget.initialData!['mediaUrls']);
-        } else if (widget.initialData!['mediaUrl'] != null) {
-          _existingMediaUrls = [widget.initialData!['mediaUrl']];
-        }
-        _checkCanPost();
-      } 
+    if (widget.initialData != null && _isEditing) {
+      _postController.text = widget.initialData!['text'] ?? '';
+      _mediaType = widget.initialData!['mediaType'];
+      _visibility = widget.initialData!['visibility'] ?? 'public';
+      
+      if (widget.initialData!['mediaUrls'] != null) {
+        _existingMediaUrls = List<String>.from(widget.initialData!['mediaUrls']);
+      } else if (widget.initialData!['mediaUrl'] != null) {
+        _existingMediaUrls = [widget.initialData!['mediaUrl']];
+      }
+      _checkCanPost();
     }
   }
 
@@ -97,42 +100,37 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // Load User Data First
+    // 1. Load Personal User Data
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
         final data = userDoc.data()!;
         setState(() {
-          _displayName = data['name'] ?? 'User';
-          _userEmail = user.email ?? '';
-          _avatarIconId = data['avatarIconId'] ?? 0;
-          _avatarHex = data['avatarHex'] ?? '';
-          _displayAvatarUrl = data['profileImageUrl'];
+          _myUserName = data['name'] ?? 'User';
+          _myUserEmail = user.email ?? '';
+          _myAvatarIconId = data['avatarIconId'] ?? 0;
+          _myAvatarHex = data['avatarHex'] ?? '';
+          _myAvatarUrl = data['profileImageUrl'];
           _isAccountPrivate = data['isPrivate'] ?? false;
         });
       }
     } catch (_) {}
 
-    // Check Community Context
+    // 2. Check Community Context
     if (widget.initialData != null && widget.initialData!.containsKey('communityId')) {
       _communityId = widget.initialData!['communityId'];
-      // Use passed data initially for speed, but fetch fresh data for verification status
       _communityName = widget.initialData!['communityName'];
       _communityIcon = widget.initialData!['communityIcon'];
-      _isBroadcasting = true;
-      _visibility = 'public'; 
+      _isCommunityContext = true;
+      _visibility = 'public'; // Community posts are always public
 
+      // Check Permissions
       try {
         final comDoc = await _firestore.collection('communities').doc(_communityId).get();
         if (comDoc.exists) {
           final data = comDoc.data()!;
+          _communityVerified = data['isVerified'] ?? false;
           
-          setState(() {
-            _communityName = data['name']; // Update with fresh name
-            _communityIcon = data['imageUrl']; // Update with fresh icon
-            _communityVerified = data['isVerified'] ?? false; // Update verified status
-          });
-
           final bool allowMembers = data['allowMemberPosts'] ?? false;
           final String ownerId = data['ownerId'];
           final List admins = data['admins'] ?? [];
@@ -140,10 +138,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           
           final bool isStaff = ownerId == user.uid || admins.contains(user.uid) || editors.contains(user.uid);
           
+          setState(() {
+            _hasOfficialAuthority = isStaff;
+            // Default behavior: Staff posts as Community by default, Members post as themselves
+            _postAsCommunity = isStaff; 
+            
+            // Update names in case they changed since entering screen
+            _communityName = data['name'];
+            _communityIcon = data['imageUrl'];
+          });
+
+          // If not staff and member posts are disallowed -> Restricted
           if (!allowMembers && !isStaff) {
             setState(() => _isRestricted = true);
             if(mounted) {
-              OverlayService().showTopNotification(context, "Posting restricted by Admin", Icons.lock, (){}, color: Colors.red);
+              OverlayService().showTopNotification(context, "Posting restricted to Admins", Icons.lock, (){}, color: Colors.red);
               Navigator.pop(context);
             }
           }
@@ -163,35 +172,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void _checkCanPost() {
     final textNotEmpty = _postController.text.trim().isNotEmpty;
     final hasMedia = _selectedMediaFiles.isNotEmpty || _existingMediaUrls.isNotEmpty;
-
-    setState(() {
-      _canPost = textNotEmpty || hasMedia;
-    });
+    setState(() => _canPost = textNotEmpty || hasMedia);
   }
 
   Future<void> _trainAiModel() async {
     final user = _auth.currentUser;
     if (user == null) return;
     try {
-      final snapshot = await _firestore
-          .collection('posts')
-          .where('userId', isEqualTo: user.uid)
-          .orderBy('timestamp', descending: true)
-          .limit(50)
-          .get();
-      List<String> postHistory = snapshot.docs
-          .map((doc) => (doc.data()['text'] ?? '').toString())
-          .where((text) => text.isNotEmpty)
-          .toList();
+      final snapshot = await _firestore.collection('posts').where('userId', isEqualTo: user.uid).limit(20).get();
+      List<String> postHistory = snapshot.docs.map((doc) => (doc.data()['text'] ?? '').toString()).toList();
       _predictionService.learnFromUserPosts(postHistory);
-    } catch (e) {
-      // Silent error
-    }
+    } catch (_) {}
   }
 
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
-
     setState(() => _isProcessing = true);
     OverlayService().showTopNotification(context, "Scanning images...", Icons.remove_red_eye, (){}, color: Colors.orange);
 
@@ -200,13 +195,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (apiKey == null || apiKey.isEmpty) return true;
 
       int limit = _selectedMediaFiles.length > 3 ? 3 : _selectedMediaFiles.length;
-
       for (int i = 0; i < limit; i++) {
-        final result = await VisualDetectorAi.analyzeImage(
-          image: _selectedMediaFiles[i],
-          geminiApiKey: apiKey,
-        );
-
+        final result = await VisualDetectorAi.analyzeImage(image: _selectedMediaFiles[i], geminiApiKey: apiKey);
         final String description = result.toString().toLowerCase(); 
         
         final List<String> dangerKeywords = [
@@ -227,11 +217,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           return false;
         }
       }
-
       return true; 
-
     } catch (e) {
-      debugPrint("Visual Detector Error: $e");
       return true; 
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -244,9 +231,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       builder: (ctx) => AlertDialog(
         title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Rejected")]),
         content: Text("Your content cannot be posted.\n\nReason: $reason"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Edit", style: TextStyle(color: TwitterTheme.blue)))
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Edit", style: TextStyle(color: TwitterTheme.blue)))],
       ),
     );
   }
@@ -271,16 +256,68 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final newText = "$currentText$separator$_predictedText ";
       _postController.text = newText;
       _postController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
-      setState(() {
-        _predictedText = null;
-        _canPost = true;
-      });
+      setState(() { _predictedText = null; _canPost = true; });
       _onTextChanged(newText);
     }
   }
 
   void _showMediaSourceSelection({required bool isVideo}) {
     FocusScope.of(context).unfocus();
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(leading: Icon(Icons.camera_alt), title: Text("Camera"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
+              ListTile(leading: Icon(Icons.photo_library), title: Text("Gallery"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
+    final picker = ImagePicker();
+    try {
+      if (isVideo) {
+        final XFile? pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
+        if (pickedFile != null && mounted) {
+          final result = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile.path))));
+          if (result != null && result['file'] is File) {
+            setState(() { _mediaType = 'video'; _selectedMediaFiles = [result['file']]; _existingMediaUrls = []; _checkCanPost(); });
+          }
+        }
+      } else {
+        if (source == ImageSource.gallery) {
+          final List<XFile> pickedFiles = await picker.pickMultiImage(imageQuality: 80);
+          if (pickedFiles.isNotEmpty) {
+            setState(() { if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; } _mediaType = 'image'; _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path))); _checkCanPost(); });
+          }
+        } else {
+          final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 80);
+          if (pickedFile != null) {
+             setState(() { if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; } _mediaType = 'image'; _selectedMediaFiles.add(File(pickedFile.path)); _checkCanPost(); });
+          }
+        }
+      }
+    } catch (e) { debugPrint("Error picking media: $e"); }
+  }
+
+  void _removeFile(int index) {
+    setState(() { _selectedMediaFiles.removeAt(index); _checkCanPost(); if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) _mediaType = null; });
+  }
+
+  void _removeExistingUrl(int index) {
+    setState(() { _existingMediaUrls.removeAt(index); _checkCanPost(); if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) _mediaType = null; });
+  }
+
+  // --- VISIBILITY PICKER (Using BottomSheet to fix floating issue) ---
+  void _showVisibilityPicker() {
+    FocusScope.of(context).unfocus(); 
+    
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -291,21 +328,48 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             children: [
               SizedBox(height: 12),
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
-              SizedBox(height: 16),
-              ListTile(
-                leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
-                title: Text("Take from Camera"),
-                onTap: () {
-                  Navigator.pop(context);
-                  _pickMedia(ImageSource.camera, isVideo: isVideo);
-                },
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text("Who can see this?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ),
+              
+              if (_isAccountPrivate) ...[
+                 ListTile(
+                  leading: Icon(Icons.people, color: TwitterTheme.blue),
+                  title: Text("Followers"),
+                  subtitle: Text("Only your followers can see this"),
+                  trailing: _visibility == 'followers' ? Icon(Icons.check, color: TwitterTheme.blue) : null,
+                  onTap: () {
+                    setState(() => _visibility = 'followers');
+                    Navigator.pop(context);
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.public, color: Colors.grey),
+                  title: Text("Public"),
+                  subtitle: Text("Account is private (Switch in settings)"),
+                  enabled: false, 
+                ),
+              ] else ...[
+                ListTile(
+                  leading: Icon(Icons.public, color: TwitterTheme.blue),
+                  title: Text("Public"),
+                  subtitle: Text("Anyone on Sapa PNJ"),
+                  trailing: _visibility == 'public' ? Icon(Icons.check, color: TwitterTheme.blue) : null,
+                  onTap: () {
+                    setState(() => _visibility = 'public');
+                    Navigator.pop(context);
+                  },
+                ),
+              ],
+              
               ListTile(
-                leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
-                title: Text("Choose from Gallery"),
+                leading: Icon(Icons.lock, color: Colors.red),
+                title: Text("Only Me"),
+                trailing: _visibility == 'private' ? Icon(Icons.check, color: TwitterTheme.blue) : null,
                 onTap: () {
+                  setState(() => _visibility = 'private');
                   Navigator.pop(context);
-                  _pickMedia(ImageSource.gallery, isVideo: isVideo);
                 },
               ),
               SizedBox(height: 12),
@@ -316,77 +380,34 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
-    final picker = ImagePicker();
+  // Helper to get Icon and Text for the button
+  Widget _buildVisibilityButtonContent() {
+    IconData icon;
+    String label;
+    Color color = TwitterTheme.blue;
 
-    try {
-      if (isVideo) {
-        final XFile? pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
-        if (pickedFile != null && mounted) {
-          final result = await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile.path))),
-          );
-          if (result != null && result['file'] is File) {
-            setState(() {
-              _mediaType = 'video';
-              _selectedMediaFiles = [result['file']]; 
-              _existingMediaUrls = []; 
-              _checkCanPost();
-            });
-          }
-        }
-      } else {
-        if (source == ImageSource.gallery) {
-          final List<XFile> pickedFiles = await picker.pickMultiImage(imageQuality: 80);
-          if (pickedFiles.isNotEmpty) {
-            setState(() {
-              if (_mediaType == 'video') {
-                _selectedMediaFiles = [];
-                _existingMediaUrls = [];
-              }
-              _mediaType = 'image';
-              _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path)));
-              _checkCanPost();
-            });
-          }
-        } else {
-          final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 80);
-          if (pickedFile != null) {
-             setState(() {
-              if (_mediaType == 'video') {
-                _selectedMediaFiles = [];
-                _existingMediaUrls = [];
-              }
-              _mediaType = 'image';
-              _selectedMediaFiles.add(File(pickedFile.path));
-              _checkCanPost();
-            });
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint("Error picking media: $e");
+    if (_visibility == 'private') {
+      icon = Icons.lock;
+      label = "Only Me";
+      color = Colors.red;
+    } else if (_visibility == 'followers') {
+      icon = Icons.people;
+      label = "Followers";
+    } else {
+      icon = Icons.public;
+      label = "Public";
     }
-  }
 
-  void _removeFile(int index) {
-    setState(() {
-      _selectedMediaFiles.removeAt(index);
-      if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) {
-        _mediaType = null;
-      }
-      _checkCanPost();
-    });
-  }
-
-  void _removeExistingUrl(int index) {
-    setState(() {
-      _existingMediaUrls.removeAt(index);
-      if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) {
-        _mediaType = null;
-      }
-      _checkCanPost();
-    });
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 18),
+        SizedBox(width: 6),
+        Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+        SizedBox(width: 4),
+        Icon(Icons.keyboard_arrow_down, color: color, size: 18),
+      ],
+    );
   }
 
   Future<void> _submitPost() async {
@@ -403,27 +424,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final isImageSafe = await _checkImageSafety();
     if (!isImageSafe) return; 
 
-    // Prepare Data
-    final List<File> filesToUpload = _selectedMediaFiles;
-    final List<String> currentUrls = _existingMediaUrls;
-    final String? mediaType = _mediaType;
-    final bool isEditing = _isEditing;
-    final String? postId = widget.postId;
-    
-    // Visibility Logic
-    String finalVisibility = _visibility;
-    if (_communityId != null) {
-        finalVisibility = 'public'; // Broadcasting is always public
-    } else if (_isAccountPrivate && _visibility == 'public') {
-      finalVisibility = 'followers';
-    }
-
-    final String uid = user.uid; // Actual Operator ID
-    final String uName = _displayName; // Display Name (User)
-    final String uEmail = _userEmail;
-    final int uIcon = _avatarIconId;
-    final String uHex = _avatarHex;
-    final String? uProfileImg = _displayAvatarUrl;
+    // Determine Final Display Identity
+    final String finalUserName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
+    final String? finalUserAvatar = _postAsCommunity ? _communityIcon : _myAvatarUrl;
+    final int finalUserIconId = _postAsCommunity ? 0 : _myAvatarIconId;
+    final String finalUserHex = _postAsCommunity ? '' : _myAvatarHex;
 
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop();
@@ -434,46 +439,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _BackgroundUploader.startUploadSequence(
         overlayState: overlayState,
         text: text,
-        filesToUpload: filesToUpload, 
-        existingMediaUrls: currentUrls, 
-        mediaType: mediaType,
-        visibility: finalVisibility,
-        isEditing: isEditing,
-        postId: postId,
-        uid: uid,
-        userName: uName,
-        userEmail: uEmail,
-        avatarIconId: uIcon,
-        avatarHex: uHex,
-        profileImageUrl: uProfileImg,
+        filesToUpload: _selectedMediaFiles, 
+        existingMediaUrls: _existingMediaUrls, 
+        mediaType: _mediaType,
+        visibility: _visibility,
+        isEditing: _isEditing,
+        postId: widget.postId,
+        
+        uid: user.uid, // ALWAYS link to real user ID for tracking
+        userName: finalUserName,
+        userEmail: _myUserEmail,
+        avatarIconId: finalUserIconId,
+        avatarHex: finalUserHex,
+        profileImageUrl: finalUserAvatar,
         
         communityId: _communityId,
         communityName: _communityName,
         communityIcon: _communityIcon,
-        communityVerified: _communityVerified, // PASS VERIFIED STATUS
+        communityVerified: _communityVerified,
+        
+        isCommunityIdentity: _postAsCommunity,
       );
     }
-  }
-
-  void _showPrivacyRestrictionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.lock, color: Colors.orange),
-            SizedBox(width: 8),
-            Text("Private Account"),
-          ],
-        ),
-        content: Text(
-          "Your account is set to Private. You cannot create Public posts. Switch your account to Public in Account Center to change this."
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text("OK")),
-        ],
-      ),
-    );
   }
 
   @override
@@ -491,6 +478,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
+    // Determine current display avatar based on toggle
+    final String? currentAvatarUrl = _postAsCommunity ? _communityIcon : _myAvatarUrl;
+    final String currentDisplayName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
+
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
@@ -498,70 +489,29 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           icon: Icon(Icons.close, color: theme.primaryColor),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: _isBroadcasting 
+        title: _isCommunityContext
             ? Row(
                 children: [
-                  Icon(Icons.campaign, color: TwitterTheme.blue, size: 20),
+                  Icon(Icons.groups, color: TwitterTheme.blue, size: 20),
                   SizedBox(width: 8),
-                  Text("Broadcasting", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Flexible(child: Text(_communityName ?? "Community", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                 ],
               ) 
             : Text(_isEditing ? "Edit Post" : "Create Post", style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: false,
         actions: [
-          if (!_isBroadcasting) 
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10.0),
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _visibility,
-                    icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
-                    style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.bold, fontSize: 13),
-                    onChanged: (String? newValue) {
-                      if (newValue == 'public_attempt' && _isAccountPrivate) {
-                        _showPrivacyRestrictionDialog();
-                        return;
-                      }
-                      if (newValue != null && newValue != 'public_attempt') {
-                        setState(() => _visibility = newValue);
-                      }
-                    },
-                    items: [
-                      if (_isAccountPrivate)
-                        DropdownMenuItem(value: 'followers', child: Row(children: [Icon(Icons.people, size: 16, color: Colors.blue), SizedBox(width: 6), Text("Followers")]))
-                      else
-                        DropdownMenuItem(value: 'public', child: Row(children: [Icon(Icons.public, size: 16, color: Colors.blue), SizedBox(width: 6), Text("Public")])),
-                      
-                      if (_isAccountPrivate)
-                        DropdownMenuItem(value: 'public_attempt', child: Row(children: [Icon(Icons.public, size: 16, color: Colors.grey), SizedBox(width: 6), Text("Public", style: TextStyle(color: Colors.grey))])),
-
-                      DropdownMenuItem(value: 'private', child: Row(children: [Icon(Icons.lock, size: 16, color: Colors.red), SizedBox(width: 6), Text("Only Me")])),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: ElevatedButton(
               onPressed: _canPost && !_isProcessing ? _submitPost : null,
-              child: _isProcessing 
-                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : Text(_isEditing ? 'Save' : 'Post'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: TwitterTheme.blue,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: StadiumBorder()
               ),
+              child: Text("Post"),
             ),
-          ),
+          )
         ],
       ),
       body: Stack(
@@ -569,160 +519,167 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           Positioned.fill(
             child: SingleChildScrollView(
               padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: bottomInset + 80),
-              child: Row(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: _displayAvatarUrl != null ? Colors.transparent : AvatarHelper.getColor(_avatarHex),
-                    backgroundImage: _displayAvatarUrl != null ? CachedNetworkImageProvider(_displayAvatarUrl!) : null,
-                    child: _displayAvatarUrl == null ? Icon(AvatarHelper.getIcon(_avatarIconId), color: Colors.white, size: 24) : null,
-                  ),
-                  SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _isBroadcasting && _communityName != null ? _communityName! : _displayName, 
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold, 
-                            fontSize: 16,
-                            color: _isBroadcasting ? TwitterTheme.blue : null
-                          )
-                        ),
-                        if (_isBroadcasting)
-                          Text("Posting as Community Identity", style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)),
-                        
-                        TextField(
-                          controller: _postController,
-                          focusNode: _postFocusNode,
-                          onChanged: _onTextChanged,
-                          autofocus: !_isEditing,
-                          maxLines: null,
-                          style: TextStyle(fontSize: 18),
-                          decoration: InputDecoration(
-                            hintText: _isBroadcasting ? "What's the official news?" : "What's happening?",
-                            border: InputBorder.none,
+                  // --- IDENTITY TOGGLE (Only for Authorized Staff) ---
+                  if (_hasOfficialAuthority)
+                    Container(
+                      margin: EdgeInsets.only(bottom: 16),
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: theme.cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: theme.dividerColor)
+                      ),
+                      child: Row(
+                        children: [
+                          Text("Post Identity:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Spacer(),
+                          ChoiceChip(
+                            label: Text("Me"),
+                            selected: !_postAsCommunity,
+                            onSelected: (val) => setState(() => _postAsCommunity = false),
+                            visualDensity: VisualDensity.compact,
                           ),
-                        ),
-                        
-                        // --- MULTI IMAGE PREVIEW SECTION ---
-                        if (_existingMediaUrls.isNotEmpty || _selectedMediaFiles.isNotEmpty)
-                          Container(
-                            margin: EdgeInsets.only(top: 12),
-                            height: 120, // Height for horizontal scroll
-                            child: ListView(
-                              scrollDirection: Axis.horizontal,
-                              children: [
-                                // 1. Show Existing URLs (Edit Mode)
-                                ..._existingMediaUrls.asMap().entries.map((entry) {
-                                  return _buildPreviewItem(
-                                    imageProvider: CachedNetworkImageProvider(entry.value),
-                                    onRemove: () => _removeExistingUrl(entry.key),
-                                    isVideo: _mediaType == 'video',
-                                  );
-                                }),
-                                
-                                // 2. Show New Files
-                                ..._selectedMediaFiles.asMap().entries.map((entry) {
-                                  return _buildPreviewItem(
-                                    imageProvider: FileImage(entry.value),
-                                    onRemove: () => _removeFile(entry.key),
-                                    isVideo: _mediaType == 'video',
-                                  );
-                                }),
-                              ],
+                          SizedBox(width: 8),
+                          ChoiceChip(
+                            label: Text("Community"),
+                            selected: _postAsCommunity,
+                            onSelected: (val) => setState(() => _postAsCommunity = true),
+                            selectedColor: TwitterTheme.blue.withOpacity(0.2),
+                            labelStyle: TextStyle(color: _postAsCommunity ? TwitterTheme.blue : null),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: currentAvatarUrl != null ? Colors.transparent : AvatarHelper.getColor(_myAvatarHex),
+                        backgroundImage: currentAvatarUrl != null ? CachedNetworkImageProvider(currentAvatarUrl) : null,
+                        child: currentAvatarUrl == null 
+                            ? (_postAsCommunity 
+                                ? Icon(Icons.groups, color: Colors.white) 
+                                : Icon(AvatarHelper.getIcon(_myAvatarIconId), color: Colors.white)) 
+                            : null,
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              currentDisplayName, 
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold, 
+                                fontSize: 16,
+                                color: _postAsCommunity ? TwitterTheme.blue : null
+                              )
                             ),
-                          ),
-                        
-                        if (_predictedText != null)
-                          GestureDetector(
-                            onTap: _acceptPrediction,
-                            child: Container(
-                              margin: EdgeInsets.only(top: 8),
-                              padding: EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                  color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.auto_awesome, size: 16, color: TwitterTheme.blue),
-                                  SizedBox(width: 6),
-                                  Flexible(
-                                    child: Text(
-                                      "Suggestion: ...$_predictedText", 
-                                      style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
+                            // --- CONTEXT LABEL LOGIC ---
+                            if (_isCommunityContext)
+                              Text(
+                                _postAsCommunity 
+                                  ? "Posting as Community Identity"
+                                  : "Posting in $_communityName",
+                                style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)
+                              ),
+                            
+                            TextField(
+                              controller: _postController,
+                              focusNode: _postFocusNode,
+                              onChanged: _onTextChanged,
+                              autofocus: !_isEditing,
+                              maxLines: null,
+                              style: TextStyle(fontSize: 18),
+                              decoration: InputDecoration(
+                                hintText: _postAsCommunity ? "What's the official news?" : "What's happening?",
+                                border: InputBorder.none,
                               ),
                             ),
-                          ),
-                      ],
-                    ),
+                            
+                            // PREVIEWS
+                            if (_existingMediaUrls.isNotEmpty || _selectedMediaFiles.isNotEmpty)
+                              Container(
+                                height: 100,
+                                margin: EdgeInsets.only(top: 10),
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  children: [
+                                    ..._existingMediaUrls.asMap().entries.map((e) => _buildPreviewItem(CachedNetworkImageProvider(e.value), () => _removeExistingUrl(e.key), _mediaType == 'video')),
+                                    ..._selectedMediaFiles.asMap().entries.map((e) => _buildPreviewItem(FileImage(e.value), () => _removeFile(e.key), _mediaType == 'video')),
+                                  ],
+                                ),
+                              ),
+                            
+                            if (_predictedText != null)
+                              GestureDetector(
+                                onTap: _acceptPrediction,
+                                child: Container(
+                                  margin: EdgeInsets.only(top: 8),
+                                  padding: EdgeInsets.all(8),
+                                  decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                                  child: Text("Suggestion: $_predictedText", style: TextStyle(color: TwitterTheme.blue)),
+                                ),
+                              )
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
           ),
+          
+          // BOTTOM BAR
           Positioned(
             left: 0, right: 0, bottom: bottomInset,
             child: Container(
-              decoration: BoxDecoration(
-                color: theme.scaffoldBackgroundColor,
-                border: Border(top: BorderSide(color: theme.dividerColor)),
-              ),
+              color: theme.scaffoldBackgroundColor,
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: SafeArea(
-                top: false,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(Icons.image, color: TwitterTheme.blue),
-                      onPressed: () => _showMediaSourceSelection(isVideo: false),
+              child: Row(
+                children: [
+                  IconButton(icon: Icon(Icons.image, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: false)),
+                  IconButton(icon: Icon(Icons.videocam, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: true)),
+                  
+                  // --- VISIBILITY BUTTON ---
+                  if (!_isCommunityContext)
+                    InkWell(
+                      onTap: _showVisibilityPicker,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: _buildVisibilityButtonContent(),
+                      ),
                     ),
-                    IconButton(
-                      icon: Icon(Icons.videocam, color: TwitterTheme.blue),
-                      onPressed: () => _showMediaSourceSelection(isVideo: true),
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
-          ),
+          )
         ],
       ),
     );
   }
 
-  Widget _buildPreviewItem({required ImageProvider imageProvider, required VoidCallback onRemove, required bool isVideo}) {
+  Widget _buildPreviewItem(ImageProvider imageProvider, VoidCallback onRemove, bool isVideo) {
     return Stack(
       children: [
         Container(
-          width: 100,
-          margin: EdgeInsets.only(right: 8),
-          decoration: BoxDecoration(
-            color: Colors.black,
-            borderRadius: BorderRadius.circular(8),
-            image: !isVideo ? DecorationImage(image: imageProvider, fit: BoxFit.cover) : null,
-          ),
-          child: isVideo 
-              ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white)) 
-              : null,
+          width: 100, margin: EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8), image: !isVideo ? DecorationImage(image: imageProvider, fit: BoxFit.cover) : null),
+          child: isVideo ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white)) : null,
         ),
-        Positioned(
-          top: 4, right: 12,
-          child: GestureDetector(
-            onTap: onRemove,
-            child: Container(
-              padding: EdgeInsets.all(2),
-              decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-              child: Icon(Icons.close, size: 14, color: Colors.white),
-            ),
-          ),
-        )
+        Positioned(top: 4, right: 12, child: GestureDetector(onTap: onRemove, child: Container(padding: EdgeInsets.all(2), decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: Icon(Icons.close, size: 14, color: Colors.white))))
       ],
     );
   }
@@ -748,6 +705,7 @@ class _BackgroundUploader {
     String? communityName,
     String? communityIcon,
     bool? communityVerified,
+    bool isCommunityIdentity = false,
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -764,154 +722,86 @@ class _BackgroundUploader {
     overlayState.insert(overlayEntry);
 
     _processUpload(
-      text: text,
-      filesToUpload: filesToUpload,
-      existingMediaUrls: existingMediaUrls,
-      mediaType: mediaType,
-      visibility: visibility,
-      isEditing: isEditing,
-      postId: postId,
-      uid: uid,
-      userName: userName,
-      userEmail: userEmail,
-      avatarIconId: avatarIconId,
-      avatarHex: avatarHex,
-      profileImageUrl: profileImageUrl,
-      communityId: communityId,
-      communityName: communityName,
-      communityIcon: communityIcon,
-      communityVerified: communityVerified,
-      onProgress: (status) {
-        overlayKey.currentState?.updateStatus(status);
-      },
-      onSuccess: () {
+      text, filesToUpload, existingMediaUrls, mediaType, visibility, isEditing, postId,
+      uid, userName, userEmail, avatarIconId, avatarHex, profileImageUrl, communityId,
+      communityName, communityIcon, communityVerified, isCommunityIdentity,
+      (status) => overlayKey.currentState?.updateStatus(status),
+      () {
         overlayKey.currentState?.handleSuccess();
-        Future.delayed(Duration(seconds: 7), () {
-           if (overlayEntry.mounted) overlayEntry.remove();
-        });
+        Future.delayed(Duration(seconds: 7), () { if (overlayEntry.mounted) overlayEntry.remove(); });
       },
-      onFailure: (error) {
+      (error) {
         overlayKey.currentState?.handleFailure(error.toString());
-        Future.delayed(Duration(seconds: 4), () {
-          if (overlayEntry.mounted) overlayEntry.remove();
-        });
+        Future.delayed(Duration(seconds: 4), () { if (overlayEntry.mounted) overlayEntry.remove(); });
       },
     );
   }
 
-  static Future<void> _processUpload({
-    required String text,
-    required List<File> filesToUpload,
-    required List<String> existingMediaUrls,
-    String? mediaType,
-    required String visibility,
-    required bool isEditing,
-    String? postId,
-    required String uid,
-    required String userName,
-    required String userEmail,
-    required int avatarIconId,
-    required String avatarHex,
-    required String? profileImageUrl,
-    required String? communityId,
-    String? communityName,
-    String? communityIcon,
-    bool? communityVerified,
-    required Function(String) onProgress,
-    required VoidCallback onSuccess,
-    required Function(dynamic) onFailure,
-  }) async {
+  static Future<void> _processUpload(
+    String text, List<File> files, List<String> urls, String? type, String vis, bool edit, String? pid,
+    String uid, String uName, String uEmail, int icon, String hex, String? img, String? comId,
+    String? comName, String? comIcon, bool? comVerified, bool isComIdentity,
+    Function(String) onProgress, VoidCallback onSuccess, Function(dynamic) onFailure,
+  ) async {
     try {
-      List<String> finalUrls = [...existingMediaUrls];
-
-      // 1. Process New Files
-      if (filesToUpload.isNotEmpty) {
+      List<String> finalUrls = [...urls];
+      if (files.isNotEmpty) {
         int count = 1;
-        for (var file in filesToUpload) {
-          onProgress("Uploading ${count}/${filesToUpload.length}...");
-          
+        for (var file in files) {
+          onProgress("Uploading ${count}/${files.length}...");
           File fileToUp = file;
-          
-          // Compress Video
-          if (mediaType == 'video') {
+          if (type == 'video') {
              try {
-                final MediaInfo? info = await VideoCompress.compressVideo(
-                  file.path,
-                  quality: VideoQuality.MediumQuality,
-                  deleteOrigin: false,
-                );
+                final MediaInfo? info = await VideoCompress.compressVideo(file.path, quality: VideoQuality.MediumQuality, deleteOrigin: false);
                 if (info != null && info.file != null) fileToUp = info.file!;
-             } catch(e) { debugPrint("Compress fail: $e"); }
+             } catch(e) {}
           }
-
-          String? url = await _cloudinaryService.uploadMedia(fileToUp);
+          String? url = await CloudinaryService().uploadMedia(fileToUp);
           if (url != null) finalUrls.add(url);
-          
           count++;
         }
       }
 
-      if (finalUrls.isEmpty && text.isEmpty) {
-        onFailure("No content to post.");
-        return;
-      }
+      if (finalUrls.isEmpty && text.isEmpty) { onFailure("No content"); return; }
 
-      // 2. Prepare Data
       final Map<String, dynamic> postData = {
         'text': text,
-        'mediaType': mediaType,
-        'visibility': visibility, 
+        'mediaType': type,
+        'visibility': vis, 
         'isUploading': false,
         'mediaUrls': finalUrls, 
-        'mediaUrl': finalUrls.isNotEmpty ? finalUrls.first : null, // Backward compat
+        'mediaUrl': finalUrls.isNotEmpty ? finalUrls.first : null,
       };
 
-      if (isEditing && postId != null) {
+      if (edit && pid != null) {
         postData['editedAt'] = FieldValue.serverTimestamp();
-        await _firestore.collection('posts').doc(postId).update(postData);
+        await FirebaseFirestore.instance.collection('posts').doc(pid).update(postData);
       } else {
         postData.addAll({
           'timestamp': FieldValue.serverTimestamp(),
-          'userId': uid, // The Real Operator ID
-          'userName': userName, // User Name
-          'userEmail': userEmail,
-          'avatarIconId': avatarIconId,
-          'avatarHex': avatarHex,
-          'profileImageUrl': profileImageUrl,
+          'userId': uid, // Operator ID
+          'userName': uName, // Display Name
+          'userEmail': uEmail,
+          'avatarIconId': icon,
+          'avatarHex': hex,
+          'profileImageUrl': img,
           'likes': {},
           'commentCount': 0,
           'repostedBy': [],
         });
 
-        if (communityId != null) {
-          postData['communityId'] = communityId;
-          postData['isCommunityPost'] = true;
-          // SAVE COMMUNITY DISPLAY INFO
-          postData['communityName'] = communityName;
-          postData['communityIcon'] = communityIcon;
-          postData['communityVerified'] = communityVerified; // Important: Save verification status
+        if (comId != null) {
+          postData['communityId'] = comId;
+          postData['communityName'] = comName;
+          postData['communityIcon'] = comIcon;
+          postData['communityVerified'] = comVerified;
+          postData['isCommunityPost'] = isComIdentity; // True = Official, False = Member post
         }
 
-        await _firestore.collection('posts').add(postData);
+        await FirebaseFirestore.instance.collection('posts').add(postData);
       }
 
-      // 3. Notify Followers
-      if (visibility == 'public' || visibility == 'followers') {
-        if (communityId == null) {
-          await _firestore.collection('users').doc(uid).collection('notifications').add({
-            'type': 'upload_complete',
-            'senderId': 'system', 
-            'postId': null,
-            'postTextSnippet': 'Your post was uploaded successfully.',
-            'timestamp': FieldValue.serverTimestamp(),
-            'isRead': false,
-          });
-        }
-      }
-
-      // Cleanup
-      if (mediaType == 'video') await VideoCompress.deleteAllCache();
-
+      if (type == 'video') await VideoCompress.deleteAllCache();
       onSuccess();
     } catch (e) {
       onFailure(e);
@@ -922,9 +812,7 @@ class _BackgroundUploader {
 class _PostUploadOverlay extends StatefulWidget {
   final VoidCallback onDismissRequest;
   const _PostUploadOverlay({super.key, required this.onDismissRequest});
-
-  @override
-  State<_PostUploadOverlay> createState() => _PostUploadOverlayState();
+  @override State<_PostUploadOverlay> createState() => _PostUploadOverlayState();
 }
 
 class _PostUploadOverlayState extends State<_PostUploadOverlay> {
@@ -933,78 +821,50 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isSuccess = false;
   bool _isError = false;
   String _message = "Uploading media...";
-  
   Timer? _autoDismissTimer;
 
   double get _targetTop => MediaQuery.of(context).padding.top + 10;
   double get _targetRight => 12.0;
   double get _miniRight => 60.0; 
 
-  @override
-  void dispose() {
-    _autoDismissTimer?.cancel();
-    super.dispose();
-  }
-
-  void updateStatus(String status) {
-    if (!mounted) return;
-    setState(() {
-      _message = status;
-    });
-  }
-
-  void dismissToIcon() {
-    setState(() { _isCardVisible = false; });
-    Future.delayed(Duration(milliseconds: 400), () {
-      if (mounted) setState(() { _isMiniVisible = true; });
-    });
-  }
-
+  @override void dispose() { _autoDismissTimer?.cancel(); super.dispose(); }
+  void updateStatus(String status) { if (!mounted) return; setState(() => _message = status); }
+  void dismissToIcon() { setState(() => _isCardVisible = false); Future.delayed(Duration(milliseconds: 400), () { if (mounted) setState(() => _isMiniVisible = true); }); }
+  
+  // --- FIX: Missing method added ---
   void _expandToCard() {
     setState(() { _isMiniVisible = false; });
     Future.delayed(Duration(milliseconds: 300), () {
       if (mounted) {
         setState(() { _isCardVisible = true; });
         _autoDismissTimer?.cancel();
-        _autoDismissTimer = Timer(Duration(seconds: 2), () {
-          dismissToIcon();
-        });
+        _autoDismissTimer = Timer(Duration(seconds: 2), dismissToIcon);
       }
     });
   }
 
-  void handleSuccess() {
-    setState(() { _isSuccess = true; _message = "Posted"; });
-    if (_isMiniVisible) {
-      Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); });
-    } else if (_isCardVisible) {
-      Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isCardVisible = false); });
-    }
-  }
-
-  void handleFailure(String error) {
-    setState(() { _isError = true; _message = "Failed"; });
-    if (!_isCardVisible) setState(() => _isCardVisible = true);
-  }
+  void handleSuccess() { setState(() { _isSuccess = true; _message = "Posted"; }); if (_isMiniVisible) Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); }); else if (_isCardVisible) Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isCardVisible = false); }); }
+  void handleFailure(String error) { setState(() { _isError = true; _message = "Failed"; }); if (!_isCardVisible) setState(() => _isCardVisible = true); }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Stack(
       children: [
         AnimatedPositioned(
-          duration: Duration(milliseconds: 400),
-          curve: Curves.easeOutQuart,
-          top: _targetTop, 
-          right: _isMiniVisible ? _miniRight : _targetRight, 
+          duration: Duration(milliseconds: 400), curve: Curves.easeOutQuart,
+          top: _targetTop, right: _isMiniVisible ? _miniRight : _targetRight, 
           child: AnimatedOpacity(
-            duration: Duration(milliseconds: 300),
-            opacity: _isMiniVisible ? 1.0 : 0.0,
+            duration: Duration(milliseconds: 300), 
+            opacity: _isMiniVisible ? 1.0 : 0.0, 
             child: GestureDetector(
               onTap: _expandToCard,
               child: Material(
                 elevation: 4,
                 shape: CircleBorder(),
-                color: _isSuccess ? Colors.green : TwitterTheme.white,
+                color: _isSuccess ? Colors.green : theme.cardColor,
                 child: Container(
                   width: 36, height: 36, padding: EdgeInsets.all(8),
                   child: _isSuccess 
@@ -1016,81 +876,20 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
           ),
         ),
         AnimatedPositioned(
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOutBack,
-          top: _isCardVisible ? MediaQuery.of(context).padding.top + 10 : _targetTop,
-          left: _isCardVisible ? 16 : MediaQuery.of(context).size.width - 50, 
-          right: _isCardVisible ? 16 : _targetRight, 
+          duration: Duration(milliseconds: 500), curve: Curves.easeInOutBack,
+          top: _isCardVisible ? _targetTop : -100, left: 16, right: _targetRight, 
           child: AnimatedOpacity(
-            duration: Duration(milliseconds: 300),
-            opacity: _isCardVisible ? 1.0 : 0.0,
-            child: Transform.scale(
-              scale: _isCardVisible ? 1.0 : 0.1, 
-              child: _UploadCard(
-                key: UniqueKey(), // FIX: UniqueKey for Dismissible
-                isSuccess: _isSuccess,
-                isError: _isError,
-                message: _message,
-                onDismiss: widget.onDismissRequest,
-              ),
+            duration: Duration(milliseconds: 300), opacity: _isCardVisible ? 1.0 : 0.0,
+            child: Material(
+              elevation: 8, borderRadius: BorderRadius.circular(12), color: theme.cardColor,
+              child: Padding(padding: EdgeInsets.all(16), child: Row(children: [
+                if (_isSuccess) Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) Icon(Icons.error, color: Colors.red) else SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
+              ])),
             ),
           ),
         )
       ],
-    );
-  }
-}
-
-class _UploadCard extends StatelessWidget {
-  final bool isSuccess;
-  final bool isError;
-  final String message;
-  final VoidCallback onDismiss;
-
-  const _UploadCard({super.key, required this.isSuccess, required this.isError, required this.message, required this.onDismiss});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Dismissible(
-      key: UniqueKey(),
-      direction: DismissDirection.horizontal,
-      onDismissed: (_) => onDismiss(),
-      child: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(12),
-        color: isDark ? TwitterTheme.darkGrey : Colors.white,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  if (isSuccess) Icon(Icons.check_circle, color: TwitterTheme.blue)
-                  else if (isError) Icon(Icons.error, color: Colors.red)
-                  else SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(message, style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black)),
-                  ),
-                  Container(width: 4, height: 24, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.5), borderRadius: BorderRadius.circular(2)))
-                ],
-              ),
-              if (!isSuccess && !isError)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: LinearProgressIndicator(
-                    backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-                    valueColor: AlwaysStoppedAnimation(TwitterTheme.blue),
-                  ),
-                )
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
