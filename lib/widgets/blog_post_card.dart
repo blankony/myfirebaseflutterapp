@@ -1,20 +1,21 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:share_plus/share_plus.dart'; 
-import 'package:url_launcher/url_launcher.dart'; 
-import '../screens/post_detail_screen.dart'; 
-import '../screens/dashboard/profile_page.dart'; 
-import '../screens/community/community_detail_screen.dart'; 
-import '../screens/image_viewer_screen.dart'; 
-import 'package:timeago/timeago.dart' as timeago; 
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../screens/post_detail_screen.dart';
+import '../screens/dashboard/profile_page.dart';
+import '../screens/community/community_detail_screen.dart';
+import '../screens/image_viewer_screen.dart';
+import 'package:timeago/timeago.dart' as timeago;
 import '../main.dart';
-import 'package:flutter/services.dart'; 
-import 'package:cached_network_image/cached_network_image.dart'; 
-import 'package:video_player/video_player.dart'; 
+import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_player/video_player.dart';
 import '../services/overlay_service.dart';
-import '../services/moderation_service.dart'; 
+import '../services/moderation_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -23,37 +24,60 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 // --- DUMB WIDGET: Video Player ---
 class _VideoPlayerWidget extends StatelessWidget {
   final VideoPlayerController controller;
-  
-  const _VideoPlayerWidget({required this.controller});
+  final bool isThumbnail;
+
+  const _VideoPlayerWidget({
+    required this.controller,
+    this.isThumbnail = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     if (!controller.value.isInitialized) {
       return Container(
         color: Colors.black,
-        height: 300,
+        height: isThumbnail ? null : 300,
         width: double.infinity,
         child: Center(child: CircularProgressIndicator(color: TwitterTheme.blue)),
       );
     }
 
+    Widget videoDisplay;
+
+    if (isThumbnail) {
+      // Logic: Fill Center (Zoom/Crop to fill)
+      videoDisplay = SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: controller.value.size.width,
+            height: controller.value.size.height,
+            child: VideoPlayer(controller),
+          ),
+        ),
+      );
+    } else {
+      // Logic: Contain (Show full video)
+      videoDisplay = AspectRatio(
+        aspectRatio: controller.value.aspectRatio,
+        child: VideoPlayer(controller),
+      );
+    }
+
     return Container(
       color: Colors.black,
-      constraints: BoxConstraints(maxHeight: 400), 
+      constraints: isThumbnail ? null : BoxConstraints(maxHeight: 400),
       width: double.infinity,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          AspectRatio(
-            aspectRatio: controller.value.aspectRatio,
-            child: VideoPlayer(controller),
-          ),
-          Container(color: Colors.black.withOpacity(0.3)),
+          videoDisplay,
+          Container(color: Colors.black.withOpacity(0.2)),
           Center(
             child: Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withOpacity(0.25),
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 2),
               ),
@@ -68,20 +92,20 @@ class _VideoPlayerWidget extends StatelessWidget {
 
 // --- SMART WIDGET: Media Preview ---
 class _PostMediaPreview extends StatefulWidget {
-  final List<String> mediaUrls; 
+  final List<String> mediaUrls;
   final String? mediaType;
   final String text;
-  final Map<String, dynamic> postData; 
-  final String postId; 
-  final String heroContextId; 
-  final VideoPlayerController? videoController; 
+  final Map<String, dynamic> postData;
+  final String postId;
+  final String heroContextId;
+  final VideoPlayerController? videoController;
 
   const _PostMediaPreview({
     required this.mediaUrls,
     this.mediaType,
     required this.text,
-    required this.postData, 
-    required this.postId, 
+    required this.postData,
+    required this.postId,
     required this.heroContextId,
     this.videoController,
   });
@@ -91,7 +115,7 @@ class _PostMediaPreview extends StatefulWidget {
 }
 
 class _PostMediaPreviewState extends State<_PostMediaPreview> {
-  int _currentIndex = 0; 
+  int _currentIndex = 0;
 
   String? _getVideoId(String url) {
     if (url.contains('youtube.com') || url.contains('youtu.be')) {
@@ -100,7 +124,7 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
     }
     return null;
   }
-  
+
   String? _extractLinkInText() {
     final linkRegExp = RegExp(r'(https?:\/\/[^\s]+)');
     final match = linkRegExp.firstMatch(widget.text);
@@ -108,23 +132,27 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
   }
 
   void _navigateToViewer(BuildContext context, String url) {
-     final String heroTag = '${widget.heroContextId}_${widget.postId}_$url';
+    final String heroTag = '${widget.heroContextId}_${widget.postId}_$url';
 
-     Navigator.of(context).push(
+    Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
-        barrierColor: Colors.black, 
+        barrierColor: Colors.black, // Background color during transition
         pageBuilder: (_, __, ___) => ImageViewerScreen(
-          imageUrl: url, 
+          imageUrl: url,
           mediaType: widget.mediaType,
-          postData: widget.postData, 
+          postData: widget.postData,
           postId: widget.postId,
-          heroTag: heroTag, 
+          heroTag: heroTag,
           videoController: widget.videoController,
         ),
+        // --- HYBRID ANIMATION LOGIC ---
+        // 1. The PageRoute performs a FADE.
+        // 2. The HERO widget (inside the child) performs the ZOOM/SCALE automatically.
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
-        }
+        },
+        transitionDuration: const Duration(milliseconds: 300),
       ),
     );
   }
@@ -132,15 +160,29 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
+    // --- VIDEO PREVIEW (Uniform 4:3 Ratio) ---
     if (widget.mediaType == 'video' && widget.mediaUrls.isNotEmpty && widget.videoController != null) {
-       return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: GestureDetector(
-            onTap: () => _navigateToViewer(context, widget.mediaUrls.first),
-            child: _VideoPlayerWidget(controller: widget.videoController!),
+      final String videoUrl = widget.mediaUrls.first;
+      final String heroTag = '${widget.heroContextId}_${widget.postId}_$videoUrl';
+
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: GestureDetector(
+          onTap: () => _navigateToViewer(context, videoUrl),
+          child: Hero(
+            tag: heroTag,
+            // AspectRatio 4:3 ensures uniform height with single-image posts
+            child: AspectRatio(
+              aspectRatio: 4 / 3,
+              child: _VideoPlayerWidget(
+                controller: widget.videoController!,
+                isThumbnail: true, // Forces "BoxFit.cover" logic
+              ),
+            ),
           ),
-       );
+        ),
+      );
     }
 
     if (widget.mediaUrls.isNotEmpty) {
@@ -150,47 +192,46 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
         borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
-            isMulti 
-            ? AspectRatio(
-                aspectRatio: 1.0, 
-                child: PageView.builder(
-                  itemCount: widget.mediaUrls.length,
-                  onPageChanged: (index) {
-                    setState(() => _currentIndex = index);
-                  },
-                  itemBuilder: (context, index) {
-                    final url = widget.mediaUrls[index];
-                    return GestureDetector(
-                      onTap: () => _navigateToViewer(context, url),
+            isMulti
+                ? AspectRatio(
+                    aspectRatio: 1.0,
+                    child: PageView.builder(
+                      itemCount: widget.mediaUrls.length,
+                      onPageChanged: (index) {
+                        setState(() => _currentIndex = index);
+                      },
+                      itemBuilder: (context, index) {
+                        final url = widget.mediaUrls[index];
+                        return GestureDetector(
+                          onTap: () => _navigateToViewer(context, url),
+                          child: Hero(
+                            tag: '${widget.heroContextId}_${widget.postId}_$url',
+                            child: CachedNetworkImage(
+                              imageUrl: url,
+                              fit: BoxFit.cover,
+                              placeholder: (context, url) => Container(color: theme.dividerColor.withOpacity(0.1)),
+                              errorWidget: (context, url, error) => Icon(Icons.error),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  )
+                : AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: GestureDetector(
+                      onTap: () => _navigateToViewer(context, widget.mediaUrls.first),
                       child: Hero(
-                        tag: '${widget.heroContextId}_${widget.postId}_$url',
+                        tag: '${widget.heroContextId}_${widget.postId}_${widget.mediaUrls.first}',
                         child: CachedNetworkImage(
-                          imageUrl: url,
+                          imageUrl: widget.mediaUrls.first,
                           fit: BoxFit.cover,
                           placeholder: (context, url) => Container(color: theme.dividerColor.withOpacity(0.1)),
                           errorWidget: (context, url, error) => Icon(Icons.error),
                         ),
                       ),
-                    );
-                  },
-                ),
-              )
-            : AspectRatio(
-                aspectRatio: 4 / 3, 
-                child: GestureDetector(
-                  onTap: () => _navigateToViewer(context, widget.mediaUrls.first),
-                  child: Hero(
-                    tag: '${widget.heroContextId}_${widget.postId}_${widget.mediaUrls.first}',
-                    child: CachedNetworkImage( 
-                      imageUrl: widget.mediaUrls.first,
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) => Container(color: theme.dividerColor.withOpacity(0.1)),
-                      errorWidget: (context, url, error) => Icon(Icons.error),
                     ),
                   ),
-                ),
-              ),
-
             if (isMulti)
               Positioned(
                 top: 12,
@@ -210,13 +251,13 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
           ],
         ),
       );
-    } 
-    
+    }
+
     final externalLink = _extractLinkInText();
     final youtubeId = externalLink != null ? _getVideoId(externalLink) : null;
-    
+
     if (youtubeId != null) {
-      return AspectRatio( 
+      return AspectRatio(
         aspectRatio: 16 / 9,
         child: GestureDetector(
           onTap: () async {
@@ -228,7 +269,7 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
           child: Container(
             margin: const EdgeInsets.only(top: 12),
             decoration: BoxDecoration(
-              color: Colors.red.shade900, 
+              color: Colors.red.shade900,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Center(
@@ -245,7 +286,7 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
         ),
       );
     }
-    
+
     return const SizedBox.shrink();
   }
 }
@@ -254,13 +295,13 @@ class BlogPostCard extends StatefulWidget {
   final String postId;
   final Map<String, dynamic> postData;
   final bool isOwner;
-  final bool isClickable; 
+  final bool isClickable;
   final bool isDetailView;
-  final String heroContextId; 
-  final VideoPlayerController? preloadedController; 
-  final bool isPinned; 
+  final String heroContextId;
+  final VideoPlayerController? preloadedController;
+  final bool isPinned;
   final Function(String, bool)? onPinToggle;
-  final String? currentProfileUserId; 
+  final String? currentProfileUserId;
 
   const BlogPostCard({
     super.key,
@@ -269,9 +310,9 @@ class BlogPostCard extends StatefulWidget {
     required this.isOwner,
     this.isClickable = true,
     this.isDetailView = false,
-    this.heroContextId = 'feed', 
+    this.heroContextId = 'feed',
     this.preloadedController,
-    this.isPinned = false, 
+    this.isPinned = false,
     this.onPinToggle,
     this.currentProfileUserId,
   });
@@ -294,19 +335,24 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   bool _isSharing = false;
   int _likeCount = 0;
   int _repostCount = 0;
-  
+
   late bool _localIsPinned;
 
   VideoPlayerController? _videoController;
-  bool _isVideoOwner = false; 
-  
+  bool _isVideoOwner = false;
+
+  // --- COMMUNITY PERMISSIONS STATE ---
+  StreamSubscription? _communityRoleSubscription;
+  bool _isCommunityAdmin = false;
+
   @override
   void initState() {
     super.initState();
-    _localIsPinned = widget.isPinned; 
+    _localIsPinned = widget.isPinned;
     _syncState();
     _initVideoController();
-    
+    _checkCommunityPermissions();
+
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
 
@@ -315,6 +361,28 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
     _repostController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
+  }
+
+  void _checkCommunityPermissions() {
+    final user = _auth.currentUser;
+    final String? communityId = widget.postData['communityId'];
+
+    if (user != null && communityId != null) {
+      _communityRoleSubscription = _firestore.collection('communities').doc(communityId).snapshots().listen((snapshot) {
+        if (mounted && snapshot.exists) {
+          final data = snapshot.data();
+          if (data != null) {
+            final String ownerId = data['ownerId'];
+            final List admins = data['admins'] ?? [];
+            final bool isAdmin = (user.uid == ownerId) || admins.contains(user.uid);
+
+            if (_isCommunityAdmin != isAdmin) {
+              setState(() => _isCommunityAdmin = isAdmin);
+            }
+          }
+        }
+      });
+    }
   }
 
   void _initVideoController() {
@@ -334,7 +402,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
             final duration = _videoController!.value.duration;
             final targetPosition = duration.inSeconds > 10 ? Duration(seconds: 10) : duration;
             _videoController!.seekTo(targetPosition).then((_) {
-               if(mounted) setState((){}); 
+              if (mounted) setState(() {});
             });
             _videoController!.setVolume(0);
             _videoController!.pause();
@@ -349,6 +417,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.didUpdateWidget(oldWidget);
     if (oldWidget.postData != widget.postData) {
       _syncState();
+      
+      if (oldWidget.postData['communityId'] != widget.postData['communityId']) {
+        _communityRoleSubscription?.cancel();
+        _checkCommunityPermissions();
+      }
+
       if (oldWidget.postData['mediaUrl'] != widget.postData['mediaUrl']) {
         if (_isVideoOwner) {
           _videoController?.dispose();
@@ -367,7 +441,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final currentUser = _auth.currentUser;
     final likes = widget.postData['likes'] as Map<String, dynamic>? ?? {};
     final reposts = widget.postData['repostedBy'] as List? ?? [];
-    
+
     if (mounted) {
       setState(() {
         _isLiked = currentUser != null && likes.containsKey(currentUser.uid);
@@ -377,14 +451,15 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       });
     }
   }
-  
+
   @override
   void dispose() {
+    _communityRoleSubscription?.cancel();
     _likeController.dispose();
     _shareController.dispose();
     _repostController.dispose();
     _editController.dispose();
-    
+
     if (_isVideoOwner) {
       _videoController?.dispose();
     }
@@ -397,20 +472,35 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _likeController.forward().then((_) => _likeController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
     final docRef = _firestore.collection('posts').doc(widget.postId);
-    setState(() { _isLiked = !_isLiked; if (_isLiked) _likeCount++; else _likeCount--; }); 
+    setState(() {
+      _isLiked = !_isLiked;
+      if (_isLiked)
+        _likeCount++;
+      else
+        _likeCount--;
+    });
     try {
       final notificationId = 'like_${widget.postId}_${currentUser.uid}';
       final notificationRef = _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').doc(notificationId);
       if (_isLiked) {
         await docRef.update({'likes.${currentUser.uid}': true});
         if (widget.postData['userId'] != currentUser.uid) {
-          notificationRef.set({'type': 'like','senderId': currentUser.uid,'postId': widget.postId,'postTextSnippet': widget.postData['text'],'timestamp': FieldValue.serverTimestamp(),'isRead': false,});
+          notificationRef.set({
+            'type': 'like',
+            'senderId': currentUser.uid,
+            'postId': widget.postId,
+            'postTextSnippet': widget.postData['text'],
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
         }
       } else {
         await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
         if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
       }
-    } catch (e) { _syncState(); }
+    } catch (e) {
+      _syncState();
+    }
   }
 
   void _toggleRepost() async {
@@ -419,33 +509,52 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _repostController.forward().then((_) => _repostController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
     final docRef = _firestore.collection('posts').doc(widget.postId);
-    setState(() { _isReposted = !_isReposted; if (_isReposted) _repostCount++; else _repostCount--; });
+    setState(() {
+      _isReposted = !_isReposted;
+      if (_isReposted)
+        _repostCount++;
+      else
+        _repostCount--;
+    });
     try {
       final notificationId = 'repost_${widget.postId}_${currentUser.uid}';
       final notificationRef = _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').doc(notificationId);
       if (_isReposted) {
-        await docRef.update({'repostedBy': FieldValue.arrayUnion([currentUser.uid])});
+        await docRef.update({
+          'repostedBy': FieldValue.arrayUnion([currentUser.uid])
+        });
         if (widget.postData['userId'] != currentUser.uid) {
-          notificationRef.set({'type': 'repost','senderId': currentUser.uid,'postId': widget.postId,'postTextSnippet': widget.postData['text'],'timestamp': FieldValue.serverTimestamp(),'isRead': false,});
+          notificationRef.set({
+            'type': 'repost',
+            'senderId': currentUser.uid,
+            'postId': widget.postId,
+            'postTextSnippet': widget.postData['text'],
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
         }
       } else {
-        await docRef.update({'repostedBy': FieldValue.arrayRemove([currentUser.uid])});
+        await docRef.update({
+          'repostedBy': FieldValue.arrayRemove([currentUser.uid])
+        });
         if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
       }
-    } catch (e) { _syncState(); }
+    } catch (e) {
+      _syncState();
+    }
   }
-  
+
   void _handleBookmarkToggle(bool isCurrentlyBookmarked) async {
     final user = _auth.currentUser;
     if (user == null) return;
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-    
+
     final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
-    
+
     if (!isCurrentlyBookmarked) {
-       OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, (){});
+      OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, () {});
     } else {
-       OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, (){});
+      OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, () {});
     }
 
     try {
@@ -455,7 +564,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         await docRef.delete();
       }
     } catch (e) {
-      OverlayService().showTopNotification(context, "Failed to bookmark", Icons.error, (){}, color: Colors.red);
+      OverlayService().showTopNotification(context, "Failed to bookmark", Icons.error, () {}, color: Colors.red);
     }
   }
 
@@ -465,7 +574,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
     final currentVis = widget.postData['visibility'] ?? 'public';
     String newVis;
-    
+
     if (currentVis == 'private') {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       final bool isPrivateAccount = userDoc.exists && (userDoc.data()?['isPrivate'] ?? false);
@@ -473,11 +582,11 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     } else {
       newVis = 'private';
     }
-    
+
     String msg;
     IconData icon;
     Color? color;
-    
+
     if (newVis == 'private') {
       msg = "Post hidden (Only Me)";
       icon = Icons.visibility_off;
@@ -489,47 +598,52 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       msg = "Post is now Public";
       icon = Icons.public;
     }
-    
-    if (mounted) OverlayService().showTopNotification(context, msg, icon, (){}, color: color);
-    
+
+    if (mounted) OverlayService().showTopNotification(context, msg, icon, () {}, color: color);
+
     try {
       await _firestore.collection('posts').doc(widget.postId).update({
         'visibility': newVis,
       });
     } catch (e) {
       if (mounted) {
-        OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, (){}, color: Colors.red);
+        OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, () {}, color: Colors.red);
       }
     }
   }
 
   void _sharePost() {
     _shareController.forward().then((_) => _shareController.reverse());
-    setState(() { _isSharing = true; });
+    setState(() {
+      _isSharing = true;
+    });
     Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) setState(() { _isSharing = false; });
+      if (mounted) setState(() {
+        _isSharing = false;
+      });
       Share.share('Check out this post by ${widget.postData['userName']}: "${widget.postData['text']}"');
     });
   }
 
   Future<void> _deletePost() async {
     final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete Post'),
-        content: Text('Are you sure you want to delete this post?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Delete', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    ) ?? false;
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Delete Post'),
+            content: Text('Are you sure you want to delete this post?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Delete', style: TextStyle(color: Colors.red))),
+            ],
+          ),
+        ) ??
+        false;
     if (confirm) {
       try {
         await _firestore.collection('posts').doc(widget.postId).delete();
-        if(mounted) OverlayService().showTopNotification(context, "Post deleted", Icons.delete_outline, (){});
+        if (mounted) OverlayService().showTopNotification(context, "Post deleted", Icons.delete_outline, () {});
       } catch (e) {
-        if(mounted) OverlayService().showTopNotification(context, "Failed to delete", Icons.error, (){}, color: Colors.red);
+        if (mounted) OverlayService().showTopNotification(context, "Failed to delete", Icons.error, () {}, color: Colors.red);
       }
     }
   }
@@ -538,22 +652,26 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final user = _auth.currentUser;
     if (user == null) return;
     final bool newPinState = !_localIsPinned;
-    setState(() { _localIsPinned = newPinState; });
+    setState(() {
+      _localIsPinned = newPinState;
+    });
     if (widget.onPinToggle != null) {
       widget.onPinToggle!(widget.postId, newPinState);
     }
     try {
-      if (!newPinState) { 
+      if (!newPinState) {
         await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': FieldValue.delete()});
-        if(mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
-      } else { 
+        if (mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, () {});
+      } else {
         await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': widget.postId});
-        if(mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
+        if (mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, () {});
       }
     } catch (e) {
-      setState(() { _localIsPinned = !newPinState; });
+      setState(() {
+        _localIsPinned = !newPinState;
+      });
       if (widget.onPinToggle != null) widget.onPinToggle!(widget.postId, !newPinState);
-      if(mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, (){}, color: Colors.red);
+      if (mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, () {}, color: Colors.red);
     }
   }
 
@@ -561,7 +679,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0); 
+        const begin = Offset(1.0, 0.0);
         const end = Offset.zero;
         const curve = Curves.easeInOutQuart;
         var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
@@ -571,23 +689,22 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   void _navigateToDetail() {
-    if (!widget.isClickable) return; 
+    if (!widget.isClickable) return;
     Navigator.of(context).push(
       _createSlideLeftRoute(
         PostDetailScreen(
           postId: widget.postId,
-          initialPostData: widget.postData, 
+          initialPostData: widget.postData,
           heroContextId: widget.heroContextId,
-          preloadedController: _videoController, 
+          preloadedController: _videoController,
         ),
       ),
     );
   }
 
-  // --- NAVIGATION LOGIC ---
   void _navigateToSource() {
     final String? communityId = widget.postData['communityId'];
-    
+
     // 1. If Community Post, Go to Community Detail
     if (communityId != null) {
       Navigator.of(context).push(
@@ -595,7 +712,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           CommunityDetailScreen(
             communityId: communityId,
             communityData: {}, // Fetch inside screen
-          ), 
+          ),
         ),
       );
       return;
@@ -616,7 +733,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
     Navigator.of(context).push(
       _createSlideLeftRoute(
-        ProfilePage(userId: postUserId, includeScaffold: true), 
+        ProfilePage(userId: postUserId, includeScaffold: true),
       ),
     );
   }
@@ -645,59 +762,86 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Future<void> _submitEdit() async {
     try {
       await _firestore.collection('posts').doc(widget.postId).update({'text': _editController.text});
-      if(mounted) Navigator.of(context).pop(); 
+      if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if(mounted) {
-        OverlayService().showTopNotification(context, "Edit failed", Icons.error, (){}, color: Colors.red);
-        Navigator.of(context).pop(); 
+      if (mounted) {
+        OverlayService().showTopNotification(context, "Edit failed", Icons.error, () {}, color: Colors.red);
+        Navigator.of(context).pop();
       }
     }
   }
 
   void _reportPost() {
     showDialog(
-      context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: Text("Report Post"),
-          children: [
-            SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text('Spam')),
-            SimpleDialogOption(onPressed: () => _submitReport('Harassment'), child: Text('Harassment')),
-            SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Content'), child: Text('Inappropriate Content')),
-            SimpleDialogOption(onPressed: () => _submitReport('Misinformation'), child: Text('Misinformation')),
-            Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: ()=>Navigator.pop(context), child: Text("Cancel"))),
-          ],
-        );
-      }
-    );
+        context: context,
+        builder: (context) {
+          return SimpleDialog(
+            title: Text("Report Post"),
+            children: [
+              SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text('Spam')),
+              SimpleDialogOption(onPressed: () => _submitReport('Harassment'), child: Text('Harassment')),
+              SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Content'), child: Text('Inappropriate Content')),
+              SimpleDialogOption(onPressed: () => _submitReport('Misinformation'), child: Text('Misinformation')),
+              Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel"))),
+            ],
+          );
+        });
   }
 
   void _submitReport(String reason) {
     Navigator.pop(context);
     moderationService.reportContent(
-      targetId: widget.postId, 
-      targetType: 'post', 
-      reason: reason
-    );
-    OverlayService().showTopNotification(context, "Report submitted.", Icons.flag, (){});
+        targetId: widget.postId,
+        targetType: 'post',
+        reason: reason);
+    OverlayService().showTopNotification(context, "Report submitted.", Icons.flag, () {});
+  }
+
+  void _reportCommunity() {
+    final String? communityId = widget.postData['communityId'];
+    if (communityId == null) return;
+
+    showDialog(
+        context: context,
+        builder: (context) {
+          return SimpleDialog(
+            title: Text("Report Community"),
+            children: [
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Spam'), child: Text('Spam')),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Harassment'), child: Text('Harassment')),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Inappropriate Content'), child: Text('Inappropriate Content')),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Misinformation'), child: Text('Misinformation')),
+              Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel"))),
+            ],
+          );
+        });
+  }
+
+  void _submitCommunityReport(String communityId, String reason) {
+    Navigator.pop(context);
+    moderationService.reportContent(
+        targetId: communityId,
+        targetType: 'community',
+        reason: reason);
+    OverlayService().showTopNotification(context, "Community report submitted.", Icons.flag, () {});
   }
 
   void _blockUser() async {
     final didConfirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Block User?"),
-        content: Text("They will not be able to follow you or view your posts, and you will not see their posts."),
-        actions: [
-          TextButton(onPressed: ()=>Navigator.pop(context, false), child: Text("Cancel")),
-          TextButton(onPressed: ()=>Navigator.pop(context, true), child: Text("Block", style: TextStyle(color: Colors.red))),
-        ],
-      )
-    ) ?? false;
+            context: context,
+            builder: (context) => AlertDialog(
+                  title: Text("Block User?"),
+                  content: Text("They will not be able to follow you or view your posts, and you will not see their posts."),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: Text("Cancel")),
+                    TextButton(onPressed: () => Navigator.pop(context, true), child: Text("Block", style: TextStyle(color: Colors.red))),
+                  ],
+                )) ??
+        false;
 
     if (didConfirm) {
       await moderationService.blockUser(widget.postData['userId']);
-      if (mounted) OverlayService().showTopNotification(context, "User blocked", Icons.block, (){});
+      if (mounted) OverlayService().showTopNotification(context, "User blocked", Icons.block, () {});
     }
   }
 
@@ -725,136 +869,144 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   @override
-  bool get wantKeepAlive => true; 
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    
+
     return StreamBuilder<List<String>>(
-      stream: moderationService.streamBlockedUsers(),
-      builder: (context, snapshot) {
-        final blockedUsers = snapshot.data ?? [];
-        if (blockedUsers.contains(widget.postData['userId'])) {
-          return SizedBox.shrink(); 
-        }
+        stream: moderationService.streamBlockedUsers(),
+        builder: (context, snapshot) {
+          final blockedUsers = snapshot.data ?? [];
+          if (blockedUsers.contains(widget.postData['userId'])) {
+            return SizedBox.shrink();
+          }
 
-        final theme = Theme.of(context);
-        final text = widget.postData['text'] ?? '';
-        final mediaType = widget.postData['mediaType'];
-        final isUploading = widget.postData['isUploading'] == true;
-        final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
-        final uploadFailed = widget.postData['uploadFailed'] == true;
-        final int commentCount = widget.postData['commentCount'] ?? 0;
-        
-        List<String> mediaUrls = [];
-        if (widget.postData['mediaUrls'] != null) {
-          mediaUrls = List<String>.from(widget.postData['mediaUrls']);
-        } else if (widget.postData['mediaUrl'] != null) {
-          mediaUrls = [widget.postData['mediaUrl']];
-        }
-        
-        if (uploadFailed) {
-          return Container(
-            padding: const EdgeInsets.all(12.0),
-            color: Colors.red.withOpacity(0.1),
-            child: Text("Post upload failed: ${text}", style: TextStyle(color: Colors.red)),
-          );
-        }
+          final theme = Theme.of(context);
+          final text = widget.postData['text'] ?? '';
+          final mediaType = widget.postData['mediaType'];
+          final isUploading = widget.postData['isUploading'] == true;
+          final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
+          final uploadFailed = widget.postData['uploadFailed'] == true;
+          final int commentCount = widget.postData['commentCount'] ?? 0;
 
-        return GestureDetector(
-          onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
-              color: theme.cardColor,
-            ),
-            padding: const EdgeInsets.all(16.0), 
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_localIsPinned)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
-                    child: Row(
-                      children: [
-                        Icon(Icons.push_pin, size: 14, color: theme.hintColor),
-                        SizedBox(width: 4),
-                        Text("Pinned Post", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.hintColor)),
-                      ],
-                    ),
-                  ),
+          List<String> mediaUrls = [];
+          if (widget.postData['mediaUrls'] != null) {
+            mediaUrls = List<String>.from(widget.postData['mediaUrls']);
+          } else if (widget.postData['mediaUrl'] != null) {
+            mediaUrls = [widget.postData['mediaUrl']];
+          }
 
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildAvatar(context),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+          if (uploadFailed) {
+            return Container(
+              padding: const EdgeInsets.all(12.0),
+              color: Colors.red.withOpacity(0.1),
+              child: Text("Post upload failed: ${text}", style: TextStyle(color: Colors.red)),
+            );
+          }
+
+          return GestureDetector(
+            onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
+                color: theme.cardColor,
+              ),
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_localIsPinned)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0, left: 36.0),
+                      child: Row(
                         children: [
-                          _buildPostHeader(context),
-                          if (text.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0),
-                              child: Text(
-                                text,
-                                style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
-                                maxLines: widget.isDetailView ? null : 10,
-                                overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
-                              ),
-                            ),
-                          if (isUploading)
-                            _buildUploadStatus(uploadProgress)
-                          else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
-                            Padding(
-                              padding: const EdgeInsets.only(top: 12.0),
-                              child: _PostMediaPreview(
-                                mediaUrls: mediaUrls, 
-                                mediaType: mediaType,
-                                text: text,
-                                postData: widget.postData, 
-                                postId: widget.postId, 
-                                heroContextId: widget.heroContextId, 
-                                videoController: _videoController, 
-                              ),
-                            ),
-                          if (widget.isDetailView && !isUploading)
-                            _buildDetailActionRow()
-                          else if (!isUploading)
-                            _buildFeedActionRow(commentCount),
+                          Icon(Icons.push_pin, size: 14, color: theme.hintColor),
+                          SizedBox(width: 4),
+                          Text("Pinned Post", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.hintColor)),
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ],
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildAvatar(context),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildPostHeader(context),
+                            if (text.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Text(
+                                  text,
+                                  style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
+                                  maxLines: widget.isDetailView ? null : 10,
+                                  overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+                                ),
+                              ),
+                            if (isUploading)
+                              _buildUploadStatus(uploadProgress)
+                            else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12.0),
+                                child: _PostMediaPreview(
+                                  mediaUrls: mediaUrls, // Pass List
+                                  mediaType: mediaType,
+                                  text: text,
+                                  postData: widget.postData,
+                                  postId: widget.postId,
+                                  heroContextId: widget.heroContextId,
+                                  videoController: _videoController,
+                                ),
+                              ),
+                            if (widget.isDetailView && !isUploading)
+                              _buildDetailActionRow()
+                            else if (!isUploading)
+                              _buildFeedActionRow(commentCount),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      }
-    );
+          );
+        });
   }
 
-  // --- UPDATED AVATAR LOGIC ---
+  // --- UPDATED AVATAR LOGIC (REAL-TIME SYNC) ---
   Widget _buildAvatar(BuildContext context) {
     // Determine which image to show based on post type
     final bool isCommunityPost = widget.postData['isCommunityPost'] ?? false;
     final String? communityId = widget.postData['communityId'];
 
     if (communityId != null && isCommunityPost) {
-       // Official Community Post: Show Community Icon
-       final String? comImg = widget.postData['communityIcon']; 
-       return GestureDetector(
-         onTap: _navigateToSource,
-         child: CircleAvatar(
-           radius: 24,
-           backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-           backgroundImage: comImg != null ? CachedNetworkImageProvider(comImg) : null,
-           child: comImg == null ? Icon(Icons.groups, size: 26, color: TwitterTheme.blue) : null,
-         ),
-       );
+      // Official Community Post: Fetch fresh image from 'communities' collection
+      return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('communities').doc(communityId).snapshots(),
+          builder: (context, snapshot) {
+            String? displayImg = widget.postData['communityIcon']; // Fallback
+
+            if (snapshot.hasData && snapshot.data!.exists) {
+              final data = snapshot.data!.data() as Map<String, dynamic>;
+              displayImg = data['imageUrl'] ?? displayImg;
+            }
+
+            return GestureDetector(
+              onTap: _navigateToSource,
+              child: CircleAvatar(
+                radius: 24,
+                backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                backgroundImage: displayImg != null ? CachedNetworkImageProvider(displayImg) : null,
+                child: displayImg == null ? Icon(Icons.groups, size: 26, color: TwitterTheme.blue) : null,
+              ),
+            );
+          });
     }
 
     // Otherwise (Personal Post or User Post in Community): Show User Avatar
@@ -871,13 +1023,13 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           colorHex = userData['avatarHex'];
           profileImageUrl = userData['profileImageUrl'];
         } else {
-           iconId = widget.postData['avatarIconId'] ?? 0;
-           colorHex = widget.postData['avatarHex'];
-           profileImageUrl = widget.postData['profileImageUrl'];
+          iconId = widget.postData['avatarIconId'] ?? 0;
+          colorHex = widget.postData['avatarHex'];
+          profileImageUrl = widget.postData['profileImageUrl'];
         }
         final Color avatarBgColor = AvatarHelper.getColor(colorHex);
         return GestureDetector(
-           onTap: _navigateToSource, // FIXED: Now defined
+          onTap: _navigateToSource,
           child: CircleAvatar(
             radius: 24,
             backgroundColor: profileImageUrl != null ? Colors.transparent : avatarBgColor,
@@ -889,120 +1041,147 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
-  // --- UPDATED HEADER LOGIC ---
+  // --- UPDATED HEADER LOGIC (REAL-TIME SYNC) ---
   Widget _buildPostHeader(BuildContext context) {
     final theme = Theme.of(context);
     final timeAgo = _formatTimestamp(widget.postData['timestamp'] as Timestamp?);
-    
+
     // Check context
     final String? communityId = widget.postData['communityId'];
     final bool isCommunityPost = widget.postData['isCommunityPost'] ?? false;
-    final bool isVerified = widget.postData['communityVerified'] ?? false;
+    final bool isVerifiedFromPost = widget.postData['communityVerified'] ?? false;
 
     // 1. OFFICIAL COMMUNITY POST
     if (communityId != null && isCommunityPost) {
-       final String comName = widget.postData['communityName'] ?? 'Community';
-       final String userName = widget.postData['userName'] ?? 'Member'; 
-       
-       return Column(
-         crossAxisAlignment: CrossAxisAlignment.start,
-         children: [
-           Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-             children: [
-               Expanded(
-                 child: Row(
-                   children: [
-                     Flexible(
-                       child: GestureDetector(
-                         onTap: _navigateToSource,
-                         child: Text(
-                           comName, 
-                           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
-                           overflow: TextOverflow.ellipsis
-                         ),
-                       )
-                     ),
-                     if (isVerified) ...[
-                       SizedBox(width: 4),
-                       Icon(Icons.verified, size: 14, color: TwitterTheme.blue), 
-                     ],
-                   ],
-                 ),
-               ),
-               Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
-             ],
-           ),
-           Padding(
-             padding: const EdgeInsets.only(top: 2.0),
-             child: Row(
-               children: [
-                 Icon(Icons.person, size: 12, color: theme.hintColor),
-                 SizedBox(width: 4),
-                 Flexible(
-                   child: Text(
-                     "Posted by $userName", 
-                     style: TextStyle(color: theme.hintColor, fontSize: 11),
-                     overflow: TextOverflow.ellipsis
-                   ),
-                 ),
-               ],
-             ),
-           ),
-         ],
-       );
+      // Stream fresh community name & verification status
+      return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('communities').doc(communityId).snapshots(),
+          builder: (context, snapshot) {
+            String comName = widget.postData['communityName'] ?? 'Community';
+            bool isVerified = isVerifiedFromPost;
+
+            if (snapshot.hasData && snapshot.data!.exists) {
+              final data = snapshot.data!.data() as Map<String, dynamic>;
+              comName = data['name'] ?? comName;
+              isVerified = data['isVerified'] ?? isVerified;
+            }
+
+            final String userName = widget.postData['userName'] ?? 'Member';
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: GestureDetector(
+                              onTap: _navigateToSource,
+                              child: Text(comName,
+                                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                          if (isVerified) ...[
+                            SizedBox(width: 4),
+                            Icon(Icons.verified, size: 14, color: TwitterTheme.blue),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
+                        SizedBox(width: 8),
+                        SizedBox(width: 24, height: 24, child: _buildOptionsButton()),
+                      ],
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.person, size: 12, color: theme.hintColor),
+                      SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          "Posted by $userName",
+                          style: TextStyle(color: theme.hintColor, fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          });
     }
-    
+
     // 2. PERSONAL POST IN COMMUNITY
     if (communityId != null && !isCommunityPost) {
       final String userName = widget.postData['userName'] ?? 'User';
-      final String comName = widget.postData['communityName'] ?? 'Community';
-      
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-             children: [
-               Expanded(
-                 child: Row(
-                   children: [
-                     Flexible(
-                       child: GestureDetector(
-                         onTap: _navigateToSource,
-                         child: Text(
-                           userName, 
-                           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
-                           overflow: TextOverflow.ellipsis
-                         ),
-                       )
-                     ),
-                   ],
-                 ),
-               ),
-               Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
-             ],
-          ),
-          Padding(
-             padding: const EdgeInsets.only(top: 2.0),
-             child: Row(
-               children: [
-                 Flexible(
-                   child: Text(
-                     "in $comName", 
-                     style: TextStyle(color: theme.hintColor, fontSize: 11, fontWeight: FontWeight.bold),
-                     overflow: TextOverflow.ellipsis
-                   ),
-                 ),
-                 if (widget.isOwner) ...[
-                    SizedBox(width: 8),
-                    SizedBox(width: 16, height: 16, child: _buildOptionsButton()),
-                 ]
-               ],
-             ),
-          )
-        ],
-      );
+
+      // Also stream community name here for correctness
+      return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('communities').doc(communityId).snapshots(),
+          builder: (context, snapshot) {
+            String comName = widget.postData['communityName'] ?? 'Community';
+            if (snapshot.hasData && snapshot.data!.exists) {
+              final data = snapshot.data!.data() as Map<String, dynamic>;
+              comName = data['name'] ?? comName;
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: GestureDetector(
+                              onTap: _navigateToSource,
+                              child: Text(userName,
+                                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
+                        SizedBox(width: 8),
+                        SizedBox(width: 24, height: 24, child: _buildOptionsButton()),
+                      ],
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2.0),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          "in $comName",
+                          style: TextStyle(color: theme.hintColor, fontSize: 11, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              ],
+            );
+          });
     }
 
     // 3. STANDARD USER POST
@@ -1027,24 +1206,24 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                     child: GestureDetector(
                       onTap: _navigateToSource,
                       child: Text(
-                        userName, 
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
-                        overflow: TextOverflow.ellipsis
+                        userName,
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    )
+                    ),
                   ),
                   if (isPrivate) ...[
                     SizedBox(width: 4),
-                    Icon(Icons.lock, size: 14, color: theme.hintColor), 
+                    Icon(Icons.lock, size: 14, color: theme.hintColor),
                   ] else if (isFollowersOnly) ...[
                     SizedBox(width: 4),
-                    Icon(Icons.people, size: 14, color: theme.hintColor), 
+                    Icon(Icons.people, size: 14, color: theme.hintColor),
                   ],
                 ],
               ),
             ),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start, 
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(width: 4),
                 Padding(
@@ -1055,7 +1234,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                   padding: const EdgeInsets.only(left: 4.0),
                   child: SizedBox(
                     width: 24,
-                    height: 24, 
+                    height: 24,
                     child: _buildOptionsButton(),
                   ),
                 ),
@@ -1076,29 +1255,58 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       elevation: 4,
       color: Theme.of(context).cardColor,
       onSelected: (value) {
-        if (value == 'edit') _showEditDialog();
-        else if (value == 'delete') _deletePost();
-        else if (value == 'pin') _togglePin(); 
-        else if (value == 'report') _reportPost();
-        else if (value == 'block') _blockUser();
-        else if (value == 'toggle_visibility') _toggleVisibility(); 
+        if (value == 'edit')
+          _showEditDialog();
+        else if (value == 'delete')
+          _deletePost();
+        else if (value == 'pin')
+          _togglePin();
+        else if (value == 'report')
+          _reportPost();
+        else if (value == 'block')
+          _blockUser();
+        else if (value == 'toggle_visibility')
+          _toggleVisibility();
+        else if (value == 'report_community') _reportCommunity();
       },
       itemBuilder: (context) {
+        final List<PopupMenuEntry<String>> options = [];
+
+        // CASE 1: I am the Author (Standard User editing own post)
         if (widget.isOwner) {
           final isPrivate = (widget.postData['visibility'] ?? 'public') == 'private';
-          return [
+          options.addAll([
             PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
             PopupMenuItem(value: 'toggle_visibility', child: Row(children: [Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(isPrivate ? "Unhide Post" : "Hide Post (Only Me)")])),
             PopupMenuItem(value: 'pin', child: Row(children: [Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")])),
             PopupMenuDivider(),
             PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post", style: TextStyle(color: Colors.red))])),
-          ];
-        } else {
-          return [
+          ]);
+        }
+        // CASE 2: I am a Community Admin/Owner (Editing someone else's post)
+        else if (_isCommunityAdmin) {
+          options.addAll([
+            PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post (Admin)")])),
+            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post (Admin)", style: TextStyle(color: Colors.red))])),
+            PopupMenuDivider(),
             PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Report Post")])),
             PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text("Block User", style: TextStyle(color: Colors.red))])),
-          ];
+          ]);
         }
+        // CASE 3: Standard User (Viewing someone else's post)
+        else {
+          options.addAll([
+            PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Report Post")])),
+            PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text("Block User", style: TextStyle(color: Colors.red))])),
+          ]);
+        }
+
+        // Add "Report Community" for everyone if this is a community post
+        if (widget.postData['communityId'] != null) {
+          options.add(PopupMenuItem(value: 'report_community', child: Row(children: [Icon(Icons.flag, size: 20, color: Colors.orange), SizedBox(width: 12), Text("Report Community")])));
+        }
+
+        return options;
       },
     );
   }
@@ -1127,7 +1335,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           _buildActionButton(Icons.chat_bubble_outline, commentCount.toString(), null, _navigateToDetail),
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
-          _buildBookmarkButton(), 
+          _buildBookmarkButton(),
           _buildActionButton(Icons.share_outlined, null, _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
@@ -1142,7 +1350,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         children: [
           _buildActionButton(Icons.repeat, _repostCount.toString(), _isReposted ? Colors.green : null, _toggleRepost, _repostAnimation),
           _buildActionButton(_isLiked ? Icons.favorite : Icons.favorite_border, _likeCount.toString(), _isLiked ? Colors.pink : null, _toggleLike, _likeAnimation),
-          _buildBookmarkButton(), 
+          _buildBookmarkButton(),
           _buildActionButton(Icons.share_outlined, 'Share', _isSharing ? TwitterTheme.blue : null, _sharePost, _shareAnimation),
         ],
       ),
@@ -1160,7 +1368,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
         child: Row(
           children: [
-            iconWidget, 
+            iconWidget,
             if (text != null && text != "0" && text.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 6.0), child: Text(text, style: TextStyle(color: iconColor, fontSize: 13))),
           ],
         ),
