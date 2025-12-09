@@ -12,6 +12,7 @@ import 'community_settings_screen.dart';
 import '../create_post_screen.dart'; 
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../image_viewer_screen.dart'; // Added for viewing images
 
 class CommunityDetailScreen extends StatefulWidget {
   final String communityId;
@@ -54,7 +55,70 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     }
   }
 
-  // --- IMAGE UPDATE LOGIC (For Customization) ---
+  // --- IMAGE VIEWING LOGIC ---
+  void _openFullImage(BuildContext context, String url, String heroTag) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        pageBuilder: (_, __, ___) => ImageViewerScreen(
+          imageUrl: url,
+          heroTag: heroTag,
+          mediaType: 'image', 
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        }
+      ),
+    );
+  }
+
+  // --- IMAGE OPTIONS MENU (View / Change) ---
+  void _showImageOptions(BuildContext context, String? url, bool isBanner, bool hasControl) {
+    // If no image and no control, do nothing
+    if (url == null && !hasControl) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              SizedBox(height: 16),
+              
+              if (url != null)
+                ListTile(
+                  leading: Icon(Icons.visibility_outlined, color: TwitterTheme.blue),
+                  title: Text(isBanner ? "View Banner" : "View Icon"),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openFullImage(context, url, isBanner ? 'community_banner' : 'community_icon');
+                  },
+                ),
+                
+              if (hasControl)
+                ListTile(
+                  leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
+                  title: Text(isBanner ? "Change Banner" : "Change Icon"),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickAndUploadImage(isBanner: isBanner);
+                  },
+                ),
+                
+              SizedBox(height: 12),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
+  // --- IMAGE UPLOAD LOGIC ---
   Future<void> _pickAndUploadImage({required bool isBanner}) async {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
@@ -149,17 +213,20 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                       children: [
                         // BANNER
                         GestureDetector(
-                          onTap: hasFullControl ? () => _pickAndUploadImage(isBanner: true) : null,
-                          child: bannerUrl != null
-                              ? CachedNetworkImage(imageUrl: bannerUrl, fit: BoxFit.cover)
-                              : Container(
-                                  color: isDarkMode ? Colors.grey[800] : Colors.grey[300], 
-                                  child: hasFullControl 
-                                    ? Center(child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [Icon(Icons.add_a_photo, color: Colors.white), Text("Add Banner", style: TextStyle(color: Colors.white, fontSize: 12))])) 
-                                    : null
-                                ),
+                          onTap: () => _showImageOptions(context, bannerUrl, true, hasFullControl),
+                          child: Hero(
+                            tag: 'community_banner',
+                            child: bannerUrl != null
+                                ? CachedNetworkImage(imageUrl: bannerUrl, fit: BoxFit.cover)
+                                : Container(
+                                    color: isDarkMode ? Colors.grey[800] : Colors.grey[300], 
+                                    child: hasFullControl 
+                                      ? Center(child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [Icon(Icons.add_a_photo, color: Colors.white), Text("Add Banner", style: TextStyle(color: Colors.white, fontSize: 12))])) 
+                                      : null
+                                  ),
+                          ),
                         ),
                         Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(0.7)]))),
                         
@@ -172,14 +239,17 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               GestureDetector(
-                                onTap: hasFullControl ? () => _pickAndUploadImage(isBanner: false) : null,
-                                child: Container(
-                                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: theme.scaffoldBackgroundColor, width: 3)),
-                                  child: CircleAvatar(
-                                    radius: 36,
-                                    backgroundColor: TwitterTheme.blue,
-                                    backgroundImage: avatarUrl != null ? CachedNetworkImageProvider(avatarUrl) : null,
-                                    child: avatarUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontSize: 32, color: Colors.white)) : null,
+                                onTap: () => _showImageOptions(context, avatarUrl, false, hasFullControl),
+                                child: Hero(
+                                  tag: 'community_icon',
+                                  child: Container(
+                                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: theme.scaffoldBackgroundColor, width: 3)),
+                                    child: CircleAvatar(
+                                      radius: 36,
+                                      backgroundColor: TwitterTheme.blue,
+                                      backgroundImage: avatarUrl != null ? CachedNetworkImageProvider(avatarUrl) : null,
+                                      child: avatarUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontSize: 32, color: Colors.white)) : null,
+                                    ),
                                   ),
                                 ),
                               ),
