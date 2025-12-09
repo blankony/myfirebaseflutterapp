@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import '../screens/post_detail_screen.dart'; 
 import '../screens/dashboard/profile_page.dart'; 
+import '../screens/community/community_detail_screen.dart'; // REQUIRED IMPORT
 import '../screens/image_viewer_screen.dart'; 
 import 'package:timeago/timeago.dart' as timeago; 
 import '../main.dart';
@@ -14,6 +15,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart'; 
 import '../services/overlay_service.dart';
 import '../services/moderation_service.dart'; 
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -37,7 +39,7 @@ class _VideoPlayerWidget extends StatelessWidget {
 
     return Container(
       color: Colors.black,
-      constraints: BoxConstraints(maxHeight: 400), // Limit height
+      constraints: BoxConstraints(maxHeight: 400), 
       width: double.infinity,
       child: Stack(
         alignment: Alignment.center,
@@ -64,9 +66,9 @@ class _VideoPlayerWidget extends StatelessWidget {
   }
 }
 
-// --- SMART WIDGET: Media Preview (Handles Single/Multi Image & Video) ---
+// --- SMART WIDGET: Media Preview ---
 class _PostMediaPreview extends StatefulWidget {
-  final List<String> mediaUrls; // Changed to List
+  final List<String> mediaUrls; 
   final String? mediaType;
   final String text;
   final Map<String, dynamic> postData; 
@@ -89,7 +91,7 @@ class _PostMediaPreview extends StatefulWidget {
 }
 
 class _PostMediaPreviewState extends State<_PostMediaPreview> {
-  int _currentIndex = 0; // To track carousel page
+  int _currentIndex = 0; 
 
   String? _getVideoId(String url) {
     if (url.contains('youtube.com') || url.contains('youtu.be')) {
@@ -131,7 +133,6 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
-    // 1. Handle Video (Single)
     if (widget.mediaType == 'video' && widget.mediaUrls.isNotEmpty && widget.videoController != null) {
        return ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -142,7 +143,6 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
        );
     }
 
-    // 2. Handle Images (Single or Multi)
     if (widget.mediaUrls.isNotEmpty) {
       final bool isMulti = widget.mediaUrls.length > 1;
 
@@ -150,10 +150,9 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
         borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
-            // CAROUSEL OR SINGLE IMAGE
             isMulti 
             ? AspectRatio(
-                aspectRatio: 1.0, // Square aspect for multi-image carousel
+                aspectRatio: 1.0, 
                 child: PageView.builder(
                   itemCount: widget.mediaUrls.length,
                   onPageChanged: (index) {
@@ -177,7 +176,7 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
                 ),
               )
             : AspectRatio(
-                aspectRatio: 4 / 3, // Default aspect for single image
+                aspectRatio: 4 / 3, 
                 child: GestureDetector(
                   onTap: () => _navigateToViewer(context, widget.mediaUrls.first),
                   child: Hero(
@@ -192,7 +191,6 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
                 ),
               ),
 
-            // PAGE INDICATOR (If Multi)
             if (isMulti)
               Positioned(
                 top: 12,
@@ -214,7 +212,6 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
       );
     } 
     
-    // 3. Handle YouTube Links (Fallback)
     final externalLink = _extractLinkInText();
     final youtubeId = externalLink != null ? _getVideoId(externalLink) : null;
     
@@ -321,12 +318,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   void _initVideoController() {
-    // Check for both old 'mediaUrl' and new 'mediaUrls'
     final String? singleUrl = widget.postData['mediaUrl'];
     final List<dynamic> urls = widget.postData['mediaUrls'] ?? [];
     final String? mediaType = widget.postData['mediaType'];
 
-    // We assume video is still single file for now
     final String? videoUrl = (urls.isNotEmpty) ? urls.first : singleUrl;
 
     if (mediaType == 'video' && videoUrl != null) {
@@ -354,7 +349,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.didUpdateWidget(oldWidget);
     if (oldWidget.postData != widget.postData) {
       _syncState();
-      // Simple check if media changed
       if (oldWidget.postData['mediaUrl'] != widget.postData['mediaUrl']) {
         if (_isVideoOwner) {
           _videoController?.dispose();
@@ -590,7 +584,24 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
-  void _navigateToUserProfile() {
+  // --- NAVIGATION LOGIC ---
+  void _navigateToSource() {
+    final String? communityId = widget.postData['communityId'];
+    
+    // 1. If Community Post, Go to Community Detail
+    if (communityId != null) {
+      Navigator.of(context).push(
+        _createSlideLeftRoute(
+          CommunityDetailScreen(
+            communityId: communityId,
+            communityData: {}, 
+          ), 
+        ),
+      );
+      return;
+    }
+
+    // 2. Else Go to User Profile
     final postUserId = widget.postData['userId'];
     if (postUserId == null) return;
     if (widget.isOwner) {
@@ -736,7 +747,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         final uploadFailed = widget.postData['uploadFailed'] == true;
         final int commentCount = widget.postData['commentCount'] ?? 0;
         
-        // --- MULTI-IMAGE LOGIC ---
         List<String> mediaUrls = [];
         if (widget.postData['mediaUrls'] != null) {
           mediaUrls = List<String>.from(widget.postData['mediaUrls']);
@@ -827,7 +837,27 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
+  // --- UPDATED AVATAR LOGIC ---
   Widget _buildAvatar(BuildContext context) {
+    // 1. COMMUNITY POST
+    if (widget.postData['communityId'] != null) {
+       final String? comImg = widget.postData['communityIcon']; 
+       // Fallback logic
+       final String? fallbackImg = widget.postData['profileImageUrl'];
+       final String? displayImg = comImg ?? fallbackImg;
+
+       return GestureDetector(
+         onTap: _navigateToSource,
+         child: CircleAvatar(
+           radius: 24,
+           backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+           backgroundImage: displayImg != null ? CachedNetworkImageProvider(displayImg) : null,
+           child: displayImg == null ? Icon(Icons.groups, size: 26, color: TwitterTheme.blue) : null,
+         ),
+       );
+    }
+
+    // 2. USER POST
     final String authorId = widget.postData['userId'];
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(authorId).snapshots(),
@@ -847,7 +877,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         }
         final Color avatarBgColor = AvatarHelper.getColor(colorHex);
         return GestureDetector(
-           onTap: _navigateToUserProfile,
+           onTap: _navigateToSource,
           child: CircleAvatar(
             radius: 24,
             backgroundColor: profileImageUrl != null ? Colors.transparent : avatarBgColor,
@@ -859,12 +889,68 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
+  // --- UPDATED HEADER LOGIC ---
   Widget _buildPostHeader(BuildContext context) {
+    final theme = Theme.of(context);
     final timeAgo = _formatTimestamp(widget.postData['timestamp'] as Timestamp?);
+
+    // 1. COMMUNITY POST
+    if (widget.postData['communityId'] != null) {
+       final String comName = widget.postData['communityName'] ?? 'Community';
+       // We show the real user's name as "Posted by..."
+       final String userName = widget.postData['userName'] ?? 'Member'; 
+       final bool isVerified = widget.postData['communityVerified'] ?? false;
+       
+       return Column(
+         crossAxisAlignment: CrossAxisAlignment.start,
+         children: [
+           Row(
+             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+             children: [
+               Expanded(
+                 child: Row(
+                   children: [
+                     Flexible(
+                       child: Text(
+                         comName, 
+                         style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), 
+                         overflow: TextOverflow.ellipsis
+                       )
+                     ),
+                     if (isVerified) ...[
+                       SizedBox(width: 4),
+                       Icon(Icons.verified, size: 14, color: TwitterTheme.blue), 
+                     ],
+                   ],
+                 ),
+               ),
+               Text("· $timeAgo", style: TextStyle(color: theme.hintColor, fontSize: 12)),
+             ],
+           ),
+           // "Posted by User" Line
+           Padding(
+             padding: const EdgeInsets.only(top: 2.0),
+             child: Row(
+               children: [
+                 Icon(Icons.person, size: 12, color: theme.hintColor),
+                 SizedBox(width: 4),
+                 Flexible(
+                   child: Text(
+                     "Posted by $userName", 
+                     style: TextStyle(color: theme.hintColor, fontSize: 11),
+                     overflow: TextOverflow.ellipsis
+                   ),
+                 ),
+               ],
+             ),
+           ),
+         ],
+       );
+    }
+
+    // 2. STANDARD USER POST
     final String userName = widget.postData['userName'] ?? 'User';
     final String handle = "@${widget.postData['userEmail']?.split('@')[0] ?? 'user'}";
-    final theme = Theme.of(context);
-    
     final String visibility = widget.postData['visibility'] ?? 'public';
     final bool isPrivate = visibility == 'private';
     final bool isFollowersOnly = visibility == 'followers';

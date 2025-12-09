@@ -4,102 +4,82 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../main.dart';
-import '../../services/overlay_service.dart';
 import 'community_detail_screen.dart';
 
 class BrowseCommunitiesScreen extends StatelessWidget {
   const BrowseCommunitiesScreen({super.key});
 
-  Future<void> _requestToJoin(BuildContext context, String communityId, List pendingMembers) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    // Cek apakah sudah request sebelumnya
-    if (pendingMembers.contains(user.uid)) {
-      OverlayService().showTopNotification(context, "Request already sent", Icons.info, (){}, color: Colors.orange);
-      return;
-    }
-
-    try {
-      // Masukkan ke array 'pendingMembers', BUKAN 'members'
-      await FirebaseFirestore.instance.collection('communities').doc(communityId).update({
-        'pendingMembers': FieldValue.arrayUnion([user.uid])
-      });
-      OverlayService().showTopNotification(context, "Request sent!", Icons.send, (){}, color: Colors.blue);
-    } catch (e) {
-      OverlayService().showTopNotification(context, "Failed to send request", Icons.error, (){}, color: Colors.red);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Explore Communities", style: TextStyle(fontWeight: FontWeight.bold)),
-      ),
+      appBar: AppBar(title: Text("Explore Channels")),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('communities').snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
-          }
+          if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
 
-          final allDocs = snapshot.data?.docs ?? [];
-          // Filter: Tampilkan komunitas yang USER BELUM JOIN
-          final notJoinedDocs = allDocs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final List members = (data['members'] is List) ? data['members'] : [];
-            return !members.contains(user?.uid);
-          }).toList();
-
-          if (notJoinedDocs.isEmpty) {
-            return Center(child: Text("No new communities to join."));
-          }
+          final allDocs = snapshot.data!.docs;
+          
+          final sortedDocs = allDocs.toList()..sort((a, b) {
+            final dataA = a.data() as Map<String, dynamic>;
+            final dataB = b.data() as Map<String, dynamic>;
+            
+            final catA = dataA['category'] ?? 'casual';
+            final catB = dataB['category'] ?? 'casual';
+            
+            // Priority Map
+            final priority = {'pnj_official': 3, 'partner_official': 2, 'casual': 1};
+            
+            return (priority[catB] ?? 0).compareTo(priority[catA] ?? 0);
+          });
 
           return ListView.builder(
             padding: EdgeInsets.all(16),
-            itemCount: notJoinedDocs.length,
+            itemCount: sortedDocs.length,
             itemBuilder: (context, index) {
-              final doc = notJoinedDocs[index];
+              final doc = sortedDocs[index];
               final data = doc.data() as Map<String, dynamic>;
               
               final String name = data['name'] ?? 'Unnamed';
               final String? imageUrl = data['imageUrl'];
-              final int memberCount = (data['members'] is List) ? (data['members'] as List).length : 0;
-              final List pendingMembers = (data['pendingMembers'] is List) ? data['pendingMembers'] : [];
-              final bool isPending = pendingMembers.contains(user?.uid);
+              final String category = data['category'] ?? 'casual';
+              final List followers = data['followers'] ?? [];
+              final bool isFollowing = followers.contains(user?.uid);
+
+              IconData badgeIcon = Icons.tag_faces;
+              Color badgeColor = Colors.grey;
+              if (category == 'pnj_official') { badgeIcon = Icons.account_balance; badgeColor = TwitterTheme.blue; }
+              else if (category == 'partner_official') { badgeIcon = Icons.verified; badgeColor = Colors.blueGrey; }
 
               return Card(
                 margin: EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 child: ListTile(
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  contentPadding: EdgeInsets.all(12),
                   leading: CircleAvatar(
-                    radius: 24,
-                    backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                    radius: 28,
+                    backgroundColor: badgeColor.withOpacity(0.1),
                     backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
-                    child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)) : null,
+                    child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold)) : null,
                   ),
-                  title: Text(name, style: TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text("$memberCount members"),
-                  trailing: isPending
-                    ? OutlinedButton(
-                        onPressed: null, // Disabled
-                        child: Text("Pending"),
-                      )
-                    : ElevatedButton(
-                        onPressed: () => _requestToJoin(context, doc.id, pendingMembers),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: TwitterTheme.blue,
-                          foregroundColor: Colors.white,
-                          shape: StadiumBorder(),
-                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                        ),
-                        child: Text("Join"),
-                      ),
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(name, style: TextStyle(fontWeight: FontWeight.bold))),
+                      if (category == 'pnj_official') Icon(Icons.verified, size: 16, color: TwitterTheme.blue),
+                    ],
+                  ),
+                  subtitle: Row(
+                    children: [
+                      Icon(badgeIcon, size: 12, color: badgeColor),
+                      SizedBox(width: 4),
+                      Text("${followers.length} Followers", style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                  trailing: isFollowing 
+                    ? Icon(Icons.check_circle, color: Colors.green)
+                    : Icon(Icons.add_circle_outline, color: TwitterTheme.blue),
                   onTap: () {
                     Navigator.push(context, MaterialPageRoute(
                       builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)

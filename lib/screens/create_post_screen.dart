@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image_editor_plus/image_editor_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_compress/video_compress.dart';
@@ -48,49 +47,115 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String _visibility = 'public'; 
   bool _isAccountPrivate = false; 
 
-  String _userName = 'Anonymous User';
+  // Identity State
+  String _displayName = 'Anonymous User';
   String _userEmail = 'anon@mail.com';
+  String? _displayAvatarUrl;
   int _avatarIconId = 0;
   String _avatarHex = '';
-  String? _profileImageUrl;
+  
+  // Community Broadcasting State
+  String? _communityId;
+  String? _communityName;
+  String? _communityIcon;
+  bool _communityVerified = false; // NEW: Track verification status
+  bool _isBroadcasting = false;
+  bool _isRestricted = false; 
 
   String? _predictedText;
   Timer? _debounce;
 
-  // --- MODIFIED STATE FOR MULTIPLE MEDIA ---
-  List<File> _selectedMediaFiles = []; // Sekarang List
-  List<String> _existingMediaUrls = []; // Untuk edit post yang punya banyak gambar
-  String? _mediaType; // 'image' or 'video'
-  
-  String? _communityId;
+  List<File> _selectedMediaFiles = []; 
+  List<String> _existingMediaUrls = []; 
+  String? _mediaType; 
 
   bool get _isEditing => widget.postId != null;
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    _loadIdentity(); 
     _trainAiModel();
 
     if (widget.initialData != null) {
-      _communityId = widget.initialData!['communityId'];
-      
       if (_isEditing) {
         _postController.text = widget.initialData!['text'] ?? '';
         _mediaType = widget.initialData!['mediaType'];
         _visibility = widget.initialData!['visibility'] ?? 'public';
         
-        // Handle Existing Media (Single or Multiple)
         if (widget.initialData!['mediaUrls'] != null) {
           _existingMediaUrls = List<String>.from(widget.initialData!['mediaUrls']);
         } else if (widget.initialData!['mediaUrl'] != null) {
           _existingMediaUrls = [widget.initialData!['mediaUrl']];
         }
-        
         _checkCanPost();
       } 
-      else if (_communityId != null) {
-        _visibility = 'public';
+    }
+  }
+
+  Future<void> _loadIdentity() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    // Load User Data First
+    try {
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      if (userDoc.exists) {
+        final data = userDoc.data()!;
+        setState(() {
+          _displayName = data['name'] ?? 'User';
+          _userEmail = user.email ?? '';
+          _avatarIconId = data['avatarIconId'] ?? 0;
+          _avatarHex = data['avatarHex'] ?? '';
+          _displayAvatarUrl = data['profileImageUrl'];
+          _isAccountPrivate = data['isPrivate'] ?? false;
+        });
+      }
+    } catch (_) {}
+
+    // Check Community Context
+    if (widget.initialData != null && widget.initialData!.containsKey('communityId')) {
+      _communityId = widget.initialData!['communityId'];
+      // Use passed data initially for speed, but fetch fresh data for verification status
+      _communityName = widget.initialData!['communityName'];
+      _communityIcon = widget.initialData!['communityIcon'];
+      _isBroadcasting = true;
+      _visibility = 'public'; 
+
+      try {
+        final comDoc = await _firestore.collection('communities').doc(_communityId).get();
+        if (comDoc.exists) {
+          final data = comDoc.data()!;
+          
+          setState(() {
+            _communityName = data['name']; // Update with fresh name
+            _communityIcon = data['imageUrl']; // Update with fresh icon
+            _communityVerified = data['isVerified'] ?? false; // Update verified status
+          });
+
+          final bool allowMembers = data['allowMemberPosts'] ?? false;
+          final String ownerId = data['ownerId'];
+          final List admins = data['admins'] ?? [];
+          final List editors = data['editors'] ?? [];
+          
+          final bool isStaff = ownerId == user.uid || admins.contains(user.uid) || editors.contains(user.uid);
+          
+          if (!allowMembers && !isStaff) {
+            setState(() => _isRestricted = true);
+            if(mounted) {
+              OverlayService().showTopNotification(context, "Posting restricted by Admin", Icons.lock, (){}, color: Colors.red);
+              Navigator.pop(context);
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("Error checking community permissions: $e");
+      }
+    } else if (!_isEditing) {
+      if (mounted) {
+        setState(() {
+          _visibility = _isAccountPrivate ? 'followers' : 'public';
+        });
       }
     }
   }
@@ -124,7 +189,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // --- UPDATED SAFETY CHECK FOR MULTIPLE IMAGES ---
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
 
@@ -135,9 +199,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
       if (apiKey == null || apiKey.isEmpty) return true;
 
-      // Scan only the first image to save quota/time, or scan all if strict
-      // For UX speed, scanning the first one is often a reasonable compromise, 
-      // but let's scan all for safety (limit to first 3 to prevent timeout).
       int limit = _selectedMediaFiles.length > 3 ? 3 : _selectedMediaFiles.length;
 
       for (int i = 0; i < limit; i++) {
@@ -171,7 +232,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     } catch (e) {
       debugPrint("Visual Detector Error: $e");
-      // Allow pass on API error to avoid blocking user due to tech issue
       return true; 
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -189,16 +249,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ],
       ),
     );
-  }
-
-  Future<File?> _editAndCompressPostImage(XFile pickedFile) async {
-    // For single image pick, we use editor. For multi-pick, we usually skip editor to be faster.
-    // Here we just compress.
-    final imageBytes = await pickedFile.readAsBytes();
-    final tempDir = await getTemporaryDirectory();
-    final tempFile = File('${tempDir.path}/${DateTime.now().microsecondsSinceEpoch}_${pickedFile.name}');
-    await tempFile.writeAsBytes(imageBytes);
-    return tempFile;
   }
 
   void _onTextChanged(String text) {
@@ -227,29 +277,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       });
       _onTextChanged(newText);
     }
-  }
-
-  Future<void> _loadUserData() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-    try {
-      final userDoc = await _firestore.collection('users').doc(user.uid).get();
-      if (userDoc.exists && mounted) {
-        final data = userDoc.data() as Map<String, dynamic>;
-        setState(() {
-          _userName = data['name'] ?? _userName;
-          _userEmail = user.email ?? _userEmail;
-          _avatarIconId = data['avatarIconId'] ?? 0;
-          _avatarHex = data['avatarHex'] ?? '';
-          _profileImageUrl = data['profileImageUrl'];
-          _isAccountPrivate = data['isPrivate'] ?? false;
-          
-          if (!_isEditing && _communityId == null) {
-            _visibility = _isAccountPrivate ? 'followers' : 'public';
-          }
-        });
-      }
-    } catch (e) {}
   }
 
   void _showMediaSourceSelection({required bool isVideo}) {
@@ -289,13 +316,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  // --- MODIFIED PICK MEDIA FUNCTION ---
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
     final picker = ImagePicker();
 
     try {
       if (isVideo) {
-        // Video: Still Single Selection
         final XFile? pickedFile = await picker.pickVideo(source: source, maxDuration: const Duration(minutes: 10));
         if (pickedFile != null && mounted) {
           final result = await Navigator.of(context).push(
@@ -304,31 +329,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           if (result != null && result['file'] is File) {
             setState(() {
               _mediaType = 'video';
-              _selectedMediaFiles = [result['file']]; // Reset list to single video
-              _existingMediaUrls = []; // Clear existing
+              _selectedMediaFiles = [result['file']]; 
+              _existingMediaUrls = []; 
               _checkCanPost();
             });
           }
         }
       } else {
-        // Image: Multi Selection
         if (source == ImageSource.gallery) {
           final List<XFile> pickedFiles = await picker.pickMultiImage(imageQuality: 80);
           if (pickedFiles.isNotEmpty) {
             setState(() {
-              // If previously was video, clear it.
               if (_mediaType == 'video') {
                 _selectedMediaFiles = [];
                 _existingMediaUrls = [];
               }
               _mediaType = 'image';
-              // Add new files to list
               _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path)));
               _checkCanPost();
             });
           }
         } else {
-          // Camera is single shot
           final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 80);
           if (pickedFile != null) {
              setState(() {
@@ -344,7 +365,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         }
       }
     } catch (e) {
-      print("Error picking media: $e");
+      debugPrint("Error picking media: $e");
     }
   }
 
@@ -389,19 +410,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final bool isEditing = _isEditing;
     final String? postId = widget.postId;
     
+    // Visibility Logic
     String finalVisibility = _visibility;
     if (_communityId != null) {
-        finalVisibility = 'public';
+        finalVisibility = 'public'; // Broadcasting is always public
     } else if (_isAccountPrivate && _visibility == 'public') {
       finalVisibility = 'followers';
     }
 
-    final String uid = user.uid;
-    final String uName = _userName;
+    final String uid = user.uid; // Actual Operator ID
+    final String uName = _displayName; // Display Name (User)
     final String uEmail = _userEmail;
     final int uIcon = _avatarIconId;
     final String uHex = _avatarHex;
-    final String? uProfileImg = _profileImageUrl;
+    final String? uProfileImg = _displayAvatarUrl;
 
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop();
@@ -412,8 +434,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _BackgroundUploader.startUploadSequence(
         overlayState: overlayState,
         text: text,
-        filesToUpload: filesToUpload, // Pass List
-        existingMediaUrls: currentUrls, // Pass List
+        filesToUpload: filesToUpload, 
+        existingMediaUrls: currentUrls, 
         mediaType: mediaType,
         visibility: finalVisibility,
         isEditing: isEditing,
@@ -424,7 +446,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         avatarIconId: uIcon,
         avatarHex: uHex,
         profileImageUrl: uProfileImg,
+        
         communityId: _communityId,
+        communityName: _communityName,
+        communityIcon: _communityIcon,
+        communityVerified: _communityVerified, // PASS VERIFIED STATUS
       );
     }
   }
@@ -460,6 +486,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isRestricted) return SizedBox.shrink(); 
+
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
@@ -470,12 +498,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           icon: Icon(Icons.close, color: theme.primaryColor),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: _isEditing 
-            ? Text("Edit Post", style: TextStyle(fontWeight: FontWeight.bold)) 
-            : (_communityId != null ? Text("New Community Post", style: TextStyle(fontSize: 16)) : null),
+        title: _isBroadcasting 
+            ? Row(
+                children: [
+                  Icon(Icons.campaign, color: TwitterTheme.blue, size: 20),
+                  SizedBox(width: 8),
+                  Text("Broadcasting", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ) 
+            : Text(_isEditing ? "Edit Post" : "Create Post", style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: false,
         actions: [
-          if (_communityId == null)
+          if (!_isBroadcasting) 
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10.0),
               child: Container(
@@ -540,15 +574,26 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 children: [
                   CircleAvatar(
                     radius: 24,
-                    backgroundColor: _profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(_avatarHex),
-                    backgroundImage: _profileImageUrl != null ? CachedNetworkImageProvider(_profileImageUrl!) : null,
-                    child: _profileImageUrl == null ? Icon(AvatarHelper.getIcon(_avatarIconId), color: Colors.white, size: 24) : null,
+                    backgroundColor: _displayAvatarUrl != null ? Colors.transparent : AvatarHelper.getColor(_avatarHex),
+                    backgroundImage: _displayAvatarUrl != null ? CachedNetworkImageProvider(_displayAvatarUrl!) : null,
+                    child: _displayAvatarUrl == null ? Icon(AvatarHelper.getIcon(_avatarIconId), color: Colors.white, size: 24) : null,
                   ),
                   SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          _isBroadcasting && _communityName != null ? _communityName! : _displayName, 
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold, 
+                            fontSize: 16,
+                            color: _isBroadcasting ? TwitterTheme.blue : null
+                          )
+                        ),
+                        if (_isBroadcasting)
+                          Text("Posting as Community Identity", style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)),
+                        
                         TextField(
                           controller: _postController,
                           focusNode: _postFocusNode,
@@ -557,7 +602,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           maxLines: null,
                           style: TextStyle(fontSize: 18),
                           decoration: InputDecoration(
-                            hintText: "What's happening?",
+                            hintText: _isBroadcasting ? "What's the official news?" : "What's happening?",
                             border: InputBorder.none,
                           ),
                         ),
@@ -687,12 +732,12 @@ class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
     required String text,
-    required List<File> filesToUpload, // CHANGED
-    required List<String> existingMediaUrls, // CHANGED
-    required String? mediaType,
+    required List<File> filesToUpload,
+    required List<String> existingMediaUrls,
+    String? mediaType,
     required String visibility,
     required bool isEditing,
-    required String? postId,
+    String? postId,
     required String uid,
     required String userName,
     required String userEmail,
@@ -700,6 +745,9 @@ class _BackgroundUploader {
     required String avatarHex,
     required String? profileImageUrl,
     required String? communityId,
+    String? communityName,
+    String? communityIcon,
+    bool? communityVerified,
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -730,6 +778,9 @@ class _BackgroundUploader {
       avatarHex: avatarHex,
       profileImageUrl: profileImageUrl,
       communityId: communityId,
+      communityName: communityName,
+      communityIcon: communityIcon,
+      communityVerified: communityVerified,
       onProgress: (status) {
         overlayKey.currentState?.updateStatus(status);
       },
@@ -763,6 +814,9 @@ class _BackgroundUploader {
     required String avatarHex,
     required String? profileImageUrl,
     required String? communityId,
+    String? communityName,
+    String? communityIcon,
+    bool? communityVerified,
     required Function(String) onProgress,
     required VoidCallback onSuccess,
     required Function(dynamic) onFailure,
@@ -787,7 +841,7 @@ class _BackgroundUploader {
                   deleteOrigin: false,
                 );
                 if (info != null && info.file != null) fileToUp = info.file!;
-             } catch(e) { print("Compress fail: $e"); }
+             } catch(e) { debugPrint("Compress fail: $e"); }
           }
 
           String? url = await _cloudinaryService.uploadMedia(fileToUp);
@@ -803,17 +857,13 @@ class _BackgroundUploader {
       }
 
       // 2. Prepare Data
-      // IMPORTANT: Backward Compatibility logic
-      // Old apps use 'mediaUrl' (string). New apps use 'mediaUrls' (array).
-      // We fill both. 'mediaUrl' gets the FIRST image so old app doesn't crash/show nothing.
-      
       final Map<String, dynamic> postData = {
         'text': text,
         'mediaType': mediaType,
         'visibility': visibility, 
         'isUploading': false,
-        'mediaUrls': finalUrls, // New Field
-        'mediaUrl': finalUrls.isNotEmpty ? finalUrls.first : null, // Legacy Field
+        'mediaUrls': finalUrls, 
+        'mediaUrl': finalUrls.isNotEmpty ? finalUrls.first : null, // Backward compat
       };
 
       if (isEditing && postId != null) {
@@ -822,8 +872,8 @@ class _BackgroundUploader {
       } else {
         postData.addAll({
           'timestamp': FieldValue.serverTimestamp(),
-          'userId': uid,
-          'userName': userName,
+          'userId': uid, // The Real Operator ID
+          'userName': userName, // User Name
           'userEmail': userEmail,
           'avatarIconId': avatarIconId,
           'avatarHex': avatarHex,
@@ -835,21 +885,28 @@ class _BackgroundUploader {
 
         if (communityId != null) {
           postData['communityId'] = communityId;
-          postData['visibility'] = 'public';
+          postData['isCommunityPost'] = true;
+          // SAVE COMMUNITY DISPLAY INFO
+          postData['communityName'] = communityName;
+          postData['communityIcon'] = communityIcon;
+          postData['communityVerified'] = communityVerified; // Important: Save verification status
         }
 
         await _firestore.collection('posts').add(postData);
       }
 
+      // 3. Notify Followers
       if (visibility == 'public' || visibility == 'followers') {
-        await _firestore.collection('users').doc(uid).collection('notifications').add({
-          'type': 'upload_complete',
-          'senderId': 'system', 
-          'postId': null,
-          'postTextSnippet': 'Your post was uploaded successfully.',
-          'timestamp': FieldValue.serverTimestamp(),
-          'isRead': false,
-        });
+        if (communityId == null) {
+          await _firestore.collection('users').doc(uid).collection('notifications').add({
+            'type': 'upload_complete',
+            'senderId': 'system', 
+            'postId': null,
+            'postTextSnippet': 'Your post was uploaded successfully.',
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
+        }
       }
 
       // Cleanup

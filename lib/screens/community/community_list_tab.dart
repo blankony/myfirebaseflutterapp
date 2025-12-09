@@ -5,7 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'create_community_screen.dart';
 import 'community_detail_screen.dart';
-import 'browse_communities_screen.dart'; // IMPORT FILE BARU
+import 'browse_communities_screen.dart';
+import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
 
 class CommunityListTab extends StatelessWidget {
@@ -14,125 +15,216 @@ class CommunityListTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final theme = Theme.of(context);
     if (user == null) return Center(child: Text("Login required"));
-
-    final double topContentPadding = MediaQuery.of(context).padding.top + kToolbarHeight;
 
     return Scaffold(
       backgroundColor: Colors.transparent, 
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      
+      // --- FAB POSITION: Bottom Right, Lifted for Nav Bar ---
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 100.0),
-        child: FloatingActionButton.extended(
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen()));
-          },
-          label: Text("Create Community"),
-          icon: Icon(Icons.add),
+        padding: const EdgeInsets.only(bottom: 90.0, right: 16.0), 
+        child: FloatingActionButton(
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen())),
           backgroundColor: TwitterTheme.blue,
-          elevation: 4,
+          child: Icon(Icons.add_business, color: Colors.white),
+          tooltip: "Create Channel",
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('communities')
-                  .where('members', arrayContains: user.uid)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
-
-                final docs = snapshot.data?.docs ?? [];
-                
-                // HEADER BUTTON: Browse/Explore (Selalu muncul di paling atas list)
-                Widget browseButton = Padding(
-                  padding: EdgeInsets.only(top: topContentPadding, left: 16, right: 16, bottom: 10),
-                  child: InkWell(
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowseCommunitiesScreen())),
+      
+      body: CustomScrollView(
+        slivers: [
+          // 1. HEADER (Browse Button)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + kToolbarHeight, 16, 8),
+              child: InkWell(
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowseCommunitiesScreen())),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
                     borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: TwitterTheme.blue.withOpacity(0.5)),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]
+                    border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4))],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.explore, color: TwitterTheme.blue),
+                      SizedBox(width: 8),
+                      Text("Discover Channels", style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue, fontSize: 16)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // 2. MY CHANNELS (Managed by Me)
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('communities')
+                .where('ownerId', isEqualTo: user.uid)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return SliverToBoxAdapter(child: SizedBox.shrink());
+              }
+
+              final myCommunities = snapshot.data!.docs;
+
+              return SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                      child: Text("Your Channels", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    ),
+                    SizedBox(
+                      height: 110,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: myCommunities.length,
+                        itemBuilder: (context, index) {
+                          final doc = myCommunities[index];
+                          final data = doc.data() as Map<String, dynamic>;
+                          final String name = data['name'] ?? 'Channel';
+                          final String? imageUrl = data['imageUrl'];
+
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: GestureDetector(
+                              onTap: () {
+                                Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)
+                                ));
+                              },
+                              child: Column(
+                                children: [
+                                  Container(
+                                    padding: EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: TwitterTheme.blue, width: 2),
+                                    ),
+                                    child: CircleAvatar(
+                                      radius: 30,
+                                      backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                                      backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
+                                      child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
+                                    ),
+                                  ),
+                                  SizedBox(height: 6),
+                                  SizedBox(
+                                    width: 70,
+                                    child: Text(
+                                      name, 
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500), 
+                                      overflow: TextOverflow.ellipsis, 
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                    ),
+                    Divider(height: 24, thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
+                  ],
+                ),
+              );
+            },
+          ),
+
+          // 3. COMMUNITY POSTS FEED HEADER
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Text("Broadcasts Feed", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            ),
+          ),
+
+          // 4. FEED CONTENT
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('communities').where('followers', arrayContains: user.uid).snapshots(),
+            builder: (context, communitySnap) {
+              if (!communitySnap.hasData) return SliverToBoxAdapter(child: Center(child: CircularProgressIndicator()));
+              
+              // Get IDs of followed communities
+              final followedCommunityIds = communitySnap.data!.docs.map((doc) => doc.id).toList();
+              
+              if (followedCommunityIds.isEmpty) {
+                return SliverToBoxAdapter(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
                         children: [
-                          Icon(Icons.explore, color: TwitterTheme.blue),
-                          SizedBox(width: 8),
-                          Text("Browse & Join Communities", style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue, fontSize: 16)),
+                          Icon(Icons.feed_outlined, size: 48, color: Colors.grey),
+                          SizedBox(height: 16),
+                          Text("Join channels to see broadcasts here.", style: TextStyle(color: Colors.grey)),
                         ],
                       ),
                     ),
                   ),
                 );
+              }
 
-                if (docs.isEmpty) {
-                  return Stack(
-                    children: [
-                      // Tombol Browse tetap ada walau kosong
-                      Align(alignment: Alignment.topCenter, child: browseButton),
-                      
-                      Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(height: 60), // Spasi agar tidak numpuk tombol browse
-                            Icon(Icons.groups_2_outlined, size: 80, color: Colors.grey.withOpacity(0.5)),
-                            SizedBox(height: 16),
-                            Text("You haven't joined any communities.", style: TextStyle(color: Colors.grey)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                }
-
-                return ListView.builder(
-                  padding: EdgeInsets.only(bottom: 80),
-                  itemCount: docs.length + 1, // +1 untuk header browse
-                  itemBuilder: (context, index) {
-                    // Item pertama adalah tombol Browse
-                    if (index == 0) return browseButton;
-
-                    final doc = docs[index - 1];
+              return StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('posts')
+                    .orderBy('timestamp', descending: true)
+                    .limit(50) 
+                    .snapshots(),
+                builder: (context, postSnap) {
+                  if (postSnap.connectionState == ConnectionState.waiting) return SliverToBoxAdapter(child: Center(child: CircularProgressIndicator()));
+                  
+                  final allPosts = postSnap.data?.docs ?? [];
+                  final communityPosts = allPosts.where((doc) {
                     final data = doc.data() as Map<String, dynamic>;
-                    
-                    final String name = data['name'] ?? 'Unnamed';
-                    final String? imageUrl = data['imageUrl'];
-                    final int memberCount = (data['members'] is List) ? (data['members'] as List).length : 0;
+                    // Filter: Must have communityId AND that ID must be in our followed list
+                    return data['communityId'] != null && followedCommunityIds.contains(data['communityId']);
+                  }).toList();
 
-                    return Card(
-                      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: ListTile(
-                        contentPadding: EdgeInsets.all(12),
-                        leading: CircleAvatar(
-                          radius: 28,
-                          backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-                          backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
-                          child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)) : null,
-                        ),
-                        title: Text(name, style: TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text("$memberCount Members"),
-                        trailing: Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                        onTap: () {
-                          Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)
-                          ));
-                        },
-                      ),
+                  if (communityPosts.isEmpty) {
+                    return SliverToBoxAdapter(
+                      child: Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32), 
+                          child: Text("No recent broadcasts from your channels.", style: TextStyle(color: Colors.grey))
+                        )
+                      )
                     );
-                  },
-                );
-              },
-            ),
+                  }
+
+                  return SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final post = communityPosts[index];
+                        final pData = post.data() as Map<String, dynamic>;
+                        return BlogPostCard(
+                          postId: post.id,
+                          postData: pData,
+                          isOwner: pData['userId'] == user.uid, 
+                          heroContextId: 'community_feed',
+                        );
+                      },
+                      childCount: communityPosts.length,
+                    ),
+                  );
+                },
+              );
+            },
           ),
+          
+          // Spacer for FAB visibility
+          SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ),
     );
