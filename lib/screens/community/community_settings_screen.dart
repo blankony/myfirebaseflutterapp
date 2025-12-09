@@ -1,11 +1,13 @@
 // ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'dart:io'; 
+import 'dart:math'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // REQUIRED IMPORT
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart'; 
 import 'package:image_cropper/image_cropper.dart'; 
+import 'package:flutter_colorpicker/flutter_colorpicker.dart'; 
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart'; 
 import '../../main.dart';
@@ -32,7 +34,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
   final CloudinaryService _cloudinaryService = CloudinaryService();
   late TabController _tabController;
   
-  // Controllers for "Instantly Editable" fields
   late TextEditingController _nameController;
   late TextEditingController _descController;
   
@@ -41,7 +42,7 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
 
   bool _isDeleting = false;
   bool _isUploadingImage = false;
-  bool _isSavingInfo = false; // Loading state for saving info
+  bool _isSavingInfo = false;
   bool _allowMemberPosts = false;
 
   @override
@@ -49,7 +50,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
     super.initState();
     _tabController = TabController(length: 2, vsync: this); 
     
-    // Initialize permissions and text fields with current data
     _allowMemberPosts = widget.communityData['allowMemberPosts'] ?? false;
     _nameController = TextEditingController(text: widget.communityData['name'] ?? '');
     _descController = TextEditingController(text: widget.communityData['description'] ?? '');
@@ -64,7 +64,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
     super.dispose();
   }
 
-  // --- SAVE INFO LOGIC ---
   Future<void> _saveInfo() async {
     if (_nameController.text.trim().isEmpty) {
       OverlayService().showTopNotification(context, "Name cannot be empty", Icons.warning, (){}, color: Colors.orange);
@@ -94,7 +93,7 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
         'allowMemberPosts': value
       });
     } catch(e) {
-      setState(() => _allowMemberPosts = !value); // Revert on fail
+      setState(() => _allowMemberPosts = !value); 
     }
   }
 
@@ -177,12 +176,11 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
     );
   }
 
-  Future<void> _updateRole(String targetUid, String action) async {
+  Future<void> _updateRoleAccess(String targetUid, String action) async {
     final docRef = FirebaseFirestore.instance.collection('communities').doc(widget.communityId);
     try {
       final batch = FirebaseFirestore.instance.batch();
       
-      // Cleanup existing roles
       batch.update(docRef, {'admins': FieldValue.arrayRemove([targetUid])});
       batch.update(docRef, {'editors': FieldValue.arrayRemove([targetUid])});
       batch.update(docRef, {'moderators': FieldValue.arrayRemove([targetUid])});
@@ -195,14 +193,136 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
         batch.update(docRef, {'moderators': FieldValue.arrayUnion([targetUid])});
       } else if (action == 'kick') {
         batch.update(docRef, {'followers': FieldValue.arrayRemove([targetUid])});
-        // Also remove any pending reqs just in case
         batch.update(docRef, {'pendingMembers': FieldValue.arrayRemove([targetUid])});
+        batch.update(docRef, {'adminRoles.$targetUid': FieldValue.delete()});
       }
 
       await batch.commit();
-      OverlayService().showTopNotification(context, "Updated successfully", Icons.check_circle, (){});
+      OverlayService().showTopNotification(context, "Permissions Updated", Icons.check_circle, (){});
     } catch (e) {
       OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red);
+    }
+  }
+
+  void _showEditRoleAppearanceDialog(BuildContext context, String userId, String currentTitle, Color currentColor) {
+    final TextEditingController titleController = TextEditingController(text: currentTitle);
+    Color selectedColor = currentColor;
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: "Dismiss",
+      transitionDuration: Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Align(
+              alignment: Alignment.center,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  margin: EdgeInsets.all(20),
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0,4))],
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text("Customize Role", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 20),
+                        TextField(
+                          controller: titleController,
+                          decoration: InputDecoration(labelText: "Role Title (e.g. Ketua BEM)", filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                        ),
+                        SizedBox(height: 20),
+                        Text("Role Color", style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).hintColor)),
+                        SizedBox(height: 10),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            ...AvatarHelper.presetColors.take(5).map((c) => GestureDetector(
+                              onTap: () => setState(() => selectedColor = c),
+                              child: Container(width: 32, height: 32, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: selectedColor == c ? Border.all(width: 3, color: Colors.black) : null)),
+                            )),
+                            IconButton(
+                              icon: Icon(Icons.shuffle),
+                              onPressed: () => setState(() => selectedColor = Color((Random().nextDouble() * 0xFFFFFF).toInt()).withOpacity(1.0)),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.colorize),
+                              onPressed: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (c) => AlertDialog(
+                                    title: const Text('Pick a color!'),
+                                    content: SingleChildScrollView(
+                                      child: ColorPicker(
+                                        pickerColor: selectedColor,
+                                        onColorChanged: (c) => selectedColor = c,
+                                      ),
+                                    ),
+                                    actions: <Widget>[
+                                      ElevatedButton(onPressed: () { setState((){}); Navigator.of(c).pop(); }, child: const Text('Got it')),
+                                    ],
+                                  ),
+                                );
+                              },
+                            )
+                          ],
+                        ),
+                        SizedBox(height: 20),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(color: selectedColor, borderRadius: BorderRadius.circular(4)),
+                          child: Text(titleController.text.isEmpty ? "Role" : titleController.text, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                        SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel")),
+                            ElevatedButton(
+                              onPressed: () async {
+                                Navigator.pop(context);
+                                await _saveRoleAppearance(userId, titleController.text, selectedColor);
+                              },
+                              child: Text("Save"),
+                            )
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+      transitionBuilder: (context, anim1, anim2, child) => ScaleTransition(scale: CurvedAnimation(parent: anim1, curve: Curves.easeOutBack), child: child),
+    );
+  }
+
+  Future<void> _saveRoleAppearance(String userId, String title, Color color) async {
+    try {
+      final hex = '0x${color.value.toRadixString(16).toUpperCase()}';
+      await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).set({
+        'adminRoles': {
+          userId: {
+            'title': title,
+            'color': hex
+          }
+        }
+      }, SetOptions(merge: true));
+      if(mounted) OverlayService().showTopNotification(context, "Role Updated", Icons.check, (){});
+    } catch(e) {
+      if(mounted) OverlayService().showTopNotification(context, "Failed to update role", Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -253,12 +373,12 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
           final String imageUrl = data['imageUrl'] ?? '';
           final String bannerUrl = data['bannerImageUrl'] ?? '';
 
-          // Flatten all users
           final Set<String> allUserIds = {};
           final List followers = data['followers'] ?? [];
           final List admins = data['admins'] ?? [];
           final List editors = data['editors'] ?? [];
           final List moderators = data['moderators'] ?? [];
+          final Map<String, dynamic> customRoles = data['adminRoles'] ?? {};
           
           allUserIds.addAll(List<String>.from(followers));
           allUserIds.addAll(List<String>.from(admins));
@@ -268,14 +388,12 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
 
           return Column(
             children: [
-              // --- HEADER SECTION (Banner + Avatar + Edit) ---
               SizedBox(
                 height: 180,
                 child: Stack(
                   clipBehavior: Clip.none,
                   alignment: Alignment.topCenter,
                   children: [
-                    // Banner
                     GestureDetector(
                       onTap: (widget.isOwner || widget.isAdmin) ? () => _showImageSourceSelection(isBanner: true) : null,
                       child: Container(
@@ -293,7 +411,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                       ),
                     ),
                     
-                    // Avatar
                     Positioned(
                       bottom: 0,
                       left: 20,
@@ -316,7 +433,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                 ),
               ),
 
-              // --- TABS ---
               TabBar(
                 controller: _tabController,
                 labelColor: TwitterTheme.blue,
@@ -332,7 +448,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                     ListView(
                       padding: EdgeInsets.all(16),
                       children: [
-                        // Editable Name
                         Text("Community Name", style: TextStyle(fontWeight: FontWeight.bold, color: theme.hintColor)),
                         SizedBox(height: 8),
                         TextField(
@@ -345,7 +460,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                         
                         SizedBox(height: 16),
                         
-                        // Editable Description
                         Text("Description", style: TextStyle(fontWeight: FontWeight.bold, color: theme.hintColor)),
                         SizedBox(height: 8),
                         TextField(
@@ -359,7 +473,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
 
                         SizedBox(height: 16),
 
-                        // Save Button
                         if (widget.isOwner || widget.isAdmin)
                           SizedBox(
                             width: double.infinity,
@@ -380,7 +493,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                         SizedBox(height: 24),
                         Divider(),
 
-                        // Permissions
                         SwitchListTile(
                           title: Text("Allow Members to Post"),
                           subtitle: Text("If off, only Admins/Editors can post."),
@@ -391,7 +503,6 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                         
                         Divider(),
                         
-                        // Delete
                         if (widget.isOwner)
                           ListTile(
                             leading: Icon(Icons.delete_forever, color: Colors.red),
@@ -423,7 +534,7 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                           child: _buildMemberList(
                             allUserIds.toList(), 
                             ownerId, admins, editors, moderators, 
-                            data
+                            customRoles
                           ),
                         ),
                       ],
@@ -444,7 +555,7 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
     List admins, 
     List editors, 
     List moderators, 
-    Map<String, dynamic> communityData
+    Map<String, dynamic> customRoles
   ) {
     if (userIds.isEmpty) return Center(child: Text("No members found."));
 
@@ -452,6 +563,8 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
       itemCount: userIds.length,
       itemBuilder: (context, index) {
         final userId = userIds[index];
+        final currentUid = FirebaseAuth.instance.currentUser?.uid;
+        final isMe = userId == currentUid;
         
         return FutureBuilder<DocumentSnapshot>(
           future: FirebaseFirestore.instance.collection('users').doc(userId).get(),
@@ -463,21 +576,39 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
             final String email = userData['email'] ?? '';
             final String? avatarUrl = userData['profileImageUrl'];
 
-            // SEARCH FILTER
             if (_searchQuery.isNotEmpty && !name.toLowerCase().contains(_searchQuery) && !email.toLowerCase().contains(_searchQuery)) {
               return SizedBox.shrink();
             }
 
-            // DETERMINE ROLE
-            String role = "Member";
-            Color roleColor = Colors.grey;
-            if (userId == ownerId) { role = "OWNER"; roleColor = Colors.red; }
-            else if (admins.contains(userId)) { role = "Admin"; roleColor = Colors.blue; }
-            else if (editors.contains(userId)) { role = "Editor"; roleColor = Colors.green; }
-            else if (moderators.contains(userId)) { role = "Moderator"; roleColor = Colors.orange; }
+            String defaultRole = "Member";
+            Color defaultColor = Colors.grey;
+            bool hasPrivilege = false;
 
-            // ACTION PERMISSIONS
-            final bool canModify = widget.isOwner || (widget.isAdmin && userId != ownerId);
+            if (userId == ownerId) { 
+              defaultRole = "OWNER"; 
+              defaultColor = Colors.red; 
+              hasPrivilege = true;
+            } else if (admins.contains(userId)) { 
+              defaultRole = "Admin"; 
+              defaultColor = Colors.blue; 
+              hasPrivilege = true;
+            } else if (editors.contains(userId)) { 
+              defaultRole = "Editor"; 
+              defaultColor = Colors.green; 
+              hasPrivilege = true;
+            } else if (moderators.contains(userId)) { 
+              defaultRole = "Moderator"; 
+              defaultColor = Colors.orange; 
+              hasPrivilege = true;
+            }
+
+            final roleOverride = customRoles[userId] ?? {};
+            final String displayRole = roleOverride['title'] ?? defaultRole;
+            final Color displayColor = roleOverride['color'] != null 
+                ? AvatarHelper.getColor(roleOverride['color']) 
+                : defaultColor;
+
+            final bool canManageUser = widget.isOwner || (widget.isAdmin && userId != ownerId);
 
             return ListTile(
               leading: CircleAvatar(
@@ -485,19 +616,54 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> with 
                 child: avatarUrl == null ? Icon(Icons.person) : null,
               ),
               title: Text(name),
-              subtitle: Text(role, style: TextStyle(color: roleColor, fontWeight: FontWeight.bold, fontSize: 12)),
+              subtitle: Container(
+                margin: EdgeInsets.only(top: 4),
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: displayColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: displayColor.withOpacity(0.5))
+                ),
+                child: Text(
+                  displayRole, 
+                  style: TextStyle(color: displayColor, fontWeight: FontWeight.bold, fontSize: 10)
+                ),
+              ),
               
-              // FIX: FirebaseAuth Access
-              trailing: (canModify && userId != FirebaseAuth.instance.currentUser?.uid) 
+              trailing: (isMe || canManageUser) 
                 ? PopupMenuButton<String>(
-                    onSelected: (val) => _updateRole(userId, val),
+                    onSelected: (val) {
+                      if (val == 'edit_appearance') {
+                        _showEditRoleAppearanceDialog(context, userId, displayRole, displayColor);
+                      } else {
+                        _updateRoleAccess(userId, val);
+                      }
+                    },
                     itemBuilder: (context) => [
-                      if (widget.isOwner) PopupMenuItem(value: 'make_admin', child: Text("Promote to Admin")),
-                      PopupMenuItem(value: 'make_editor', child: Text("Set as Editor")),
-                      PopupMenuItem(value: 'make_mod', child: Text("Set as Moderator")),
-                      PopupMenuItem(value: 'remove_role', child: Text("Demote to Member")),
-                      PopupMenuDivider(),
-                      PopupMenuItem(value: 'kick', child: Text("Kick User", style: TextStyle(color: Colors.red))),
+                      // Allow me to edit myself if I have a role, OR allow manager to edit others
+                      if ((isMe && hasPrivilege) || canManageUser) 
+                        PopupMenuItem(
+                          value: 'edit_appearance', 
+                          child: Row(
+                            children: const [
+                              Icon(Icons.palette_outlined, size: 20, color: Colors.purple), 
+                              SizedBox(width: 8), 
+                              Text("Customize Role")
+                            ],
+                          )
+                        ),
+                      
+                      if ((isMe && hasPrivilege && canManageUser) || canManageUser) PopupMenuDivider(),
+
+                      // Only managers can change actual permissions
+                      if (canManageUser && !isMe) ...[
+                        if (widget.isOwner) PopupMenuItem(value: 'make_admin', child: Text("Promote to Admin")),
+                        PopupMenuItem(value: 'make_editor', child: Text("Set as Editor")),
+                        PopupMenuItem(value: 'make_mod', child: Text("Set as Moderator")),
+                        PopupMenuItem(value: 'remove_role', child: Text("Demote to Member")),
+                        PopupMenuDivider(),
+                        PopupMenuItem(value: 'kick', child: Text("Kick User", style: TextStyle(color: Colors.red))),
+                      ]
                     ],
                   ) 
                 : null,

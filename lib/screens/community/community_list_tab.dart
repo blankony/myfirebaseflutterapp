@@ -9,76 +9,85 @@ import 'browse_communities_screen.dart';
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
 
-class CommunityListTab extends StatelessWidget {
+class CommunityListTab extends StatefulWidget {
   const CommunityListTab({super.key});
 
   @override
+  State<CommunityListTab> createState() => _CommunityListTabState();
+}
+
+class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  Route _createSlideUpRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(0.0, 1.0); 
+        const end = Offset.zero;
+        const curve = Curves.easeOutQuart;
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        return SlideTransition(position: animation.drive(tween), child: child);
+      },
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     final user = FirebaseAuth.instance.currentUser;
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     if (user == null) return Center(child: Text("Login required"));
+
+    // Calculate tighter top padding
+    final double topPadding = MediaQuery.of(context).padding.top + kToolbarHeight - 10; 
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: CustomScrollView(
         slivers: [
-          // 1. HEADER (Browse & Create Buttons)
+          // 1. HEADER (Action Buttons)
           SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + kToolbarHeight, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowseCommunitiesScreen())),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: theme.cardColor,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4))],
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(Icons.explore, color: TwitterTheme.blue, size: 28),
-                            SizedBox(height: 8),
-                            Text("Discover", style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)),
-                          ],
-                        ),
+              padding: EdgeInsets.fromLTRB(16, topPadding, 16, 16),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 600),
+                curve: Curves.easeOutBack,
+                builder: (context, value, child) {
+                  return Transform.scale(scale: value, child: child);
+                },
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildHeaderAction(
+                        context,
+                        "Discover",
+                        Icons.explore_outlined,
+                        TwitterTheme.blue,
+                        () => Navigator.push(context, _createSlideUpRoute(BrowseCommunitiesScreen())),
                       ),
                     ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen())),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: theme.cardColor,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.green.withOpacity(0.3)),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4))],
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(Icons.group_add_rounded, color: Colors.green, size: 28),
-                            SizedBox(height: 8),
-                            Text("Create Channel", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-                          ],
-                        ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: _buildHeaderAction(
+                        context,
+                        "Create",
+                        Icons.group_add_outlined,
+                        Colors.green,
+                        () => Navigator.push(context, _createSlideUpRoute(CreateCommunityScreen())),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
 
-          // 2. MY CHANNELS (Managed by Me)
+          // 2. YOUR CHANNELS
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('communities')
@@ -97,10 +106,13 @@ class CommunityListTab extends StatelessWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                      child: Text("Your Channels", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                      child: Text(
+                        "Your Channels", 
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)
+                      ),
                     ),
                     SizedBox(
-                      height: 110,
+                      height: 120, // Increased slightly for breathing room
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         padding: EdgeInsets.symmetric(horizontal: 12),
@@ -108,62 +120,36 @@ class CommunityListTab extends StatelessWidget {
                         itemBuilder: (context, index) {
                           final doc = myCommunities[index];
                           final data = doc.data() as Map<String, dynamic>;
-                          final String name = data['name'] ?? 'Channel';
-                          final String? imageUrl = data['imageUrl'];
-
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: GestureDetector(
-                              onTap: () {
-                                Navigator.push(context, MaterialPageRoute(
-                                  builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)
-                                ));
-                              },
-                              child: Column(
-                                children: [
-                                  Container(
-                                    padding: EdgeInsets.all(2),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: TwitterTheme.blue, width: 2),
-                                    ),
-                                    child: CircleAvatar(
-                                      radius: 30,
-                                      backgroundColor: TwitterTheme.blue.withOpacity(0.1),
-                                      backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
-                                      child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
-                                    ),
-                                  ),
-                                  SizedBox(height: 6),
-                                  SizedBox(
-                                    width: 70,
-                                    child: Text(
-                                      name, 
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500), 
-                                      overflow: TextOverflow.ellipsis, 
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                          
+                          // Manual Staggered Animation (Without external package)
+                          return TweenAnimationBuilder<Offset>(
+                            tween: Tween(begin: Offset(100, 0), end: Offset.zero),
+                            duration: Duration(milliseconds: 400 + (index * 100)),
+                            curve: Curves.easeOutQuart,
+                            builder: (context, offset, child) => Transform.translate(offset: offset, child: child),
+                            child: _buildMyChannelItem(context, doc.id, data),
                           );
                         },
                       ),
                     ),
-                    Divider(height: 24, thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
+                    Divider(height: 32, thickness: 1, color: theme.dividerColor.withOpacity(0.5)),
                   ],
                 ),
               );
             },
           ),
 
-          // 3. COMMUNITY POSTS FEED HEADER
+          // 3. FEED HEADER
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Text("Broadcasts Feed", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0.0),
+              child: Row(
+                children: [
+                  Icon(Icons.dynamic_feed, color: theme.primaryColor, size: 20),
+                  SizedBox(width: 8),
+                  Text("Broadcast Feed", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                ],
+              ),
             ),
           ),
 
@@ -171,22 +157,21 @@ class CommunityListTab extends StatelessWidget {
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('communities').where('followers', arrayContains: user.uid).snapshots(),
             builder: (context, communitySnap) {
-              if (!communitySnap.hasData) return SliverToBoxAdapter(child: Center(child: CircularProgressIndicator()));
+              if (!communitySnap.hasData) return SliverToBoxAdapter(child: SizedBox(height: 200, child: Center(child: CircularProgressIndicator())));
               
               final followedCommunityIds = communitySnap.data!.docs.map((doc) => doc.id).toList();
               
               if (followedCommunityIds.isEmpty) {
                 return SliverToBoxAdapter(
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32.0),
-                      child: Column(
-                        children: [
-                          Icon(Icons.feed_outlined, size: 48, color: Colors.grey),
-                          SizedBox(height: 16),
-                          Text("Join channels to see broadcasts here.", style: TextStyle(color: Colors.grey)),
-                        ],
-                      ),
+                  child: Container(
+                    padding: EdgeInsets.all(40),
+                    alignment: Alignment.center,
+                    child: Column(
+                      children: [
+                        Icon(Icons.feed_outlined, size: 48, color: theme.disabledColor),
+                        SizedBox(height: 16),
+                        Text("Join communities to see updates here.", style: TextStyle(color: theme.hintColor)),
+                      ],
                     ),
                   ),
                 );
@@ -198,7 +183,7 @@ class CommunityListTab extends StatelessWidget {
                     .limit(50) 
                     .snapshots(),
                 builder: (context, postSnap) {
-                  if (postSnap.connectionState == ConnectionState.waiting) return SliverToBoxAdapter(child: Center(child: CircularProgressIndicator()));
+                  if (postSnap.connectionState == ConnectionState.waiting) return SliverToBoxAdapter(child: SizedBox(height: 100, child: Center(child: CircularProgressIndicator())));
                   
                   final allPosts = postSnap.data?.docs ?? [];
                   final communityPosts = allPosts.where((doc) {
@@ -208,11 +193,9 @@ class CommunityListTab extends StatelessWidget {
 
                   if (communityPosts.isEmpty) {
                     return SliverToBoxAdapter(
-                      child: Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(32), 
-                          child: Text("No recent broadcasts from your channels.", style: TextStyle(color: Colors.grey))
-                        )
+                      child: Padding(
+                        padding: EdgeInsets.all(40), 
+                        child: Center(child: Text("No recent broadcasts.", style: TextStyle(color: theme.hintColor)))
                       )
                     );
                   }
@@ -222,11 +205,19 @@ class CommunityListTab extends StatelessWidget {
                       (context, index) {
                         final post = communityPosts[index];
                         final pData = post.data() as Map<String, dynamic>;
-                        return BlogPostCard(
-                          postId: post.id,
-                          postData: pData,
-                          isOwner: pData['userId'] == user.uid, 
-                          heroContextId: 'community_feed',
+                        
+                        // Entrance Animation for Feed
+                        return TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.0, end: 1.0),
+                          duration: Duration(milliseconds: 500),
+                          curve: Curves.easeOut,
+                          builder: (context, val, child) => Opacity(opacity: val, child: Transform.translate(offset: Offset(0, 50 * (1-val)), child: child)),
+                          child: BlogPostCard(
+                            postId: post.id,
+                            postData: pData,
+                            isOwner: pData['userId'] == user.uid, 
+                            heroContextId: 'community_feed',
+                          ),
                         );
                       },
                       childCount: communityPosts.length,
@@ -239,6 +230,83 @@ class CommunityListTab extends StatelessWidget {
           
           SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderAction(BuildContext context, String label, IconData icon, Color color, VoidCallback onTap) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.05),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            )
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 26),
+            SizedBox(height: 8),
+            Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMyChannelItem(BuildContext context, String id, Map<String, dynamic> data) {
+    final String name = data['name'] ?? 'Channel';
+    final String? imageUrl = data['imageUrl'];
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6.0),
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => CommunityDetailScreen(communityId: id, communityData: data)
+          ));
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: TwitterTheme.blue.withOpacity(0.5), width: 2),
+                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0,2))]
+              ),
+              child: CircleAvatar(
+                radius: 32,
+                backgroundColor: theme.cardColor,
+                backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
+                child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: TwitterTheme.blue)) : null,
+              ),
+            ),
+            SizedBox(height: 8),
+            SizedBox(
+              width: 75,
+              child: Text(
+                name, 
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600), 
+                overflow: TextOverflow.ellipsis, 
+                textAlign: TextAlign.center,
+                maxLines: 1,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
