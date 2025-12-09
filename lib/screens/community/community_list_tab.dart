@@ -19,45 +19,61 @@ class CommunityListTab extends StatelessWidget {
     if (user == null) return Center(child: Text("Login required"));
 
     return Scaffold(
-      backgroundColor: Colors.transparent, 
-      
-      // --- FAB POSITION: Bottom Right, Lifted for Nav Bar ---
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 90.0, right: 16.0), 
-        child: FloatingActionButton(
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen())),
-          backgroundColor: TwitterTheme.blue,
-          child: Icon(Icons.add_business, color: Colors.white),
-          tooltip: "Create Channel",
-        ),
-      ),
-      
+      backgroundColor: Colors.transparent,
       body: CustomScrollView(
         slivers: [
-          // 1. HEADER (Browse Button)
+          // 1. HEADER (Browse & Create Buttons)
           SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + kToolbarHeight, 16, 8),
-              child: InkWell(
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowseCommunitiesScreen())),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: theme.cardColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4))],
+              child: Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BrowseCommunitiesScreen())),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: theme.cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4))],
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(Icons.explore, color: TwitterTheme.blue, size: 28),
+                            SizedBox(height: 8),
+                            Text("Discover", style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.explore, color: TwitterTheme.blue),
-                      SizedBox(width: 8),
-                      Text("Discover Channels", style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue, fontSize: 16)),
-                    ],
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CreateCommunityScreen())),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: theme.cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.green.withOpacity(0.3)),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: Offset(0, 4))],
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(Icons.group_add_rounded, color: Colors.green, size: 28),
+                            SizedBox(height: 8),
+                            Text("Create Channel", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -157,7 +173,6 @@ class CommunityListTab extends StatelessWidget {
             builder: (context, communitySnap) {
               if (!communitySnap.hasData) return SliverToBoxAdapter(child: Center(child: CircularProgressIndicator()));
               
-              // Get IDs of followed communities
               final followedCommunityIds = communitySnap.data!.docs.map((doc) => doc.id).toList();
               
               if (followedCommunityIds.isEmpty) {
@@ -188,7 +203,6 @@ class CommunityListTab extends StatelessWidget {
                   final allPosts = postSnap.data?.docs ?? [];
                   final communityPosts = allPosts.where((doc) {
                     final data = doc.data() as Map<String, dynamic>;
-                    // Filter: Must have communityId AND that ID must be in our followed list
                     return data['communityId'] != null && followedCommunityIds.contains(data['communityId']);
                   }).toList();
 
@@ -223,7 +237,6 @@ class CommunityListTab extends StatelessWidget {
             },
           ),
           
-          // Spacer for FAB visibility
           SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ),

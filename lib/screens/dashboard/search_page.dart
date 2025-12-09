@@ -66,6 +66,10 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (widget.isSearching && !oldWidget.isSearching) {
       _tabController.index = 0;
+      // Request focus only if explicitly entering search mode
+      Future.delayed(Duration(milliseconds: 100), () {
+        if(mounted && widget.isSearching) FocusScope.of(context).requestFocus(_searchFocusNode);
+      });
     }
     
     if (oldWidget.isSearching && !widget.isSearching) {
@@ -73,7 +77,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       _searchText = '';
       _searchSuggestion = null;
       _stopListening();
-      FocusScope.of(context).unfocus(); 
+      FocusScope.of(context).unfocus(); // Explicitly unfocus
     }
   }
 
@@ -266,96 +270,99 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
                   child: Container(
                     color: theme.scaffoldBackgroundColor,
-                    child: SingleChildScrollView(
-                      physics: const NeverScrollableScrollPhysics(),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: screenWidth,
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            child: Center(
-                              child: TextField(
-                                controller: _searchController,
-                                focusNode: _searchFocusNode,
-                                autofocus: false, 
-                                readOnly: _isListening, 
-                                decoration: InputDecoration(
-                                  hintText: _isListening ? 'Mendengarkan...' : 'Tahan mic untuk bicara...',
-                                  hintStyle: TextStyle(
-                                    color: _isListening ? TwitterTheme.blue : theme.hintColor,
-                                    fontStyle: _isListening ? FontStyle.italic : FontStyle.normal,
-                                    fontWeight: _isListening ? FontWeight.bold : FontWeight.normal,
-                                  ),
-                                  prefixIcon: Icon(Icons.search),
-                                  suffixIcon: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (_searchController.text.isNotEmpty)
-                                        IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch),
-                                      
-                                      Listener(
-                                        onPointerDown: (details) => _startListening(),
-                                        onPointerUp: (details) => _stopListening(),
-                                        onPointerCancel: (details) => _stopListening(),
-                                        child: Padding(
-                                          padding: const EdgeInsets.only(right: 12.0, left: 4.0),
-                                          child: ScaleTransition(
-                                            scale: _micAnimController,
-                                            child: Container(
-                                              padding: EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: _isListening ? Colors.red : Colors.transparent,
-                                                boxShadow: _isListening ? [
-                                                  BoxShadow(color: Colors.red.withOpacity(0.4), blurRadius: 10, spreadRadius: 2)
-                                                ] : null,
+                    // FIX: Ensure TextField is not built/focused if not searching
+                    child: widget.isSearching 
+                        ? SingleChildScrollView(
+                            physics: const NeverScrollableScrollPhysics(),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: screenWidth,
+                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  child: Center(
+                                    child: TextField(
+                                      controller: _searchController,
+                                      focusNode: _searchFocusNode,
+                                      autofocus: false, // Managed manually
+                                      readOnly: _isListening, 
+                                      decoration: InputDecoration(
+                                        hintText: _isListening ? 'Mendengarkan...' : 'Tahan mic untuk bicara...',
+                                        hintStyle: TextStyle(
+                                          color: _isListening ? TwitterTheme.blue : theme.hintColor,
+                                          fontStyle: _isListening ? FontStyle.italic : FontStyle.normal,
+                                          fontWeight: _isListening ? FontWeight.bold : FontWeight.normal,
+                                        ),
+                                        prefixIcon: Icon(Icons.search),
+                                        suffixIcon: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (_searchController.text.isNotEmpty)
+                                              IconButton(icon: Icon(Icons.clear), onPressed: _clearSearch),
+                                            
+                                            Listener(
+                                              onPointerDown: (details) => _startListening(),
+                                              onPointerUp: (details) => _stopListening(),
+                                              onPointerCancel: (details) => _stopListening(),
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(right: 12.0, left: 4.0),
+                                                child: ScaleTransition(
+                                                  scale: _micAnimController,
+                                                  child: Container(
+                                                    padding: EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: _isListening ? Colors.red : Colors.transparent,
+                                                      boxShadow: _isListening ? [
+                                                        BoxShadow(color: Colors.red.withOpacity(0.4), blurRadius: 10, spreadRadius: 2)
+                                                      ] : null,
+                                                    ),
+                                                    child: Icon(
+                                                      _isListening ? Icons.mic : Icons.mic_none,
+                                                      color: _isListening ? Colors.white : theme.primaryColor,
+                                                      size: 24,
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
-                                              child: Icon(
-                                                _isListening ? Icons.mic : Icons.mic_none,
-                                                color: _isListening ? Colors.white : theme.primaryColor,
-                                                size: 24,
+                                            ),
+                                          ],
+                                        ),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+                                        filled: true,
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+                                      ),
+                                      onChanged: _onSearchChanged,
+                                    ),
+                                  ),
+                                ),
+                                if (_searchSuggestion != null && widget.isSearching)
+                                  InkWell(
+                                    onTap: _applySuggestion,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(bottom: 8.0, left: 24.0, right: 24.0),
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.lightbulb_outline, size: 14, color: TwitterTheme.blue),
+                                          SizedBox(width: 8),
+                                          Expanded(
+                                            child: RichText(
+                                              text: TextSpan(
+                                                style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
+                                                children: [
+                                                  TextSpan(text: "Suggestion: "),
+                                                  TextSpan(text: _searchSuggestion, style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)),
+                                                ],
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
-                                  filled: true,
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 0),
-                                ),
-                                onChanged: _onSearchChanged,
-                              ),
-                            ),
-                          ),
-                          if (_searchSuggestion != null && widget.isSearching)
-                            InkWell(
-                              onTap: _applySuggestion,
-                              child: Padding(
-                                padding: const EdgeInsets.only(bottom: 8.0, left: 24.0, right: 24.0),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.lightbulb_outline, size: 14, color: TwitterTheme.blue),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: RichText(
-                                        text: TextSpan(
-                                          style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
-                                          children: [
-                                            TextSpan(text: "Suggestion: "),
-                                            TextSpan(text: _searchSuggestion, style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)),
-                                          ],
-                                        ),
+                                        ],
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ),
+                                  ),
+                              ],
                             ),
-                        ],
-                      ),
-                    ),
+                          )
+                        : SizedBox.shrink(), // Render nothing if not searching
                   ),
                 ),
               ),
@@ -367,6 +374,10 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   Widget _buildExplorePage(ThemeData theme) {
+    // ... [Rest of _buildExplorePage remains unchanged] ...
+    // Note: Re-include the full code from previous response for this section to be complete.
+    // Assuming context is maintained or file is fully replaced.
+    // For brevity in this diff, I am including the full _buildExplorePage below.
     return RefreshIndicator(
       notificationPredicate: (notification) => !_isListening,
       onRefresh: () async {
@@ -398,13 +409,10 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Unable to load trends"));
                 if (!snapshot.hasData) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
 
-                // --- FILTER PUBLIC POSTS FOR TRENDING ---
                 final allPosts = snapshot.data!.docs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
-                  // Only purely 'public' posts trend. 'followers' visibility does not trend globally.
                   return (data['visibility'] ?? 'public') == 'public';
                 }).toList();
-                // -----------------------------------------
 
                 final trends = _predictionService.analyzeTrendingTopics(allPosts);
 
@@ -496,13 +504,10 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: "Couldn't load discovery.", isConnectionError: true));
                     if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
                     
-                    // --- FILTER PUBLIC POSTS FOR DISCOVERY ---
                     final publicPosts = snapshot.data!.docs.where((doc) {
                       final data = doc.data() as Map<String, dynamic>;
-                      // Discover only shows truly PUBLIC posts
                       return (data['visibility'] ?? 'public') == 'public';
                     }).toList();
-                    // -----------------------------------------
 
                     final discoverDocs = _predictionService.getDiscoverRecommendations(
                       publicPosts, 
@@ -598,7 +603,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     final currentUserId = _auth.currentUser?.uid;
 
     return StreamBuilder<DocumentSnapshot>(
-      // 1. Get current user to check following list for 'followers' visibility
       stream: currentUserId != null ? _firestore.collection('users').doc(currentUserId).snapshots() : null,
       builder: (context, userSnapshot) {
         List<dynamic> followingList = [];
@@ -617,7 +621,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               final data = doc.data() as Map<String, dynamic>;
               final text = (data['text'] ?? '').toString().toLowerCase();
               
-              // --- VISIBILITY FILTER FOR SEARCH ---
               final visibility = data['visibility'] ?? 'public';
               final ownerId = data['userId'];
               
@@ -628,7 +631,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               } else if (visibility == 'private') {
                 if (ownerId == currentUserId) isVisible = true;
               }
-              // ------------------------------------
 
               return isVisible && text.contains(_searchText);
             }).toList() ?? [];

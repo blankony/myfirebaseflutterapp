@@ -23,7 +23,6 @@ final CloudinaryService _cloudinaryService = CloudinaryService();
 
 class CreatePostScreen extends StatefulWidget {
   final String? postId;
-  // initialData may contain 'communityId', 'communityName', 'communityIcon'
   final Map<String, dynamic>? initialData;
 
   const CreatePostScreen({
@@ -48,20 +47,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String _visibility = 'public'; 
   bool _isAccountPrivate = false; 
 
-  // User Identity State
   String _myUserName = 'Anonymous';
   String _myUserEmail = '';
   String? _myAvatarUrl;
   int _myAvatarIconId = 0;
   String _myAvatarHex = '';
   
-  // Community Context
   String? _communityId;
   String? _communityName;
   String? _communityIcon;
   bool _communityVerified = false;
   
-  // Posting Mode Logic
   bool _isCommunityContext = false; 
   bool _hasOfficialAuthority = false; 
   bool _postAsCommunity = false; 
@@ -79,7 +75,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   void initState() {
     super.initState();
-    _checkEmailVerification(); // NEW: Check Email Status first
+    _checkEmailVerification(); 
     _loadIdentity(); 
     _trainAiModel();
 
@@ -97,33 +93,36 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // --- NEW FUNCTION: Enforce Read-Only Mode ---
   Future<void> _checkEmailVerification() async {
     final user = _auth.currentUser;
     if (user != null) {
-      await user.reload(); // Ensure we have the latest status
+      await user.reload(); 
       if (!user.emailVerified) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (context) => AlertDialog(
-              title: Row(children: const [Icon(Icons.mark_email_unread, color: Colors.orange), SizedBox(width: 8), Text("Verification Required")]),
+              title: Row(children: const [
+                Icon(Icons.mark_email_unread, color: Colors.orange), 
+                SizedBox(width: 8), 
+                Expanded(child: Text("Verification Required", overflow: TextOverflow.ellipsis))
+              ]),
               content: const Text("You must verify your email address to create posts. Currently, your account is in Read-Only mode."),
               actions: [
                 TextButton(
                   onPressed: () {
                     user.sendEmailVerification();
-                    Navigator.pop(context); // Close dialog
-                    Navigator.pop(context); // Close Create Post Screen
+                    Navigator.pop(context); 
+                    Navigator.pop(context); 
                     OverlayService().showTopNotification(context, "Verification email sent!", Icons.check, (){});
                   },
                   child: const Text("Resend Email"),
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    Navigator.pop(context); // Close dialog
-                    Navigator.pop(context); // Close Create Post Screen
+                    Navigator.pop(context); 
+                    Navigator.pop(context); 
                   },
                   child: const Text("Close"),
                 ),
@@ -139,7 +138,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // 1. Load Personal User Data
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
@@ -155,7 +153,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
     } catch (_) {}
 
-    // 2. Check Community Context
     if (widget.initialData != null && widget.initialData!.containsKey('communityId')) {
       _communityId = widget.initialData!['communityId'];
       _communityName = widget.initialData!['communityName'];
@@ -163,7 +160,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _isCommunityContext = true;
       _visibility = 'public'; 
 
-      // Check Permissions
       try {
         final comDoc = await _firestore.collection('communities').doc(_communityId).get();
         if (comDoc.exists) {
@@ -763,7 +759,7 @@ class _BackgroundUploader {
   static Future<void> _processUpload(
     String text, List<File> files, List<String> urls, String? type, String vis, bool edit, String? pid,
     String uid, String uName, String uEmail, int icon, String hex, String? img, String? comId,
-    String? comName, String? comIcon, bool? comVerified, bool isComIdentity,
+    String? comName, String? comIcon, bool? comVerified, bool isCommunityIdentity, // Fixed Name
     Function(String) onProgress, VoidCallback onSuccess, Function(dynamic) onFailure,
   ) async {
     try {
@@ -818,7 +814,7 @@ class _BackgroundUploader {
           postData['communityName'] = comName;
           postData['communityIcon'] = comIcon;
           postData['communityVerified'] = comVerified;
-          postData['isCommunityPost'] = isComIdentity; 
+          postData['isCommunityPost'] = isCommunityIdentity; 
         }
 
         await FirebaseFirestore.instance.collection('posts').add(postData);
@@ -901,12 +897,19 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
           top: _isCardVisible ? _targetTop : -100, left: 16, right: _targetRight, 
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 300), opacity: _isCardVisible ? 1.0 : 0.0,
-            child: Material(
-              elevation: 8, borderRadius: BorderRadius.circular(12), color: theme.cardColor,
-              child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
-                if (_isSuccess) const Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) const Icon(Icons.error, color: Colors.red) else const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                const SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
-              ])),
+            child: Dismissible(
+              key: const ValueKey('upload_card_dismiss'),
+              direction: DismissDirection.horizontal,
+              onDismissed: (_) {
+                widget.onDismissRequest();
+              },
+              child: Material(
+                elevation: 8, borderRadius: BorderRadius.circular(12), color: theme.cardColor,
+                child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
+                  if (_isSuccess) const Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) const Icon(Icons.error, color: Colors.red) else const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
+                ])),
+              ),
             ),
           ),
         )
