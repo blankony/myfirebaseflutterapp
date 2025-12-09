@@ -112,7 +112,7 @@ class _AdminsListState extends State<_AdminsList> {
           builder: (context, setState) {
             return AlertDialog(
               title: Text("Edit Role Appearance"),
-              // WRAPPED IN SINGLECHILDSCROLLVIEW TO FIX OVERFLOW
+              // FIX: Wrapped content in SingleChildScrollView to prevent overflow when keyboard appears
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
