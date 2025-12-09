@@ -62,6 +62,7 @@ dependencies:
   speech_to_text: ^7.0.0
   badword_guard: ^1.0.0
   visual_detector_ai: ^1.0.0
+  webview_flutter: ^4.13.0
 
 
 dev_dependencies:

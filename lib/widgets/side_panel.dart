@@ -9,17 +9,18 @@ import '../main.dart';
 import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
 import '../screens/saved_posts_screen.dart'; 
+import '../screens/webview_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
 class SidePanel extends StatefulWidget {
   final VoidCallback onProfileSelected;
-  final VoidCallback onCommunitySelected; // Callback Baru
+  final VoidCallback onCommunitySelected; 
 
   const SidePanel({
     super.key,
     required this.onProfileSelected,
-    required this.onCommunitySelected, // Wajib diisi
+    required this.onCommunitySelected, 
   });
 
   @override
@@ -37,7 +38,7 @@ class _SidePanelState extends State<SidePanel> {
         content: Text('Are you sure you want to sign out?'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text('Sign Out')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text('Sign Out', style: TextStyle(color: Colors.red))),
         ],
       ),
     ) ?? false;
@@ -50,6 +51,7 @@ class _SidePanelState extends State<SidePanel> {
     }
   }
 
+  // Animasi Slide Up
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -66,6 +68,14 @@ class _SidePanelState extends State<SidePanel> {
           child: child,
         );
       },
+    );
+  }
+
+  // Helper untuk membuka WebView
+  void _openWebService(String title, String url) {
+    Navigator.pop(context); // Tutup drawer dulu
+    Navigator.of(context).push(
+      _createSlideUpRoute(WebViewScreen(url: url, title: title)),
     );
   }
 
@@ -112,8 +122,9 @@ class _SidePanelState extends State<SidePanel> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // --- HEADER SECTION ---
               SizedBox(
-                height: 220, 
+                height: 200, 
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -129,17 +140,6 @@ class _SidePanelState extends State<SidePanel> {
                         decoration: BoxDecoration(
                           color: theme.primaryColor.withOpacity(0.1),
                         ),
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              top: -50, right: -50,
-                              child: Container(
-                                width: 150, height: 150,
-                                decoration: BoxDecoration(shape: BoxShape.circle, color: theme.primaryColor.withOpacity(0.2)),
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
 
                     Container(
@@ -149,7 +149,7 @@ class _SidePanelState extends State<SidePanel> {
                           end: Alignment.bottomCenter,
                           colors: [
                             Colors.black.withOpacity(0.1),
-                            Colors.black.withOpacity(0.7),
+                            Colors.black.withOpacity(0.8),
                           ],
                         ),
                       ),
@@ -226,51 +226,109 @@ class _SidePanelState extends State<SidePanel> {
               
               Divider(height: 1, thickness: 1),
               
-              Expanded(child: ListView(padding: EdgeInsets.zero, children: [
-                ListTile(
-                  leading: Icon(Icons.account_circle_outlined), 
-                  title: Text('Account Center'), 
-                  onTap: () {
-                    Navigator.pop(context); 
-                    Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
-                  }
+              // --- MENU LIST ---
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero, 
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.account_circle_outlined), 
+                      title: Text('Account Center'), 
+                      onTap: () {
+                        Navigator.pop(context); 
+                        Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
+                      }
+                    ),
+                    ListTile(
+                      leading: Icon(Icons.groups_2_outlined), 
+                      title: Text('Communities'), 
+                      onTap: () {
+                        Navigator.pop(context);
+                        widget.onCommunitySelected();
+                      }
+                    ),
+                    
+                    // --- EXPANDABLE ACADEMIC MENU (UPDATED NAMES) ---
+                    Theme(
+                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
+                        leading: Icon(Icons.school_outlined, color: TwitterTheme.blue),
+                        title: Text(
+                          'Layanan PNJ', 
+                          style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)
+                        ),
+                        childrenPadding: EdgeInsets.only(left: 16),
+                        children: [
+                          ListTile(
+                            leading: Icon(Icons.fingerprint, color: Colors.teal, size: 20),
+                            title: Text('SPIRIT ACADEMIA'),
+                            trailing: Icon(Icons.arrow_forward_ios, size: 12),
+                            dense: true,
+                            onTap: () => _openWebService("SPIRIT ACADEMIA", "https://academia.pnj.ac.id/"),
+                          ),
+                          ListTile(
+                            leading: Icon(Icons.laptop_chromebook, color: Colors.orange, size: 20),
+                            title: Text('E-Learning'),
+                            trailing: Icon(Icons.arrow_forward_ios, size: 12),
+                            dense: true,
+                            onTap: () => _openWebService("E-Learning PNJ", "https://elearning.pnj.ac.id/"),
+                          ),
+                          ListTile(
+                            leading: Icon(Icons.bar_chart, color: Colors.purple, size: 20),
+                            title: Text('Akademik PNJ'),
+                            trailing: Icon(Icons.arrow_forward_ios, size: 12),
+                            dense: true,
+                            onTap: () => _openWebService("Akademik PNJ", "https://akademik.pnj.ac.id/"),
+                          ),
+                          ListTile(
+                            leading: Icon(Icons.language, color: Colors.blueGrey, size: 20),
+                            title: Text('Website PNJ'),
+                            trailing: Icon(Icons.arrow_forward_ios, size: 12),
+                            dense: true,
+                            onTap: () => _openWebService("Official Website", "https://pnj.ac.id/"),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // -------------------------------------
+
+                    ListTile(
+                      leading: Icon(Icons.bookmark_border), 
+                      title: Text('Saved'), 
+                      onTap: () {
+                        Navigator.pop(context); 
+                        Navigator.of(context).push(_createSlideUpRoute(SavedPostsScreen()));
+                      }
+                    ),
+                    ListTile(
+                      leading: Icon(Icons.settings_outlined), 
+                      title: Text('Settings'), 
+                      onTap: () {
+                        Navigator.pop(context); 
+                        Navigator.of(context).push(_createSlideUpRoute(SettingsPage()));
+                      }
+                    ),
+                  ],
                 ),
-                ListTile(
-                  leading: Icon(Icons.groups_2_outlined), 
-                  title: Text('Community'), 
-                  onTap: () {
-                    Navigator.pop(context);
-                    widget.onCommunitySelected();
-                  }
-                ),
-                ListTile(
-                  leading: Icon(Icons.bookmark_border), 
-                  title: Text('Saved'), 
-                  onTap: () {
-                    Navigator.pop(context); 
-                    Navigator.of(context).push(_createSlideUpRoute(SavedPostsScreen()));
-                  }
-                ),
-                ListTile(
-                  leading: Icon(Icons.settings_outlined), 
-                  title: Text('More Settings'), 
-                  onTap: () {
-                    Navigator.pop(context); 
-                    Navigator.of(context).push(_createSlideUpRoute(SettingsPage()));
-                  }
-                ),
-              ])),
+              ),
               
               Divider(height: 1),
-              Padding(padding: EdgeInsets.all(8), child: Column(children: [
-                 _ThemeSwitchTile(),
-                 ListTile(
-                  leading: Icon(Icons.logout, color: Colors.red), 
-                  title: Text('Logout', style: TextStyle(color: Colors.red)), 
-                  onTap: _signOut,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16),
+              
+              // --- FOOTER ---
+              Padding(
+                padding: EdgeInsets.all(8), 
+                child: Column(
+                  children: [
+                    _ThemeSwitchTile(),
+                    ListTile(
+                      leading: Icon(Icons.logout, color: Colors.red), 
+                      title: Text('Logout', style: TextStyle(color: Colors.red)), 
+                      onTap: _signOut,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                  ],
                 ),
-              ]))
+              )
             ],
           );
         },
