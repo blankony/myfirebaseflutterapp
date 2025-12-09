@@ -62,10 +62,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _communityVerified = false;
   
   // Posting Mode Logic
-  bool _isCommunityContext = false; // True if inside a community
-  bool _hasOfficialAuthority = false; // True if Admin/Editor/Owner
-  bool _postAsCommunity = false; // The Toggle State
-  bool _isRestricted = false; // If true, cannot post at all
+  bool _isCommunityContext = false; 
+  bool _hasOfficialAuthority = false; 
+  bool _postAsCommunity = false; 
+  bool _isRestricted = false; 
 
   String? _predictedText;
   Timer? _debounce;
@@ -79,6 +79,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   void initState() {
     super.initState();
+    _checkEmailVerification(); // NEW: Check Email Status first
     _loadIdentity(); 
     _trainAiModel();
 
@@ -93,6 +94,44 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         _existingMediaUrls = [widget.initialData!['mediaUrl']];
       }
       _checkCanPost();
+    }
+  }
+
+  // --- NEW FUNCTION: Enforce Read-Only Mode ---
+  Future<void> _checkEmailVerification() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      await user.reload(); // Ensure we have the latest status
+      if (!user.emailVerified) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: Row(children: const [Icon(Icons.mark_email_unread, color: Colors.orange), SizedBox(width: 8), Text("Verification Required")]),
+              content: const Text("You must verify your email address to create posts. Currently, your account is in Read-Only mode."),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    user.sendEmailVerification();
+                    Navigator.pop(context); // Close dialog
+                    Navigator.pop(context); // Close Create Post Screen
+                    OverlayService().showTopNotification(context, "Verification email sent!", Icons.check, (){});
+                  },
+                  child: const Text("Resend Email"),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context); // Close dialog
+                    Navigator.pop(context); // Close Create Post Screen
+                  },
+                  child: const Text("Close"),
+                ),
+              ],
+            ),
+          );
+        });
+      }
     }
   }
 
@@ -122,7 +161,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _communityName = widget.initialData!['communityName'];
       _communityIcon = widget.initialData!['communityIcon'];
       _isCommunityContext = true;
-      _visibility = 'public'; // Community posts are always public
+      _visibility = 'public'; 
 
       // Check Permissions
       try {
@@ -140,15 +179,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           
           setState(() {
             _hasOfficialAuthority = isStaff;
-            // Default behavior: Staff posts as Community by default, Members post as themselves
             _postAsCommunity = isStaff; 
-            
-            // Update names in case they changed since entering screen
             _communityName = data['name'];
             _communityIcon = data['imageUrl'];
           });
 
-          // If not staff and member posts are disallowed -> Restricted
           if (!allowMembers && !isStaff) {
             setState(() => _isRestricted = true);
             if(mounted) {
@@ -229,7 +264,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Rejected")]),
+        title: Row(children: const [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Rejected")]),
         content: Text("Your content cannot be posted.\n\nReason: $reason"),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Edit", style: TextStyle(color: TwitterTheme.blue)))],
       ),
@@ -270,8 +305,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(leading: Icon(Icons.camera_alt), title: Text("Camera"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
-              ListTile(leading: Icon(Icons.photo_library), title: Text("Gallery"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
+              ListTile(leading: const Icon(Icons.camera_alt), title: const Text("Camera"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
+              ListTile(leading: const Icon(Icons.photo_library), title: const Text("Gallery"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
             ],
           ),
         );
@@ -314,65 +349,61 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     setState(() { _existingMediaUrls.removeAt(index); _checkCanPost(); if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) _mediaType = null; });
   }
 
-  // --- VISIBILITY PICKER (Using BottomSheet to fix floating issue) ---
   void _showVisibilityPicker() {
     FocusScope.of(context).unfocus(); 
-    
     showModalBottomSheet(
       context: context,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
               Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Text("Who can see this?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                child: const Text("Who can see this?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ),
-              
               if (_isAccountPrivate) ...[
                  ListTile(
-                  leading: Icon(Icons.people, color: TwitterTheme.blue),
-                  title: Text("Followers"),
-                  subtitle: Text("Only your followers can see this"),
-                  trailing: _visibility == 'followers' ? Icon(Icons.check, color: TwitterTheme.blue) : null,
+                  leading: const Icon(Icons.people, color: TwitterTheme.blue),
+                  title: const Text("Followers"),
+                  subtitle: const Text("Only your followers can see this"),
+                  trailing: _visibility == 'followers' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                   onTap: () {
                     setState(() => _visibility = 'followers');
                     Navigator.pop(context);
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.public, color: Colors.grey),
-                  title: Text("Public"),
-                  subtitle: Text("Account is private (Switch in settings)"),
+                  leading: const Icon(Icons.public, color: Colors.grey),
+                  title: const Text("Public"),
+                  subtitle: const Text("Account is private (Switch in settings)"),
                   enabled: false, 
                 ),
               ] else ...[
                 ListTile(
-                  leading: Icon(Icons.public, color: TwitterTheme.blue),
-                  title: Text("Public"),
-                  subtitle: Text("Anyone on Sapa PNJ"),
-                  trailing: _visibility == 'public' ? Icon(Icons.check, color: TwitterTheme.blue) : null,
+                  leading: const Icon(Icons.public, color: TwitterTheme.blue),
+                  title: const Text("Public"),
+                  subtitle: const Text("Anyone on Sapa PNJ"),
+                  trailing: _visibility == 'public' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                   onTap: () {
                     setState(() => _visibility = 'public');
                     Navigator.pop(context);
                   },
                 ),
               ],
-              
               ListTile(
-                leading: Icon(Icons.lock, color: Colors.red),
-                title: Text("Only Me"),
-                trailing: _visibility == 'private' ? Icon(Icons.check, color: TwitterTheme.blue) : null,
+                leading: const Icon(Icons.lock, color: Colors.red),
+                title: const Text("Only Me"),
+                trailing: _visibility == 'private' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                 onTap: () {
                   setState(() => _visibility = 'private');
                   Navigator.pop(context);
                 },
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
             ],
           ),
         );
@@ -380,7 +411,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  // Helper to get Icon and Text for the button
   Widget _buildVisibilityButtonContent() {
     IconData icon;
     String label;
@@ -402,9 +432,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, color: color, size: 18),
-        SizedBox(width: 6),
+        const SizedBox(width: 6),
         Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
-        SizedBox(width: 4),
+        const SizedBox(width: 4),
         Icon(Icons.keyboard_arrow_down, color: color, size: 18),
       ],
     );
@@ -424,7 +454,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final isImageSafe = await _checkImageSafety();
     if (!isImageSafe) return; 
 
-    // Determine Final Display Identity
     final String finalUserName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
     final String? finalUserAvatar = _postAsCommunity ? _communityIcon : _myAvatarUrl;
     final int finalUserIconId = _postAsCommunity ? 0 : _myAvatarIconId;
@@ -446,7 +475,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         isEditing: _isEditing,
         postId: widget.postId,
         
-        uid: user.uid, // ALWAYS link to real user ID for tracking
+        uid: user.uid, 
         userName: finalUserName,
         userEmail: _myUserEmail,
         avatarIconId: finalUserIconId,
@@ -473,12 +502,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isRestricted) return SizedBox.shrink(); 
+    if (_isRestricted) return const SizedBox.shrink(); 
 
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    // Determine current display avatar based on toggle
     final String? currentAvatarUrl = _postAsCommunity ? _communityIcon : _myAvatarUrl;
     final String currentDisplayName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
 
@@ -492,12 +520,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         title: _isCommunityContext
             ? Row(
                 children: [
-                  Icon(Icons.groups, color: TwitterTheme.blue, size: 20),
-                  SizedBox(width: 8),
-                  Flexible(child: Text(_communityName ?? "Community", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                  const Icon(Icons.groups, color: TwitterTheme.blue, size: 20),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(_communityName ?? "Community", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                 ],
               ) 
-            : Text(_isEditing ? "Edit Post" : "Create Post", style: TextStyle(fontWeight: FontWeight.bold)),
+            : Text(_isEditing ? "Edit Post" : "Create Post", style: const TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: false,
         actions: [
           Padding(
@@ -507,9 +535,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: TwitterTheme.blue,
                 foregroundColor: Colors.white,
-                shape: StadiumBorder()
+                shape: const StadiumBorder()
               ),
-              child: Text("Post"),
+              child: const Text("Post"),
             ),
           )
         ],
@@ -522,11 +550,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- IDENTITY TOGGLE (Only for Authorized Staff) ---
                   if (_hasOfficialAuthority)
                     Container(
-                      margin: EdgeInsets.only(bottom: 16),
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: theme.cardColor,
                         borderRadius: BorderRadius.circular(12),
@@ -534,17 +561,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       ),
                       child: Row(
                         children: [
-                          Text("Post Identity:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          Spacer(),
+                          const Text("Post Identity:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          const Spacer(),
                           ChoiceChip(
-                            label: Text("Me"),
+                            label: const Text("Me"),
                             selected: !_postAsCommunity,
                             onSelected: (val) => setState(() => _postAsCommunity = false),
                             visualDensity: VisualDensity.compact,
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           ChoiceChip(
-                            label: Text("Community"),
+                            label: const Text("Community"),
                             selected: _postAsCommunity,
                             onSelected: (val) => setState(() => _postAsCommunity = true),
                             selectedColor: TwitterTheme.blue.withOpacity(0.2),
@@ -564,11 +591,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         backgroundImage: currentAvatarUrl != null ? CachedNetworkImageProvider(currentAvatarUrl) : null,
                         child: currentAvatarUrl == null 
                             ? (_postAsCommunity 
-                                ? Icon(Icons.groups, color: Colors.white) 
+                                ? const Icon(Icons.groups, color: Colors.white) 
                                 : Icon(AvatarHelper.getIcon(_myAvatarIconId), color: Colors.white)) 
                             : null,
                       ),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -581,13 +608,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                 color: _postAsCommunity ? TwitterTheme.blue : null
                               )
                             ),
-                            // --- CONTEXT LABEL LOGIC ---
                             if (_isCommunityContext)
                               Text(
                                 _postAsCommunity 
                                   ? "Posting as Community Identity"
                                   : "Posting in $_communityName",
-                                style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)
+                                style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)
                               ),
                             
                             TextField(
@@ -596,18 +622,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               onChanged: _onTextChanged,
                               autofocus: !_isEditing,
                               maxLines: null,
-                              style: TextStyle(fontSize: 18),
+                              style: const TextStyle(fontSize: 18),
                               decoration: InputDecoration(
                                 hintText: _postAsCommunity ? "What's the official news?" : "What's happening?",
                                 border: InputBorder.none,
                               ),
                             ),
                             
-                            // PREVIEWS
                             if (_existingMediaUrls.isNotEmpty || _selectedMediaFiles.isNotEmpty)
                               Container(
                                 height: 100,
-                                margin: EdgeInsets.only(top: 10),
+                                margin: const EdgeInsets.only(top: 10),
                                 child: ListView(
                                   scrollDirection: Axis.horizontal,
                                   children: [
@@ -621,10 +646,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               GestureDetector(
                                 onTap: _acceptPrediction,
                                 child: Container(
-                                  margin: EdgeInsets.only(top: 8),
-                                  padding: EdgeInsets.all(8),
+                                  margin: const EdgeInsets.only(top: 8),
+                                  padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                                  child: Text("Suggestion: $_predictedText", style: TextStyle(color: TwitterTheme.blue)),
+                                  child: Text("Suggestion: $_predictedText", style: const TextStyle(color: TwitterTheme.blue)),
                                 ),
                               )
                           ],
@@ -637,24 +662,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
           ),
           
-          // BOTTOM BAR
           Positioned(
             left: 0, right: 0, bottom: bottomInset,
             child: Container(
               color: theme.scaffoldBackgroundColor,
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  IconButton(icon: Icon(Icons.image, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: false)),
-                  IconButton(icon: Icon(Icons.videocam, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: true)),
+                  IconButton(icon: const Icon(Icons.image, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: false)),
+                  IconButton(icon: const Icon(Icons.videocam, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: true)),
                   
-                  // --- VISIBILITY BUTTON ---
                   if (!_isCommunityContext)
                     InkWell(
                       onTap: _showVisibilityPicker,
                       borderRadius: BorderRadius.circular(20),
                       child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
                           borderRadius: BorderRadius.circular(20),
@@ -675,11 +698,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return Stack(
       children: [
         Container(
-          width: 100, margin: EdgeInsets.only(right: 8),
+          width: 100, margin: const EdgeInsets.only(right: 8),
           decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8), image: !isVideo ? DecorationImage(image: imageProvider, fit: BoxFit.cover) : null),
-          child: isVideo ? Center(child: Icon(Icons.play_circle_fill, color: Colors.white)) : null,
+          child: isVideo ? const Center(child: Icon(Icons.play_circle_fill, color: Colors.white)) : null,
         ),
-        Positioned(top: 4, right: 12, child: GestureDetector(onTap: onRemove, child: Container(padding: EdgeInsets.all(2), decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: Icon(Icons.close, size: 14, color: Colors.white))))
+        Positioned(top: 4, right: 12, child: GestureDetector(onTap: onRemove, child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 14, color: Colors.white))))
       ],
     );
   }
@@ -728,11 +751,11 @@ class _BackgroundUploader {
       (status) => overlayKey.currentState?.updateStatus(status),
       () {
         overlayKey.currentState?.handleSuccess();
-        Future.delayed(Duration(seconds: 7), () { if (overlayEntry.mounted) overlayEntry.remove(); });
+        Future.delayed(const Duration(seconds: 7), () { if (overlayEntry.mounted) overlayEntry.remove(); });
       },
       (error) {
         overlayKey.currentState?.handleFailure(error.toString());
-        Future.delayed(Duration(seconds: 4), () { if (overlayEntry.mounted) overlayEntry.remove(); });
+        Future.delayed(const Duration(seconds: 4), () { if (overlayEntry.mounted) overlayEntry.remove(); });
       },
     );
   }
@@ -779,8 +802,8 @@ class _BackgroundUploader {
       } else {
         postData.addAll({
           'timestamp': FieldValue.serverTimestamp(),
-          'userId': uid, // Operator ID
-          'userName': uName, // Display Name
+          'userId': uid,
+          'userName': uName,
           'userEmail': uEmail,
           'avatarIconId': icon,
           'avatarHex': hex,
@@ -795,7 +818,7 @@ class _BackgroundUploader {
           postData['communityName'] = comName;
           postData['communityIcon'] = comIcon;
           postData['communityVerified'] = comVerified;
-          postData['isCommunityPost'] = isComIdentity; // True = Official, False = Member post
+          postData['isCommunityPost'] = isComIdentity; 
         }
 
         await FirebaseFirestore.instance.collection('posts').add(postData);
@@ -829,62 +852,60 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
 
   @override void dispose() { _autoDismissTimer?.cancel(); super.dispose(); }
   void updateStatus(String status) { if (!mounted) return; setState(() => _message = status); }
-  void dismissToIcon() { setState(() => _isCardVisible = false); Future.delayed(Duration(milliseconds: 400), () { if (mounted) setState(() => _isMiniVisible = true); }); }
+  void dismissToIcon() { setState(() => _isCardVisible = false); Future.delayed(const Duration(milliseconds: 400), () { if (mounted) setState(() => _isMiniVisible = true); }); }
   
-  // --- FIX: Missing method added ---
   void _expandToCard() {
     setState(() { _isMiniVisible = false; });
-    Future.delayed(Duration(milliseconds: 300), () {
+    Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) {
         setState(() { _isCardVisible = true; });
         _autoDismissTimer?.cancel();
-        _autoDismissTimer = Timer(Duration(seconds: 2), dismissToIcon);
+        _autoDismissTimer = Timer(const Duration(seconds: 2), dismissToIcon);
       }
     });
   }
 
-  void handleSuccess() { setState(() { _isSuccess = true; _message = "Posted"; }); if (_isMiniVisible) Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); }); else if (_isCardVisible) Future.delayed(Duration(seconds: 5), () { if (mounted) setState(() => _isCardVisible = false); }); }
+  void handleSuccess() { setState(() { _isSuccess = true; _message = "Posted"; }); if (_isMiniVisible) Future.delayed(const Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); }); else if (_isCardVisible) Future.delayed(const Duration(seconds: 5), () { if (mounted) setState(() => _isCardVisible = false); }); }
   void handleFailure(String error) { setState(() { _isError = true; _message = "Failed"; }); if (!_isCardVisible) setState(() => _isCardVisible = true); }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return Stack(
       children: [
         AnimatedPositioned(
-          duration: Duration(milliseconds: 400), curve: Curves.easeOutQuart,
+          duration: const Duration(milliseconds: 400), curve: Curves.easeOutQuart,
           top: _targetTop, right: _isMiniVisible ? _miniRight : _targetRight, 
           child: AnimatedOpacity(
-            duration: Duration(milliseconds: 300), 
+            duration: const Duration(milliseconds: 300), 
             opacity: _isMiniVisible ? 1.0 : 0.0, 
             child: GestureDetector(
               onTap: _expandToCard,
               child: Material(
                 elevation: 4,
-                shape: CircleBorder(),
+                shape: const CircleBorder(),
                 color: _isSuccess ? Colors.green : theme.cardColor,
                 child: Container(
-                  width: 36, height: 36, padding: EdgeInsets.all(8),
+                  width: 36, height: 36, padding: const EdgeInsets.all(8),
                   child: _isSuccess 
-                    ? Icon(Icons.check, size: 20, color: Colors.white)
-                    : CircularProgressIndicator(strokeWidth: 3, color: TwitterTheme.blue),
+                    ? const Icon(Icons.check, size: 20, color: Colors.white)
+                    : const CircularProgressIndicator(strokeWidth: 3, color: TwitterTheme.blue),
                 ),
               ),
             ),
           ),
         ),
         AnimatedPositioned(
-          duration: Duration(milliseconds: 500), curve: Curves.easeInOutBack,
+          duration: const Duration(milliseconds: 500), curve: Curves.easeInOutBack,
           top: _isCardVisible ? _targetTop : -100, left: 16, right: _targetRight, 
           child: AnimatedOpacity(
-            duration: Duration(milliseconds: 300), opacity: _isCardVisible ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 300), opacity: _isCardVisible ? 1.0 : 0.0,
             child: Material(
               elevation: 8, borderRadius: BorderRadius.circular(12), color: theme.cardColor,
-              child: Padding(padding: EdgeInsets.all(16), child: Row(children: [
-                if (_isSuccess) Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) Icon(Icons.error, color: Colors.red) else SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
+              child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
+                if (_isSuccess) const Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) const Icon(Icons.error, color: Colors.red) else const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
               ])),
             ),
           ),

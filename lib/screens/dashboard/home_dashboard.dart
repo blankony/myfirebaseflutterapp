@@ -38,11 +38,9 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   late final PageController _pageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
-  // Persistent Scroll Controllers
   final ScrollController _scrollController = ScrollController();
   final ScrollController _recommendedScrollController = ScrollController();
   
-  // Cache the Home Widget
   late Widget _persistentHomeTab;
 
   bool _isSearching = false;
@@ -63,7 +61,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     
     _pageController = PageController(initialPage: _selectedIndex);
 
-    // Initialize Home with 2 Tabs (Recent & Recommended)
     _persistentHomeTab = KeepAlivePage(
       child: HomePage(
         scrollController: _scrollController,
@@ -187,7 +184,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
               if (postId != null) {
                  Navigator.push(context, _AnimatedRoute(page: PostDetailScreen(postId: postId)));
               } else if (type == 'follow') {
-                _onItemTapped(4); // Profile is now index 4
+                _onItemTapped(4); 
               }
             }
           );
@@ -247,24 +244,100 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     );
   }
 
-  void _navigateToCreatePost() {
+  void _navigateToCreatePost({Map<String, dynamic>? initialData}) {
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (context) => CreatePostScreen(),
+        builder: (context) => CreatePostScreen(initialData: initialData),
       ),
     );
   }
 
+  // --- NEW: Community Selection Logic ---
+  void _showCommunityPostSelector(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Container(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16.0),
+                child: Text("Post to Community", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('communities')
+                      .where('followers', arrayContains: user.uid)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
+                    
+                    final docs = snapshot.data?.docs ?? [];
+                    if (docs.isEmpty) {
+                      return Center(child: Text("You haven't joined any communities yet."));
+                    }
+
+                    return ListView.builder(
+                      itemCount: docs.length,
+                      itemBuilder: (context, index) {
+                        final data = docs[index].data() as Map<String, dynamic>;
+                        final String name = data['name'] ?? 'Community';
+                        final String? icon = data['imageUrl'];
+                        
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: TwitterTheme.blue.withOpacity(0.1),
+                            backgroundImage: icon != null ? CachedNetworkImageProvider(icon) : null,
+                            child: icon == null ? Icon(Icons.groups, color: TwitterTheme.blue) : null,
+                          ),
+                          title: Text(name),
+                          trailing: Icon(Icons.arrow_forward_ios, size: 14),
+                          onTap: () {
+                            Navigator.pop(ctx); // Close Sheet
+                            _navigateToCreatePost(initialData: {
+                              'communityId': docs[index].id,
+                              'communityName': name,
+                              'communityIcon': icon,
+                            });
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _handleFabTap() {
+    if (_selectedIndex == 1) {
+      // If on Community Tab -> Show Picker
+      _showCommunityPostSelector(context);
+    } else {
+      // If Home or Profile -> Normal Post
+      _navigateToCreatePost();
+    }
+  }
+
   List<Widget> _appBarActions(BuildContext context) {
-    // Actions based on NEW Index
-    // 0: Home, 1: Community, 2: AI, 3: Search, 4: Profile
     switch (_selectedIndex) {
-      case 0: // Home
+      case 0: 
         return [ _NotificationButton(onPressed: _showNotificationPopup) ];
-      case 1: // Community
-        return []; // Community has its own controls usually
-      case 2: // AI Assistant
+      case 1: 
+        return []; 
+      case 2: 
         return [
           IconButton(
             icon: const Icon(Icons.history), 
@@ -274,14 +347,14 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             },
           ),
         ];
-      case 3: // Search
+      case 3: 
         return [
           IconButton(
             icon: _isSearching ? Icon(Icons.close) : Icon(Icons.search),
             onPressed: () { setState(() { _isSearching = !_isSearching; }); },
           ),
         ];
-      case 4: // Profile
+      case 4: 
         return []; 
       default:
         return [];
@@ -289,7 +362,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 
   void _onItemTapped(int index) {
-    if (index == 3) { // Search is now index 3
+    if (index == 3) { 
       if (_selectedIndex == 3) {
         setState(() { _isSearching = !_isSearching; });
       } else {
@@ -321,18 +394,17 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   Widget build(BuildContext context) {
     super.build(context); 
 
-    // --- NEW TAB STRUCTURE ---
     final _widgetOptions = <Widget>[
-      _persistentHomeTab, // Index 0: Home
-      KeepAlivePage(child: CommunityListTab()), // Index 1: Community
-      KeepAlivePage(child: AiAssistantPage()), // Index 2: AI
+      _persistentHomeTab, 
+      KeepAlivePage(child: CommunityListTab()), 
+      KeepAlivePage(child: AiAssistantPage()), 
       KeepAlivePage(
         child: SearchPage(
           isSearching: _isSearching,
           onSearchPressed: () { setState(() { _isSearching = !_isSearching; }); },
         ),
-      ), // Index 3: Search
-      ProfileTabPage(), // Index 4: Profile
+      ), 
+      ProfileTabPage(), 
     ];
 
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -342,16 +414,14 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     final inactiveIconColor = isDarkMode ? Colors.white : const Color.fromARGB(170, 0, 0, 0);
     final activeIconColor = TwitterTheme.blue;
 
-    // Show Main FAB only on Home (Index 0)
-    // Community (Index 1) has its own FAB
-    bool showMainFab = _selectedIndex == 0;
+    // Show FAB on Home (0), Community (1), and Profile (4)
+    bool showMainFab = _selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 4;
 
     return Scaffold(
       key: _scaffoldKey,
       extendBody: true,
       extendBodyBehindAppBar: true,
       
-      // AI Drawer only on Index 2 (AI)
       endDrawer: _selectedIndex == 2 
           ? AiHistoryDrawer(
               onNewChat: () {
@@ -364,7 +434,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           : null,
 
       appBar: _selectedIndex == 4
-          ? null // No AppBar on Profile
+          ? null 
           : AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
@@ -396,10 +466,10 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
             ),
       drawer: SidePanel(
         onProfileSelected: () {
-          _onItemTapped(4); // Switch to Profile (Index 4)
+          _onItemTapped(4); 
         },
         onCommunitySelected: () {
-          _onItemTapped(1); // Switch to Community (Index 1)
+          _onItemTapped(1); 
         },
       ),
       
@@ -408,7 +478,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
           : Padding(
               padding: const EdgeInsets.only(bottom: 20.0), 
               child: FloatingActionButton(
-                onPressed: _navigateToCreatePost,
+                onPressed: _handleFabTap, // Updated Logic
                 backgroundColor: TwitterTheme.blue,
                 elevation: 4,
                 child: const Icon(Icons.edit_outlined, color: Colors.white),
@@ -463,7 +533,7 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
                   inactiveColor: inactiveIconColor,
                 ),
                 BottomNavyBarItem(
-                  icon: Icon(Icons.groups), // Community Icon
+                  icon: Icon(Icons.groups), 
                   title: Text('Community'),
                   activeColor: activeIconColor,
                   inactiveColor: inactiveIconColor,

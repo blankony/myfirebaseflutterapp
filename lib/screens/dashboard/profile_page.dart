@@ -21,6 +21,7 @@ import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../services/moderation_service.dart'; 
 import '../follow_list_screen.dart'; 
+import '../ktm_verification_screen.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -53,7 +54,6 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   bool _isBlocked = false;
   String? _optimisticPinnedPostId; 
   
-  // SPAM PREVENTION
   bool _isProcessingFollow = false;
 
   @override
@@ -480,6 +480,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         
         final bool canViewProfile = isMyProfile || !isPrivateAccount || amIFollowing;
 
+        final String verificationStatus = data['verificationStatus'] ?? 'none'; 
+        final bool isVerified = verificationStatus == 'verified';
+
         Widget content = RefreshIndicator(
           onRefresh: _handleRefresh,
           color: TwitterTheme.blue,
@@ -511,7 +514,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                             fontWeight: FontWeight.bold
                           )
                         ),
-                        if (isPrivateAccount) ...[
+                        if (isVerified) ...[
+                          SizedBox(width: 4),
+                          Icon(Icons.verified, size: 16, color: TwitterTheme.blue),
+                        ] else if (isPrivateAccount) ...[
                           SizedBox(width: 4),
                           Icon(Icons.lock, size: 16, color: isDarkMode ? TwitterTheme.white : TwitterTheme.black),
                         ],
@@ -528,7 +534,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 ),
 
                 SliverToBoxAdapter(
-                  child: _buildProfileInfoBody(context, data),
+                  child: _buildProfileInfoBody(context, data, isMyProfile),
                 ),
 
                 if (!_isBlocked && canViewProfile)
@@ -714,11 +720,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     );
   }
 
-  Widget _buildProfileInfoBody(BuildContext context, Map<String, dynamic> data) {
+  Widget _buildProfileInfoBody(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
     final String name = data['name'] ?? 'Name';
     final String handle = "@${(data['email'] ?? '').split('@')[0]}";
     final String displayBio = _isBioExpanded ? (data['bio'] ?? '') : ((data['bio'] ?? '').length > 100 ? (data['bio'] ?? '').substring(0, 100) + '...' : (data['bio'] ?? ''));
+    
+    final String verificationStatus = data['verificationStatus'] ?? 'none';
+    final bool isVerified = verificationStatus == 'verified';
+    final bool isPending = verificationStatus == 'pending';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -728,13 +738,46 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             Flexible(
               child: Text(name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22), overflow: TextOverflow.ellipsis),
             ),
-            if (data['isPrivate'] ?? false) ...[
+            if (isVerified) ...[
+              SizedBox(width: 4),
+              Icon(Icons.verified, size: 22, color: TwitterTheme.blue),
+            ] else if (data['isPrivate'] ?? false) ...[
               SizedBox(width: 6),
               Icon(Icons.lock, size: 22, color: theme.textTheme.titleLarge?.color),
             ],
           ],
         ),
         Text(handle, style: theme.textTheme.titleSmall),
+        
+        if (isMyProfile && !isVerified)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: InkWell(
+              onTap: isPending 
+                ? () => OverlayService().showTopNotification(context, "Verification is under review.", Icons.access_time, (){}, color: Colors.orange)
+                : () => Navigator.push(context, MaterialPageRoute(builder: (_) => KtmVerificationScreen())),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isPending ? Colors.orange.withOpacity(0.1) : TwitterTheme.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: isPending ? Colors.orange : TwitterTheme.blue),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(isPending ? Icons.hourglass_top : Icons.verified_outlined, size: 16, color: isPending ? Colors.orange : TwitterTheme.blue),
+                    SizedBox(width: 6),
+                    Text(
+                      isPending ? "Verification Pending" : "Get Verified", 
+                      style: TextStyle(color: isPending ? Colors.orange : TwitterTheme.blue, fontWeight: FontWeight.bold, fontSize: 12)
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
         SizedBox(height: 8),
         if (!_isBlocked) ...[
           Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge),
@@ -872,16 +915,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               
               final visibleDocs = allDocs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
+                
+                // NEW: Hide community identity posts on personal profile
+                final bool isCommunityIdentityPost = data['isCommunityPost'] ?? false;
+                if (isCommunityIdentityPost) return false;
+
                 final visibility = data['visibility'] ?? 'public';
                 final ownerId = data['userId'];
                 
                 if (visibility == 'public') return true;
-                
-                // FIXED: Allow 'followers' visibility on Profile Page if authorized
-                // Since we are already inside the authorized view of ProfilePage, 
-                // we can show 'followers' posts.
                 if (visibility == 'followers') return true;
-                
                 if (visibility == 'private' && ownerId == _auth.currentUser?.uid) return true;
                 
                 return false;
