@@ -7,8 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:myfirebaseflutterapp/widgets/side_panel.dart';
-import 'package:myfirebaseflutterapp/widgets/ai_history_drawer.dart'; 
+import 'package:timeago/timeago.dart' as timeago; 
+
+import '../../widgets/side_panel.dart';
+import '../../widgets/ai_history_drawer.dart'; 
 import 'home_page.dart';
 import 'ai_assistant_page.dart';
 import 'search_page.dart';
@@ -20,7 +22,9 @@ import '../../widgets/notification_sheet.dart';
 import '../../services/overlay_service.dart';
 import '../../services/notification_prefs_service.dart';
 import '../../services/ai_event_bus.dart';
-import 'package:myfirebaseflutterapp/screens/post_detail_screen.dart';
+
+import '../../services/draft_service.dart'; 
+import '../post_detail_screen.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -193,6 +197,42 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     });
   }
 
+  void _showPostCreationMenu(BuildContext context) async {
+    // 1. Ambil Draft Terbaru
+    final DraftService draftService = DraftService();
+    final List<DraftPost> drafts = await draftService.getDrafts();
+    
+    if (!mounted) return;
+
+    // 2. Tampilkan Dialog dengan BackdropFilter (Blur)
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.3), // Gelap transparan
+      builder: (ctx) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8), // EFEK BLUR
+          child: Dialog(
+            backgroundColor: Colors.transparent, // Transparan agar blur terlihat
+            insetPadding: EdgeInsets.all(20),
+            // UPDATE: Menggunakan Widget Stateful baru
+            child: _DraftMenuContent(
+              initialDrafts: drafts,
+              onNewPost: () {
+                Navigator.pop(ctx);
+                _navigateToCreatePost(); // Buka create post kosong
+              },
+              onOpenDraft: (draft) {
+                Navigator.pop(ctx);
+                _navigateToCreatePost(draftData: draft); // Buka create post dengan data draft
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _scrollToTop() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 600), curve: Curves.easeOutQuart);
@@ -244,11 +284,11 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     );
   }
 
-  void _navigateToCreatePost({Map<String, dynamic>? initialData}) {
+  void _navigateToCreatePost({Map<String, dynamic>? initialData, DraftPost? draftData}) {
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (context) => CreatePostScreen(initialData: initialData),
+        builder: (context) => CreatePostScreen(initialData: initialData, draftData: draftData),
       ),
     );
   }
@@ -322,13 +362,8 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
   }
 
   void _handleFabTap() {
-    if (_selectedIndex == 1) {
-      // If on Community Tab -> Show Picker
-      _showCommunityPostSelector(context);
-    } else {
-      // If Home or Profile -> Normal Post
-      _navigateToCreatePost();
-    }
+    // Memanggil menu blur yang baru
+    _showPostCreationMenu(context);
   }
 
   List<Widget> _appBarActions(BuildContext context) {
@@ -414,7 +449,6 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
     final inactiveIconColor = isDarkMode ? Colors.white : const Color.fromARGB(170, 0, 0, 0);
     final activeIconColor = TwitterTheme.blue;
 
-    // Show FAB on Home (0), Community (1), and Profile (4)
     bool showMainFab = _selectedIndex == 0 || _selectedIndex == 1 || _selectedIndex == 4;
 
     return Scaffold(
@@ -473,17 +507,15 @@ class _HomeDashboardState extends State<HomeDashboard> with TickerProviderStateM
         },
       ),
       
-      floatingActionButton: !showMainFab
-          ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 20.0), 
-              child: FloatingActionButton(
-                onPressed: _handleFabTap, // Updated Logic
-                backgroundColor: TwitterTheme.blue,
-                elevation: 4,
-                child: const Icon(Icons.edit_outlined, color: Colors.white),
-              ),
-            ),
+      floatingActionButton: !showMainFab ? null : Padding(
+        padding: const EdgeInsets.only(bottom: 20.0), 
+        child: FloatingActionButton(
+          onPressed: _handleFabTap, 
+          backgroundColor: TwitterTheme.blue, 
+          elevation: 4, 
+          child: const Icon(Icons.edit_outlined, color: Colors.white)
+        )
+      ),
 
       body: FadeTransition(
         opacity: _fadeAnimation,
@@ -847,4 +879,159 @@ class BottomNavyBarItem {
   final Color activeColor;
   final Color? inactiveColor;
   final TextAlign? textAlign;
+}
+
+// --- UPDATED: WIDGET KONTEN MENU DRAFTS (STATEFUL UNTUK SWIPE TO DELETE) ---
+class _DraftMenuContent extends StatefulWidget {
+  final List<DraftPost> initialDrafts;
+  final VoidCallback onNewPost;
+  final Function(DraftPost) onOpenDraft;
+
+  const _DraftMenuContent({
+    required this.initialDrafts, 
+    required this.onNewPost, 
+    required this.onOpenDraft
+  });
+
+  @override
+  State<_DraftMenuContent> createState() => _DraftMenuContentState();
+}
+
+class _DraftMenuContentState extends State<_DraftMenuContent> {
+  late List<DraftPost> _localDrafts;
+
+  @override
+  void initState() {
+    super.initState();
+    // Inisialisasi list lokal dari data yang dikirim (ambil max 3)
+    _localDrafts = widget.initialDrafts.take(3).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bgColor = isDark ? Color(0xFF15202B) : Colors.white;
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: bgColor.withOpacity(0.9), // Sedikit transparan
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: theme.dividerColor.withOpacity(0.5)),
+        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20, spreadRadius: 5)]
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text("Create Post", style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+          SizedBox(height: 24),
+          
+          // Tombol Create New
+          ElevatedButton.icon(
+            onPressed: widget.onNewPost,
+            icon: Icon(Icons.add, color: Colors.white),
+            label: Text("Create New Post", style: TextStyle(fontSize: 16)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TwitterTheme.blue,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              elevation: 0,
+            ),
+          ),
+          
+          // List Draft (Max 3)
+          if (_localDrafts.isNotEmpty) ...[
+            SizedBox(height: 24),
+            Row(children: [
+              Text("Recent Drafts", style: TextStyle(color: theme.hintColor, fontWeight: FontWeight.bold, fontSize: 13)),
+              Spacer(),
+              Text("${_localDrafts.length}/3", style: TextStyle(color: theme.hintColor, fontSize: 12)),
+            ]),
+            SizedBox(height: 8),
+            
+            Container(
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: theme.dividerColor.withOpacity(0.3)),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Column(
+                  children: List.generate(_localDrafts.length, (index) {
+                    final draft = _localDrafts[index];
+                    final bool isLast = index == _localDrafts.length - 1;
+                    
+                    return Column(
+                      children: [
+                        // --- DISMISSIBLE UNTUK HAPUS ---
+                        Dismissible(
+                          key: Key(draft.id), // Key unik dari draft ID
+                          direction: DismissDirection.startToEnd, // Slide ke kanan
+                          background: Container(
+                            alignment: Alignment.centerLeft,
+                            padding: EdgeInsets.only(left: 20),
+                            color: Colors.red,
+                            child: Row(
+                              children: const [
+                                Icon(Icons.delete, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text("Delete", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                              ],
+                            ),
+                          ),
+                          onDismissed: (direction) async {
+                            // 1. Hapus dari UI Local segera
+                            setState(() {
+                              _localDrafts.removeAt(index);
+                            });
+                            
+                            // 2. Panggil Service untuk hapus permanen
+                            await DraftService().deleteDraft(draft.id);
+                            
+                            // 3. (Opsional) Tampilkan feedback kecil jika perlu, tapi visual item hilang sudah cukup jelas
+                          },
+                          child: ListTile(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                            leading: Container(
+                              width: 40, height: 40,
+                              decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                              child: Icon(draft.mediaUrls.isNotEmpty ? Icons.image : Icons.text_fields, color: TwitterTheme.blue, size: 20),
+                            ),
+                            title: Text(
+                              draft.text.isEmpty ? "Untitled Draft" : draft.text,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Text(timeago.format(DateTime.fromMillisecondsSinceEpoch(draft.timestamp)), style: TextStyle(fontSize: 11)),
+                            trailing: Icon(Icons.arrow_forward_ios, size: 12, color: theme.hintColor),
+                            onTap: () => widget.onOpenDraft(draft),
+                          ),
+                        ),
+                        
+                        if (!isLast) Divider(height: 1, indent: 60),
+                      ],
+                    );
+                  }),
+                ),
+              ),
+            ),
+          ] else ...[
+            SizedBox(height: 16),
+            Center(child: Text("No drafts saved", style: TextStyle(color: theme.hintColor))),
+          ],
+          
+          SizedBox(height: 12),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("Cancel", style: TextStyle(color: theme.hintColor)),
+          )
+        ],
+      ),
+    );
+  }
 }

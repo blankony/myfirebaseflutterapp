@@ -15,6 +15,7 @@ import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/overlay_service.dart';
+import '../services/draft_service.dart'; // Pastikan import ini ada
 import 'video_trimmer_screen.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -22,13 +23,15 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 final CloudinaryService _cloudinaryService = CloudinaryService();
 
 class CreatePostScreen extends StatefulWidget {
-  final String? postId;
-  final Map<String, dynamic>? initialData;
+  final String? postId; // For editing published posts
+  final Map<String, dynamic>? initialData; // For community context/prefill
+  final DraftPost? draftData; // For loading a draft
 
   const CreatePostScreen({
     super.key,
     this.postId,
     this.initialData,
+    this.draftData,
   });
 
   @override
@@ -38,11 +41,13 @@ class CreatePostScreen extends StatefulWidget {
 class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _postController = TextEditingController();
   final PredictionService _predictionService = PredictionService();
+  final DraftService _draftService = DraftService(); 
   final FocusNode _postFocusNode = FocusNode();
   final LanguageChecker _badwordGuard = LanguageChecker();
 
   bool _canPost = false;
   bool _isProcessing = false;
+  bool _isSavingDraft = false; 
 
   String _visibility = 'public'; 
   bool _isAccountPrivate = false; 
@@ -68,7 +73,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   List<File> _selectedMediaFiles = []; 
   List<String> _existingMediaUrls = []; 
+  List<String> _existingPublicIds = []; 
   String? _mediaType; 
+  
+  String? _currentDraftId;
+
+  // State untuk melacak perubahan (Modified Check)
+  String _initialText = '';
+  List<String> _initialMediaUrls = [];
 
   bool get _isEditing => widget.postId != null;
 
@@ -79,59 +91,77 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _loadIdentity(); 
     _trainAiModel();
 
+    // Init Logic Priority: Edit Published > Load Draft > New Post
     if (widget.initialData != null && _isEditing) {
-      _postController.text = widget.initialData!['text'] ?? '';
-      _mediaType = widget.initialData!['mediaType'];
-      _visibility = widget.initialData!['visibility'] ?? 'public';
-      
-      if (widget.initialData!['mediaUrls'] != null) {
-        _existingMediaUrls = List<String>.from(widget.initialData!['mediaUrls']);
-      } else if (widget.initialData!['mediaUrl'] != null) {
-        _existingMediaUrls = [widget.initialData!['mediaUrl']];
-      }
-      _checkCanPost();
+      _initFromPublishedPost();
+    } else if (widget.draftData != null) {
+      _initFromDraft(widget.draftData!);
+    } else if (widget.initialData != null) {
+      // Setup community context from navigation
+      _communityId = widget.initialData!['communityId'];
+      _communityName = widget.initialData!['communityName'];
+      _communityIcon = widget.initialData!['communityIcon'];
     }
+  }
+
+  void _initFromPublishedPost() {
+    _postController.text = widget.initialData!['text'] ?? '';
+    _mediaType = widget.initialData!['mediaType'];
+    _visibility = widget.initialData!['visibility'] ?? 'public';
+    
+    if (widget.initialData!['mediaUrls'] != null) {
+      _existingMediaUrls = List<String>.from(widget.initialData!['mediaUrls']);
+    } else if (widget.initialData!['mediaUrl'] != null) {
+      _existingMediaUrls = [widget.initialData!['mediaUrl']];
+    }
+    _checkCanPost();
+  }
+
+  void _initFromDraft(DraftPost draft) {
+    _currentDraftId = draft.id;
+    _postController.text = draft.text;
+    _mediaType = draft.mediaType;
+    _visibility = draft.visibility;
+    _existingMediaUrls = List<String>.from(draft.mediaUrls);
+    _existingPublicIds = List<String>.from(draft.publicIds);
+    
+    // Simpan state awal untuk perbandingan
+    _initialText = draft.text;
+    _initialMediaUrls = List<String>.from(draft.mediaUrls);
+    
+    if (draft.communityId != null) {
+      _communityId = draft.communityId;
+      _communityName = draft.communityName;
+      _communityIcon = draft.communityIcon;
+      _isCommunityContext = true;
+    }
+    _checkCanPost();
+  }
+
+  // Cek apakah ada perubahan dari kondisi awal (untuk menghindari prompt save yang tidak perlu)
+  bool _hasChanges() {
+    bool textChanged = _postController.text.trim() != _initialText.trim();
+    // Cek sederhana: jika ada file baru dipilih ATAU jumlah url server berbeda
+    bool mediaChanged = _selectedMediaFiles.isNotEmpty || 
+                        _existingMediaUrls.length != _initialMediaUrls.length;
+    return textChanged || mediaChanged;
   }
 
   Future<void> _checkEmailVerification() async {
     final user = _auth.currentUser;
     if (user != null) {
-      // FIX: Wrap reload in try-catch to handle offline state
-      try {
-        await user.reload(); 
-      } catch (e) {
-        // Ignore offline error, rely on cached status
-      }
-
+      try { await user.reload(); } catch (_) {}
       if (!user.emailVerified) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (context) => AlertDialog(
-              title: Row(children: const [
-                Icon(Icons.mark_email_unread, color: Colors.orange), 
-                SizedBox(width: 8), 
-                Expanded(child: Text("Verification Required", overflow: TextOverflow.ellipsis))
-              ]),
-              content: const Text("You must verify your email address to create posts. Currently, your account is in Read-Only mode."),
+              title: Row(children: const [Icon(Icons.mark_email_unread, color: Colors.orange), SizedBox(width: 8), Expanded(child: Text("Verification Required", overflow: TextOverflow.ellipsis))]),
+              content: const Text("You must verify your email address to create posts."),
               actions: [
-                TextButton(
-                  onPressed: () {
-                    user.sendEmailVerification();
-                    Navigator.pop(context); 
-                    Navigator.pop(context); 
-                    OverlayService().showTopNotification(context, "Verification email sent!", Icons.check, (){});
-                  },
-                  child: const Text("Resend Email"),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context); 
-                    Navigator.pop(context); 
-                  },
-                  child: const Text("Close"),
-                ),
+                TextButton(onPressed: () { user.sendEmailVerification(); Navigator.pop(context); Navigator.pop(context); OverlayService().showTopNotification(context, "Verification email sent!", Icons.check, (){}); }, child: const Text("Resend Email")),
+                ElevatedButton(onPressed: () { Navigator.pop(context); Navigator.pop(context); }, child: const Text("Close")),
               ],
             ),
           );
@@ -159,10 +189,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
     } catch (_) {}
 
-    if (widget.initialData != null && widget.initialData!.containsKey('communityId')) {
-      _communityId = widget.initialData!['communityId'];
-      _communityName = widget.initialData!['communityName'];
-      _communityIcon = widget.initialData!['communityIcon'];
+    if (_communityId != null) {
       _isCommunityContext = true;
       _visibility = 'public'; 
 
@@ -171,12 +198,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         if (comDoc.exists) {
           final data = comDoc.data()!;
           _communityVerified = data['isVerified'] ?? false;
-          
           final bool allowMembers = data['allowMemberPosts'] ?? false;
           final String ownerId = data['ownerId'];
           final List admins = data['admins'] ?? [];
           final List editors = data['editors'] ?? [];
-          
           final bool isStaff = ownerId == user.uid || admins.contains(user.uid) || editors.contains(user.uid);
           
           setState(() {
@@ -194,15 +219,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             }
           }
         }
-      } catch (e) {
-        debugPrint("Error checking community permissions: $e");
-      }
-    } else if (!_isEditing) {
-      if (mounted) {
-        setState(() {
-          _visibility = _isAccountPrivate ? 'followers' : 'public';
-        });
-      }
+      } catch (e) { debugPrint("Error checking community permissions: $e"); }
+    } else if (!_isEditing && widget.draftData == null) {
+      if (mounted) setState(() { _visibility = _isAccountPrivate ? 'followers' : 'public'; });
     }
   }
 
@@ -280,17 +299,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (text.trim().isEmpty) return;
       final suggestion = await _predictionService.getLocalPrediction(text);
-      if (mounted && suggestion != null && suggestion.isNotEmpty) {
-        setState(() => _predictedText = suggestion);
-      }
+      if (mounted && suggestion != null && suggestion.isNotEmpty) setState(() => _predictedText = suggestion);
     });
   }
 
   void _acceptPrediction() {
     if (_predictedText != null) {
-      final currentText = _postController.text;
-      final separator = currentText.endsWith(' ') ? '' : ' ';
-      final newText = "$currentText$separator$_predictedText ";
+      final newText = "${_postController.text.trimRight()} $_predictedText ";
       _postController.text = newText;
       _postController.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
       setState(() { _predictedText = null; _canPost = true; });
@@ -300,20 +315,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   void _showMediaSourceSelection({required bool isVideo}) {
     FocusScope.of(context).unfocus();
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(leading: const Icon(Icons.camera_alt), title: const Text("Camera"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
-              ListTile(leading: const Icon(Icons.photo_library), title: const Text("Gallery"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
-            ],
-          ),
-        );
-      },
-    );
+    showModalBottomSheet(context: context, builder: (context) {
+      return SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        ListTile(leading: const Icon(Icons.camera_alt), title: const Text("Camera"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
+        ListTile(leading: const Icon(Icons.photo_library), title: const Text("Gallery"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
+      ]));
+    });
   }
 
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
@@ -324,19 +331,35 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         if (pickedFile != null && mounted) {
           final result = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => VideoTrimmerScreen(file: File(pickedFile.path))));
           if (result != null && result['file'] is File) {
-            setState(() { _mediaType = 'video'; _selectedMediaFiles = [result['file']]; _existingMediaUrls = []; _checkCanPost(); });
+            setState(() { 
+              _mediaType = 'video'; 
+              _selectedMediaFiles = [result['file']]; 
+              _existingMediaUrls = []; 
+              _existingPublicIds = [];
+              _checkCanPost(); 
+            });
           }
         }
       } else {
         if (source == ImageSource.gallery) {
           final List<XFile> pickedFiles = await picker.pickMultiImage(imageQuality: 80);
           if (pickedFiles.isNotEmpty) {
-            setState(() { if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; } _mediaType = 'image'; _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path))); _checkCanPost(); });
+            setState(() { 
+              if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; _existingPublicIds = []; } 
+              _mediaType = 'image'; 
+              _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path))); 
+              _checkCanPost(); 
+            });
           }
         } else {
           final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 80);
           if (pickedFile != null) {
-             setState(() { if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; } _mediaType = 'image'; _selectedMediaFiles.add(File(pickedFile.path)); _checkCanPost(); });
+             setState(() { 
+               if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; _existingPublicIds = []; } 
+               _mediaType = 'image'; 
+               _selectedMediaFiles.add(File(pickedFile.path)); 
+               _checkCanPost(); 
+             });
           }
         }
       }
@@ -348,7 +371,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _removeExistingUrl(int index) {
-    setState(() { _existingMediaUrls.removeAt(index); _checkCanPost(); if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) _mediaType = null; });
+    setState(() { 
+      _existingMediaUrls.removeAt(index);
+      if (_existingPublicIds.length > index) _existingPublicIds.removeAt(index); 
+      _checkCanPost(); 
+      if (_selectedMediaFiles.isEmpty && _existingMediaUrls.isEmpty) _mediaType = null; 
+    });
   }
 
   void _showVisibilityPicker() {
@@ -442,8 +470,136 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  // --- INTERCEPT BACK NAVIGATION ---
+  Future<bool> _onWillPop() async {
+    // 1. Jika kosong total dan bukan draft, langsung keluar
+    if (!_canPost && _currentDraftId == null) return true;
+
+    // 2. Jika Draft sudah ada DAN TIDAK ADA PERUBAHAN, langsung keluar (BUG FIX)
+    if (_currentDraftId != null && !_hasChanges()) {
+      return true;
+    }
+
+    // 3. Jika sedang edit post yang sudah publish (bukan draft), konfirmasi discard changes
+    if (_isEditing) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Discard changes?"),
+          content: const Text("You have unsaved changes. Are you sure you want to discard them?"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text("Keep Editing"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text("Discard", style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      );
+      return confirm ?? false;
+    }
+
+    // 4. Untuk Post Baru atau Draft yang diubah -> Tawarkan Save
+    final String title = _currentDraftId != null ? "Update Draft?" : "Save Draft?";
+    final String content = _currentDraftId != null ? "Save changes to your draft?" : "Save this as a draft?";
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('discard'),
+            child: const Text("Discard", style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('cancel'),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop('save'),
+            style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == 'save') {
+      await _saveToDrafts();
+      return true; // _saveToDrafts logic will show notification, then we pop
+    } else if (result == 'discard') {
+      return true;
+    }
+    
+    return false; // Stay
+  }
+
+  // --- SAVE DRAFT LOGIC ---
+  Future<void> _saveToDrafts() async {
+    setState(() => _isSavingDraft = true);
+    
+    // Upload new media files to Cloudinary FIRST (so the draft persists URLs)
+    try {
+      List<String> finalUrls = [..._existingMediaUrls];
+      List<String> finalPublicIds = [..._existingPublicIds];
+
+      if (_selectedMediaFiles.isNotEmpty) {
+        OverlayService().showTopNotification(context, "Uploading media for draft...", Icons.cloud_upload, (){});
+        
+        for (var file in _selectedMediaFiles) {
+          File fileToUp = file;
+          if (_mediaType == 'video') {
+             try {
+                final MediaInfo? info = await VideoCompress.compressVideo(file.path, quality: VideoQuality.MediumQuality, deleteOrigin: false);
+                if (info != null && info.file != null) fileToUp = info.file!;
+             } catch(e) {}
+          }
+          
+          final response = await _cloudinaryService.uploadFileWithDetails(fileToUp, _mediaType == 'video' ? 'video' : 'auto');
+          
+          if (response.secureUrl != null) {
+            finalUrls.add(response.secureUrl!);
+            if (response.publicId != null) finalPublicIds.add(response.publicId!);
+          }
+        }
+      }
+
+      // Create Draft Object
+      final draft = DraftPost(
+        id: _currentDraftId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        text: _postController.text,
+        mediaUrls: finalUrls,
+        publicIds: finalPublicIds,
+        mediaType: _mediaType,
+        visibility: _visibility,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        communityId: _communityId,
+        communityName: _communityName,
+        communityIcon: _communityIcon,
+      );
+
+      // Save Locally
+      await _draftService.saveDraft(draft);
+
+      if (mounted) {
+        OverlayService().showTopNotification(context, "Draft saved", Icons.save, (){}, color: Colors.green);
+        // Do not pop here manually, let the WillPopScope flow handle it if triggered by back
+      }
+    } catch (e) {
+      if(mounted) OverlayService().showTopNotification(context, "Failed to save draft", Icons.error, (){}, color: Colors.red);
+    } finally {
+      if(mounted) setState(() => _isSavingDraft = false);
+    }
+  }
+
   Future<void> _submitPost() async {
     if (!_canPost) return;
+    
     final user = _auth.currentUser;
     if (user == null) return;
 
@@ -456,11 +612,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final isImageSafe = await _checkImageSafety();
     if (!isImageSafe) return; 
 
-    final String finalUserName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
-    final String? finalUserAvatar = _postAsCommunity ? _communityIcon : _myAvatarUrl;
-    final int finalUserIconId = _postAsCommunity ? 0 : _myAvatarIconId;
-    final String finalUserHex = _postAsCommunity ? '' : _myAvatarHex;
-
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop();
 
@@ -469,27 +620,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (overlayState != null) {
       _BackgroundUploader.startUploadSequence(
         overlayState: overlayState,
-        text: text,
+        text: _postController.text,
         filesToUpload: _selectedMediaFiles, 
-        existingMediaUrls: _existingMediaUrls, 
+        existingMediaUrls: _existingMediaUrls, // Pass Cloudinary URLs from draft here
         mediaType: _mediaType,
         visibility: _visibility,
         isEditing: _isEditing,
         postId: widget.postId,
         
         uid: user.uid, 
-        userName: finalUserName,
+        userName: _postAsCommunity ? (_communityName ?? 'Community') : _myUserName,
         userEmail: _myUserEmail,
-        avatarIconId: finalUserIconId,
-        avatarHex: finalUserHex,
-        profileImageUrl: finalUserAvatar,
+        avatarIconId: _postAsCommunity ? 0 : _myAvatarIconId,
+        avatarHex: _postAsCommunity ? '' : _myAvatarHex,
+        profileImageUrl: _postAsCommunity ? _communityIcon : _myAvatarUrl,
         
         communityId: _communityId,
         communityName: _communityName,
         communityIcon: _communityIcon,
         communityVerified: _communityVerified,
-        
         isCommunityIdentity: _postAsCommunity,
+        
+        draftIdToDelete: _currentDraftId, // Tell uploader to clean up local draft
       );
     }
   }
@@ -505,193 +657,203 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isRestricted) return const SizedBox.shrink(); 
-
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     final String? currentAvatarUrl = _postAsCommunity ? _communityIcon : _myAvatarUrl;
     final String currentDisplayName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
 
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: Icon(Icons.close, color: theme.primaryColor),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: _isCommunityContext
-            ? Row(
-                children: [
-                  const Icon(Icons.groups, color: TwitterTheme.blue, size: 20),
-                  const SizedBox(width: 8),
-                  Flexible(child: Text(_communityName ?? "Community", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                ],
-              ) 
-            : Text(_isEditing ? "Edit Post" : "Create Post", style: const TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: false,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: ElevatedButton(
-              onPressed: _canPost && !_isProcessing ? _submitPost : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: TwitterTheme.blue,
-                foregroundColor: Colors.white,
-                shape: const StadiumBorder()
+    // Wrap with WillPopScope to handle "Back" logic
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: Icon(Icons.close, color: theme.primaryColor),
+            // Manually trigger pop check
+            onPressed: () async {
+              if (await _onWillPop()) {
+                if (mounted) Navigator.of(context).pop();
+              }
+            },
+          ),
+          title: _isCommunityContext
+              ? Row(
+                  children: [
+                    const Icon(Icons.groups, color: TwitterTheme.blue, size: 20),
+                    const SizedBox(width: 8),
+                    Flexible(child: Text(_communityName ?? "Community", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                  ],
+                ) 
+              : Text(_isEditing ? "Edit Post" : "Create Post", style: const TextStyle(fontWeight: FontWeight.bold)),
+          centerTitle: false,
+          actions: [
+            // TOMBOL SAVE DRAFT DIHAPUS DARI SINI
+            
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: ElevatedButton(
+                onPressed: _canPost && !_isProcessing && !_isSavingDraft ? _submitPost : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: TwitterTheme.blue,
+                  foregroundColor: Colors.white,
+                  shape: const StadiumBorder()
+                ),
+                child: const Text("Post"),
               ),
-              child: const Text("Post"),
-            ),
-          )
-        ],
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: bottomInset + 80),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_hasOfficialAuthority)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: theme.cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: theme.dividerColor)
-                      ),
-                      child: Row(
-                        children: [
-                          const Text("Post Identity:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          const Spacer(),
-                          ChoiceChip(
-                            label: const Text("Me"),
-                            selected: !_postAsCommunity,
-                            onSelected: (val) => setState(() => _postAsCommunity = false),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          const SizedBox(width: 8),
-                          ChoiceChip(
-                            label: const Text("Community"),
-                            selected: _postAsCommunity,
-                            onSelected: (val) => setState(() => _postAsCommunity = true),
-                            selectedColor: TwitterTheme.blue.withOpacity(0.2),
-                            labelStyle: TextStyle(color: _postAsCommunity ? TwitterTheme.blue : null),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 24,
-                        backgroundColor: currentAvatarUrl != null ? Colors.transparent : AvatarHelper.getColor(_myAvatarHex),
-                        backgroundImage: currentAvatarUrl != null ? CachedNetworkImageProvider(currentAvatarUrl) : null,
-                        child: currentAvatarUrl == null 
-                            ? (_postAsCommunity 
-                                ? const Icon(Icons.groups, color: Colors.white) 
-                                : Icon(AvatarHelper.getIcon(_myAvatarIconId), color: Colors.white)) 
-                            : null,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+            )
+          ],
+        ),
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: bottomInset + 80),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_hasOfficialAuthority)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: theme.cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: theme.dividerColor)
+                        ),
+                        child: Row(
                           children: [
-                            Text(
-                              currentDisplayName, 
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold, 
-                                fontSize: 16,
-                                color: _postAsCommunity ? TwitterTheme.blue : null
-                              )
+                            const Text("Post Identity:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const Spacer(),
+                            ChoiceChip(
+                              label: const Text("Me"),
+                              selected: !_postAsCommunity,
+                              onSelected: (val) => setState(() => _postAsCommunity = false),
+                              visualDensity: VisualDensity.compact,
                             ),
-                            if (_isCommunityContext)
-                              Text(
-                                _postAsCommunity 
-                                  ? "Posting as Community Identity"
-                                  : "Posting in $_communityName",
-                                style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)
-                              ),
-                            
-                            TextField(
-                              controller: _postController,
-                              focusNode: _postFocusNode,
-                              onChanged: _onTextChanged,
-                              autofocus: !_isEditing,
-                              maxLines: null,
-                              style: const TextStyle(fontSize: 18),
-                              decoration: InputDecoration(
-                                hintText: _postAsCommunity ? "What's the official news?" : "What's happening?",
-                                border: InputBorder.none,
-                              ),
+                            const SizedBox(width: 8),
+                            ChoiceChip(
+                              label: const Text("Community"),
+                              selected: _postAsCommunity,
+                              onSelected: (val) => setState(() => _postAsCommunity = true),
+                              selectedColor: TwitterTheme.blue.withOpacity(0.2),
+                              labelStyle: TextStyle(color: _postAsCommunity ? TwitterTheme.blue : null),
+                              visualDensity: VisualDensity.compact,
                             ),
-                            
-                            if (_existingMediaUrls.isNotEmpty || _selectedMediaFiles.isNotEmpty)
-                              Container(
-                                height: 100,
-                                margin: const EdgeInsets.only(top: 10),
-                                child: ListView(
-                                  scrollDirection: Axis.horizontal,
-                                  children: [
-                                    ..._existingMediaUrls.asMap().entries.map((e) => _buildPreviewItem(CachedNetworkImageProvider(e.value), () => _removeExistingUrl(e.key), _mediaType == 'video')),
-                                    ..._selectedMediaFiles.asMap().entries.map((e) => _buildPreviewItem(FileImage(e.value), () => _removeFile(e.key), _mediaType == 'video')),
-                                  ],
-                                ),
-                              ),
-                            
-                            if (_predictedText != null)
-                              GestureDetector(
-                                onTap: _acceptPrediction,
-                                child: Container(
-                                  margin: const EdgeInsets.only(top: 8),
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                                  child: Text("Suggestion: $_predictedText", style: const TextStyle(color: TwitterTheme.blue)),
-                                ),
-                              )
                           ],
                         ),
                       ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          Positioned(
-            left: 0, right: 0, bottom: bottomInset,
-            child: Container(
-              color: theme.scaffoldBackgroundColor,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  IconButton(icon: const Icon(Icons.image, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: false)),
-                  IconButton(icon: const Icon(Icons.videocam, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: true)),
-                  
-                  if (!_isCommunityContext)
-                    InkWell(
-                      onTap: _showVisibilityPicker,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
-                          borderRadius: BorderRadius.circular(20),
+
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CircleAvatar(
+                          radius: 24,
+                          backgroundColor: currentAvatarUrl != null ? Colors.transparent : AvatarHelper.getColor(_myAvatarHex),
+                          backgroundImage: currentAvatarUrl != null ? CachedNetworkImageProvider(currentAvatarUrl) : null,
+                          child: currentAvatarUrl == null 
+                              ? (_postAsCommunity 
+                                  ? const Icon(Icons.groups, color: Colors.white) 
+                                  : Icon(AvatarHelper.getIcon(_myAvatarIconId), color: Colors.white)) 
+                              : null,
                         ),
-                        child: _buildVisibilityButtonContent(),
-                      ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                currentDisplayName, 
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold, 
+                                  fontSize: 16,
+                                  color: _postAsCommunity ? TwitterTheme.blue : null
+                                )
+                              ),
+                              if (_isCommunityContext)
+                                Text(
+                                  _postAsCommunity 
+                                    ? "Posting as Community Identity"
+                                    : "Posting in $_communityName",
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)
+                                ),
+                              
+                              TextField(
+                                controller: _postController,
+                                focusNode: _postFocusNode,
+                                onChanged: _onTextChanged,
+                                autofocus: !_isEditing,
+                                maxLines: null,
+                                style: const TextStyle(fontSize: 18),
+                                decoration: InputDecoration(
+                                  hintText: _postAsCommunity ? "What's the official news?" : "What's happening?",
+                                  border: InputBorder.none,
+                                ),
+                              ),
+                              
+                              if (_existingMediaUrls.isNotEmpty || _selectedMediaFiles.isNotEmpty)
+                                Container(
+                                  height: 100,
+                                  margin: const EdgeInsets.only(top: 10),
+                                  child: ListView(
+                                    scrollDirection: Axis.horizontal,
+                                    children: [
+                                      ..._existingMediaUrls.asMap().entries.map((e) => _buildPreviewItem(CachedNetworkImageProvider(e.value), () => _removeExistingUrl(e.key), _mediaType == 'video')),
+                                      ..._selectedMediaFiles.asMap().entries.map((e) => _buildPreviewItem(FileImage(e.value), () => _removeFile(e.key), _mediaType == 'video')),
+                                    ],
+                                  ),
+                                ),
+                              
+                              if (_predictedText != null)
+                                GestureDetector(
+                                  onTap: _acceptPrediction,
+                                  child: Container(
+                                    margin: const EdgeInsets.only(top: 8),
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                                    child: Text("Suggestion: $_predictedText", style: const TextStyle(color: TwitterTheme.blue)),
+                                  ),
+                                )
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
-          )
-        ],
+            
+            Positioned(
+              left: 0, right: 0, bottom: bottomInset,
+              child: Container(
+                color: theme.scaffoldBackgroundColor,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    IconButton(icon: const Icon(Icons.image, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: false)),
+                    IconButton(icon: const Icon(Icons.videocam, color: TwitterTheme.blue), onPressed: () => _showMediaSourceSelection(isVideo: true)),
+                    
+                    if (!_isCommunityContext)
+                      InkWell(
+                        onTap: _showVisibilityPicker,
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: _buildVisibilityButtonContent(),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
@@ -710,6 +872,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
+// Background Uploader Class (unchanged)
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
@@ -731,6 +894,7 @@ class _BackgroundUploader {
     String? communityIcon,
     bool? communityVerified,
     bool isCommunityIdentity = false,
+    String? draftIdToDelete, // Parameter untuk menghapus draft jika sukses
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -749,7 +913,7 @@ class _BackgroundUploader {
     _processUpload(
       text, filesToUpload, existingMediaUrls, mediaType, visibility, isEditing, postId,
       uid, userName, userEmail, avatarIconId, avatarHex, profileImageUrl, communityId,
-      communityName, communityIcon, communityVerified, isCommunityIdentity,
+      communityName, communityIcon, communityVerified, isCommunityIdentity, draftIdToDelete,
       (status) => overlayKey.currentState?.updateStatus(status),
       () {
         overlayKey.currentState?.handleSuccess();
@@ -765,7 +929,7 @@ class _BackgroundUploader {
   static Future<void> _processUpload(
     String text, List<File> files, List<String> urls, String? type, String vis, bool edit, String? pid,
     String uid, String uName, String uEmail, int icon, String hex, String? img, String? comId,
-    String? comName, String? comIcon, bool? comVerified, bool isCommunityIdentity, 
+    String? comName, String? comIcon, bool? comVerified, bool isCommunityIdentity, String? draftId,
     Function(String) onProgress, VoidCallback onSuccess, Function(dynamic) onFailure,
   ) async {
     try {
@@ -824,6 +988,11 @@ class _BackgroundUploader {
         }
 
         await FirebaseFirestore.instance.collection('posts').add(postData);
+        
+        // HAPUS DRAFT JIKA SUKSES
+        if (draftId != null) {
+          await DraftService().discardDraftAfterPosting(draftId);
+        }
       }
 
       if (type == 'video') await VideoCompress.deleteAllCache();

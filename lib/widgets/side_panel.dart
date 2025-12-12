@@ -10,6 +10,7 @@ import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
 import '../screens/saved_posts_screen.dart'; 
 import '../screens/webview_screen.dart'; 
+import '../screens/drafts_screen.dart'; // Import Drafts Screen
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
