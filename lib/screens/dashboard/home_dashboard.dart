@@ -329,12 +329,22 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
+  // --- MODIFIED: CHECK DRAFTS BEFORE SHOWING DIALOG ---
   void _showPostCreationMenu(BuildContext context) async {
     final DraftService draftService = DraftService();
+    // 1. Ambil drafts terlebih dahulu
     final List<DraftPost> drafts = await draftService.getDrafts();
 
     if (!mounted) return;
 
+    // 2. Cek apakah drafts kosong
+    if (drafts.isEmpty) {
+      // Jika kosong, langsung buka Create Post Screen tanpa dialog
+      _navigateToCreatePost();
+      return;
+    }
+
+    // 3. Jika ada drafts, tampilkan dialog pilihan
     showDialog(
       context: context,
       barrierDismissible: true,
