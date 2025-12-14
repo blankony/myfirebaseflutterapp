@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../main.dart';
 import 'community_detail_screen.dart';
+import '../../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 class BrowseCommunitiesScreen extends StatelessWidget {
   const BrowseCommunitiesScreen({super.key});
@@ -12,19 +13,24 @@ class BrowseCommunitiesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
     return Scaffold(
-      appBar: AppBar(title: Text("Explore Channels")),
+      appBar: AppBar(title: Text(t.translate('comm_explore_title'))), // "Explore Channels"
+      // Menggunakan SafeArea untuk menghindari masalah layout di edge screen saat transisi
       body: SafeArea(
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('communities').snapshots(),
           builder: (context, snapshot) {
+            // Tampilkan loading yang memiliki ukuran pasti, bukan shrink
             if (!snapshot.hasData) {
               return Center(child: CircularProgressIndicator());
             }
 
             final allDocs = snapshot.data!.docs;
             
+            // Sorting logic
             final sortedDocs = allDocs.toList()..sort((a, b) {
               final dataA = a.data() as Map<String, dynamic>;
               final dataB = b.data() as Map<String, dynamic>;
@@ -39,8 +45,10 @@ class BrowseCommunitiesScreen extends StatelessWidget {
             });
 
             return ListView.builder(
+              // PENTING: PageStorageKey mencegah list di-rebuild ulang dari nol saat navigasi kembali
               key: const PageStorageKey('browse_communities_list'),
               padding: EdgeInsets.all(16),
+              // Physics memastikan scroll view selalu punya constraints yang valid
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: sortedDocs.length,
               itemBuilder: (context, index) {
@@ -63,6 +71,7 @@ class BrowseCommunitiesScreen extends StatelessWidget {
                   badgeColor = Colors.blueGrey; 
                 }
 
+                // RepaintBoundary mengisolasi render item agar tidak crash saat transisi halaman
                 return RepaintBoundary(
                   child: Card(
                     margin: EdgeInsets.only(bottom: 12),
@@ -85,13 +94,14 @@ class BrowseCommunitiesScreen extends StatelessWidget {
                         children: [
                           Icon(badgeIcon, size: 12, color: badgeColor),
                           SizedBox(width: 4),
-                          Text("${followers.length} Followers", style: TextStyle(fontSize: 12)),
+                          Text("${followers.length} ${t.translate('comm_followers_count')}", style: TextStyle(fontSize: 12)),
                         ],
                       ),
                       trailing: isFollowing 
                         ? Icon(Icons.check_circle, color: Colors.green)
                         : Icon(Icons.add_circle_outline, color: TwitterTheme.blue),
                       onTap: () {
+                        // Menggunakan push biasa agar animasi default platform digunakan (lebih stabil)
                         Navigator.push(context, MaterialPageRoute(
                           builder: (_) => CommunityDetailScreen(communityId: doc.id, communityData: data)
                         ));

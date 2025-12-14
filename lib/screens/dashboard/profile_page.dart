@@ -654,7 +654,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         : [
             PopupMenuItem(value: 'share', child: Text(t.translate('profile_menu_share_account'))), 
             PopupMenuItem(value: 'report', child: Text(t.translate('profile_report_title'))),
-            PopupMenuItem(value: 'block', child: Text(_isBlocked ? t.translate('profile_unblocked') : t.translate('general_delete'), style: TextStyle(color: Colors.red))), // Using Delete/Block key
+            PopupMenuItem(value: 'block', child: Text(_isBlocked ? t.translate('profile_unblocked') : t.translate('general_delete'), style: TextStyle(color: Colors.red))), 
           ],
     );
   }

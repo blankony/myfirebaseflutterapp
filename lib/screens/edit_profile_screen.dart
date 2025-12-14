@@ -11,6 +11,7 @@ import '../services/cloudinary_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/pnj_data.dart'; 
 import '../services/overlay_service.dart'; 
+import '../services/app_localizations.dart'; // 1. IMPORT LOCALIZATION
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -131,6 +132,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
   
   Future<File?> _cropImage({required XFile imageFile, required bool isAvatar}) async {
+    // Localization di dalam async method bisa tricky, kita pakai hardcoded untuk UI crop
+    // atau pass title dari fungsi pemanggil. Di sini hardcoded English umum library.
     try {
       final dynamic cropped = await ImageCropper().cropImage(
         sourcePath: imageFile.path,
@@ -167,8 +170,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return null;
   }
 
-  // --- MODIFIED: Selection Dialog for Camera/Gallery ---
   void _showImageSourceSelection({required bool isAvatar}) {
+    var t = AppLocalizations.of(context)!;
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -182,7 +185,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               SizedBox(height: 16),
               ListTile(
                 leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
-                title: Text("Camera"),
+                title: Text(t.translate('profile_camera')), // "Take from Camera"
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(isAvatar: isAvatar, source: ImageSource.camera);
@@ -190,7 +193,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               ListTile(
                 leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
-                title: Text("Gallery"),
+                title: Text(t.translate('profile_gallery')), // "Choose from Gallery"
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(isAvatar: isAvatar, source: ImageSource.gallery);
@@ -204,7 +207,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  // --- MODIFIED: Accepts Source ---
   Future<void> _pickImage({required bool isAvatar, required ImageSource source}) async {
     FocusScope.of(context).unfocus();
     final picker = ImagePicker();
@@ -237,9 +239,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _saveChanges() async {
     FocusScope.of(context).unfocus();
+    var t = AppLocalizations.of(context)!;
 
     if (_user == null || _nameController.text.isEmpty) {
-      OverlayService().showTopNotification(context, "Name cannot be empty", Icons.warning, (){}, color: Colors.orange);
+      OverlayService().showTopNotification(context, t.translate('edit_error_name'), Icons.warning, (){}, color: Colors.orange);
       return;
     }
     setState(() { _isLoading = true; });
@@ -252,7 +255,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (uploadUrl == null) {
         if (mounted) { 
           setState(() { _isLoading = false; }); 
-          OverlayService().showTopNotification(context, "Failed to upload avatar", Icons.error, (){}, color: Colors.red);
+          OverlayService().showTopNotification(context, t.translate('edit_error_upload'), Icons.error, (){}, color: Colors.red);
         }
         return;
       }
@@ -264,7 +267,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (uploadUrl == null) {
         if (mounted) { 
           setState(() { _isLoading = false; }); 
-          OverlayService().showTopNotification(context, "Failed to upload banner", Icons.error, (){}, color: Colors.red);
+          OverlayService().showTopNotification(context, t.translate('edit_error_upload'), Icons.error, (){}, color: Colors.red);
         }
         return;
       }
@@ -304,7 +307,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (context.mounted) {
         OverlayService().showTopNotification(
           context, 
-          "Profile updated successfully!", 
+          t.translate('edit_success'), 
           Icons.check_circle, 
           (){}, 
           color: Colors.green
@@ -390,6 +393,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 2. GET LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    
     final bool isCustomImageSet = _selectedImageFile != null || (_profileImageUrl != null && _profileImageUrl!.isNotEmpty);
     final bool isCustomBannerSet = _selectedBannerFile != null || (_bannerImageUrl != null && _bannerImageUrl!.isNotEmpty);
 
@@ -397,7 +403,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       child: Scaffold(
         appBar: AppBar(
-          title: Text('Edit Profile', style: TextStyle(fontWeight: FontWeight.bold)),
+          title: Text(t.translate('edit_profile_title'), style: TextStyle(fontWeight: FontWeight.bold)), // "Edit Profile"
           centerTitle: true,
           elevation: 0,
           backgroundColor: theme.scaffoldBackgroundColor,
@@ -413,7 +419,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 child: _isLoading 
                     ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    : Text(t.translate('edit_save'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), // "Save"
               ),
             ),
           ],
@@ -448,7 +454,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             Container(
                               color: Colors.black26, 
                               child: Center(
-                                child: Icon(Icons.add_a_photo_outlined, color: Colors.white.withOpacity(0.8), size: 32),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.add_a_photo_outlined, color: Colors.white.withOpacity(0.8), size: 32),
+                                    Text(t.translate('edit_banner_add'), style: TextStyle(color: Colors.white, fontSize: 12))
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -513,7 +525,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         padding: const EdgeInsets.only(left: 8.0, bottom: 16.0),
                         child: GestureDetector(
                           onTap: () => setState(() { _selectedImageFile = null; _profileImageUrl = null; _selectedIconId = 0; }),
-                          child: Text("Remove photo", style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 13)),
+                          child: Text(t.translate('edit_remove_photo'), style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 13)), // "Remove photo"
                         ),
                       ),
 
@@ -523,8 +535,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       controller: _nameController,
                       autofocus: false,
                       decoration: InputDecoration(
-                        labelText: 'Display Name',
-                        hintText: 'Enter your name',
+                        labelText: t.translate('edit_display_name'), // "Display Name"
+                        hintText: t.translate('edit_name_hint'), // "Enter your name"
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                       ),
@@ -535,8 +547,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       autofocus: false,
                       maxLength: 200,
                       decoration: InputDecoration(
-                        labelText: 'Bio',
-                        hintText: 'Tell the world about yourself',
+                        labelText: t.translate('edit_bio_label'), // "Bio"
+                        hintText: t.translate('edit_bio_hint'), // "Tell the world..."
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                         alignLabelWithHint: true,
@@ -547,12 +559,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     
                     SizedBox(height: 30),
 
-                    Text("Academic Info", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    Text(t.translate('edit_academic_info'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), // "Academic Info"
                     SizedBox(height: 16),
                     
                     DropdownButtonFormField<String>(
                       decoration: InputDecoration(
-                        labelText: "Department (Jurusan)",
+                        labelText: t.translate('edit_dept_label'), // "Department"
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                         filled: true,
@@ -574,7 +586,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     
                     DropdownButtonFormField<Map<String, String>>(
                       decoration: InputDecoration(
-                        labelText: "Study Program (Prodi)",
+                        labelText: t.translate('edit_prodi_label'), // "Study Program"
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                         filled: true,
@@ -603,7 +615,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       Divider(),
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12.0),
-                        child: Text("Or choose an avatar preset", style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)),
+                        child: Text(t.translate('edit_avatar_preset'), style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)), // "Or choose avatar preset"
                       ),
                       SizedBox(
                         height: 60,
@@ -677,7 +689,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(8)),
                         child: Icon(Icons.lock_outline, color: theme.primaryColor),
                       ),
-                      title: Text('Change Password'),
+                      title: Text(t.translate('edit_change_password')), // "Change Password"
                       trailing: Icon(Icons.arrow_forward_ios, size: 14, color: theme.hintColor),
                       onTap: () {
                         Navigator.of(context).push(
