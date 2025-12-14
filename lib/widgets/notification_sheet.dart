@@ -9,6 +9,7 @@ import '../screens/post_detail_screen.dart';
 import '../screens/dashboard/profile_page.dart';
 import '../main.dart';
 import '../services/overlay_service.dart';
+import '../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -48,7 +49,7 @@ class _NotificationSheetState extends State<NotificationSheet> {
     await batch.commit();
   }
 
-  String _getGroupLabel(Timestamp timestamp) {
+  String _getGroupLabel(Timestamp timestamp, AppLocalizations t) {
     final now = DateTime.now();
     final date = timestamp.toDate();
     final today = DateTime(now.year, now.month, now.day);
@@ -56,12 +57,12 @@ class _NotificationSheetState extends State<NotificationSheet> {
     final difference = today.difference(notificationDate).inDays;
 
     if (difference == 0) {
-      if (now.difference(date).inMinutes < 60) return "New";
-      return "Today";
+      if (now.difference(date).inMinutes < 60) return t.translate('time_new'); // "New"
+      return t.translate('time_today'); // "Today"
     }
-    if (difference == 1) return "Yesterday";
-    if (difference < 7) return "This Week";
-    return "Earlier";
+    if (difference == 1) return t.translate('time_yesterday'); // "Yesterday"
+    if (difference < 7) return t.translate('time_this_week'); // "This Week"
+    return t.translate('time_earlier'); // "Earlier"
   }
 
   @override
@@ -71,6 +72,7 @@ class _NotificationSheetState extends State<NotificationSheet> {
     }
     
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!;
 
     return Container(
       decoration: BoxDecoration(
@@ -85,12 +87,12 @@ class _NotificationSheetState extends State<NotificationSheet> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  "Activity",
+                  t.translate('notif_activity_title'), // "Activity"
                   style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 IconButton(
                   icon: Icon(Icons.check_circle_outline),
-                  tooltip: "Mark all read",
+                  tooltip: t.translate('notif_mark_read'), // "Mark all read"
                   onPressed: _markNotificationsAsRead,
                 )
               ],
@@ -121,7 +123,7 @@ class _NotificationSheetState extends State<NotificationSheet> {
                       children: [
                         Icon(Icons.notifications_none, size: 64, color: theme.hintColor.withOpacity(0.3)),
                         SizedBox(height: 16),
-                        Text("No notifications yet", style: TextStyle(color: theme.hintColor)),
+                        Text(t.translate('notif_empty'), style: TextStyle(color: theme.hintColor)), // "No notifications yet"
                       ],
                     ),
                   );
@@ -135,7 +137,8 @@ class _NotificationSheetState extends State<NotificationSheet> {
                   final Timestamp? timestamp = data['timestamp'];
                   
                   if (timestamp != null) {
-                    String group = _getGroupLabel(timestamp);
+                    // Pass localization instance to helper
+                    String group = _getGroupLabel(timestamp, t);
                     if (group != currentGroup) {
                       currentGroup = group;
                       listItems.add(
@@ -197,6 +200,7 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
     setState(() => _isProcessing = true);
     final myUid = _auth.currentUser!.uid;
     final senderId = widget.notificationData['senderId'];
+    var t = AppLocalizations.of(context)!;
 
     try {
       final batch = _firestore.batch();
@@ -226,9 +230,9 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
 
       await batch.commit();
       
-      if(isAccepted && mounted) OverlayService().showTopNotification(context, "Request accepted", Icons.person_add, (){}, color: Colors.green);
+      if(isAccepted && mounted) OverlayService().showTopNotification(context, t.translate('notif_req_accepted'), Icons.person_add, (){}, color: Colors.green);
     } catch (e) {
-      if(mounted) OverlayService().showTopNotification(context, "Error processing request", Icons.error, (){}, color: Colors.red);
+      if(mounted) OverlayService().showTopNotification(context, t.translate('notif_req_error'), Icons.error, (){}, color: Colors.red);
       setState(() => _isProcessing = false);
     }
   }
@@ -237,6 +241,7 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final senderId = widget.notificationData['senderId'];
+    var t = AppLocalizations.of(context)!;
 
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(senderId).get(),
@@ -270,7 +275,7 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
                         style: theme.textTheme.bodyMedium,
                         children: [
                           TextSpan(text: name, style: TextStyle(fontWeight: FontWeight.bold)),
-                          TextSpan(text: " wants to follow you."),
+                          TextSpan(text: " ${t.translate('notif_req_body')}"), // " wants to follow you."
                         ],
                       ),
                     ),
@@ -290,7 +295,7 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
                         foregroundColor: Colors.red,
                         side: BorderSide(color: Colors.red.withOpacity(0.5))
                       ),
-                      child: Text("Decline")
+                      child: Text(t.translate('notif_req_decline')) // "Decline"
                     ),
                     SizedBox(width: 12),
                     ElevatedButton(
@@ -299,7 +304,7 @@ class _FollowRequestTileState extends State<_FollowRequestTile> {
                         backgroundColor: TwitterTheme.blue,
                         foregroundColor: Colors.white
                       ),
-                      child: Text("Confirm")
+                      child: Text(t.translate('notif_req_confirm')) // "Confirm"
                     ),
                   ]
                 ],
@@ -347,9 +352,10 @@ class _NotificationTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final String senderId = notificationData['senderId'];
+    var t = AppLocalizations.of(context)!;
     
     if (senderId == 'system') {
-      return _buildSystemTile(context, theme);
+      return _buildSystemTile(context, theme, t);
     }
 
     return FutureBuilder<DocumentSnapshot>(
@@ -364,24 +370,24 @@ class _NotificationTile extends StatelessWidget {
           profileUrl = userData['profileImageUrl'];
         }
 
-        return _buildUserTile(context, theme, name, profileUrl);
+        return _buildUserTile(context, theme, name, profileUrl, t);
       },
     );
   }
 
-  Widget _buildSystemTile(BuildContext context, ThemeData theme) {
+  Widget _buildSystemTile(BuildContext context, ThemeData theme, AppLocalizations t) {
     final String type = notificationData['type'];
     final String text = notificationData['postTextSnippet'] ?? '';
     final Timestamp? timestamp = notificationData['timestamp'];
     
     IconData icon = Icons.info;
     Color color = theme.primaryColor;
-    String title = "System Notification";
+    String title = t.translate('notif_sys_title'); // "System Notification"
 
     if (type == 'upload_complete') {
       icon = Icons.cloud_done;
       color = Colors.green;
-      title = "Upload Successful";
+      title = t.translate('notif_upload_title'); // "Upload Successful"
     }
 
     return Container(
@@ -412,7 +418,7 @@ class _NotificationTile extends StatelessWidget {
     );
   }
 
-  Widget _buildUserTile(BuildContext context, ThemeData theme, String name, String? profileUrl) {
+  Widget _buildUserTile(BuildContext context, ThemeData theme, String name, String? profileUrl, AppLocalizations t) {
     final String type = notificationData['type'];
     final String snippet = notificationData['postTextSnippet'] ?? '';
     final Timestamp? timestamp = notificationData['timestamp'];
@@ -425,32 +431,32 @@ class _NotificationTile extends StatelessWidget {
       case 'like':
         badgeIcon = Icons.favorite;
         badgeColor = Colors.pink;
-        actionText = "liked your post";
+        actionText = t.translate('action_liked');
         break;
       case 'repost':
         badgeIcon = Icons.repeat;
         badgeColor = Colors.green;
-        actionText = "reposted your post";
+        actionText = t.translate('action_reposted');
         break;
       case 'comment':
         badgeIcon = Icons.chat_bubble;
         badgeColor = TwitterTheme.blue;
-        actionText = "replied to you";
+        actionText = t.translate('action_replied');
         break;
       case 'follow':
         badgeIcon = Icons.person_add;
         badgeColor = Colors.purple;
-        actionText = "followed you";
+        actionText = t.translate('action_followed');
         break;
       case 'request_accepted': 
         badgeIcon = Icons.check_circle; 
         badgeColor = Colors.teal;
-        actionText = "accepted your follow request";
+        actionText = t.translate('action_accepted');
         break;
       default:
         badgeIcon = Icons.notifications;
         badgeColor = Colors.grey;
-        actionText = "interacted with you";
+        actionText = t.translate('action_interacted');
     }
 
     return InkWell(

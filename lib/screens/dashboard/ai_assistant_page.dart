@@ -18,6 +18,7 @@ import '../../services/ai_event_bus.dart';
 import '../../widgets/common_error_widget.dart';
 import '../../services/overlay_service.dart';
 import '../../services/voice_service.dart'; 
+import '../../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 // --- ENHANCED LANGUAGE DETECTOR ---
 class LanguageDetector {
@@ -219,17 +220,18 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   late AnimationController _typingController;
   late TTSManager _ttsManager;
 
+  // MODIFIED: Use JSON Keys instead of hardcoded strings
   final List<Map<String, dynamic>> _allSuggestions = [
-    {'text': "What is PNJ?", 'icon': Icons.school_outlined},
-    {'text': "Help me write a bio", 'icon': Icons.edit_note},
-    {'text': "Campus facilities info", 'icon': Icons.map_outlined},
-    {'text': "Scholarship opportunities", 'icon': Icons.school},
-    {'text': "Student organizations", 'icon': Icons.groups_outlined},
-    {'text': "Academic calendar dates", 'icon': Icons.calendar_month_outlined},
-    {'text': "Library opening hours", 'icon': Icons.access_time},
-    {'text': "How to contact admin?", 'icon': Icons.contact_support_outlined},
-    {'text': "Translate this text", 'icon': Icons.translate},
-    {'text': "Draft a formal email", 'icon': Icons.email_outlined},
+    {'text': "ai_sugg_pnj", 'icon': Icons.school_outlined},
+    {'text': "ai_sugg_bio", 'icon': Icons.edit_note},
+    {'text': "ai_sugg_facilities", 'icon': Icons.map_outlined},
+    {'text': "ai_sugg_scholarship", 'icon': Icons.school},
+    {'text': "ai_sugg_orgs", 'icon': Icons.groups_outlined},
+    {'text': "ai_sugg_calendar", 'icon': Icons.calendar_month_outlined},
+    {'text': "ai_sugg_library", 'icon': Icons.access_time},
+    {'text': "ai_sugg_admin", 'icon': Icons.contact_support_outlined},
+    {'text': "ai_sugg_translate", 'icon': Icons.translate},
+    {'text': "ai_sugg_email", 'icon': Icons.email_outlined},
   ];
   late List<Map<String, dynamic>> _activeSuggestions;
 
@@ -313,7 +315,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
 
   void _copyToClipboard(String text) {
     Clipboard.setData(ClipboardData(text: text));
-    OverlayService().showTopNotification(context, "Copied to clipboard", Icons.copy_rounded, (){});
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    OverlayService().showTopNotification(context, t.translate('ai_copied'), Icons.copy_rounded, (){}); // "Copied to clipboard"
   }
 
   void _shareResponse(String text) {
@@ -404,6 +408,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     _textController.clear();
     if (text.trim().isEmpty) return;
     
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+
     _ttsManager.stop();
     final user = FirebaseAuth.instance.currentUser;
 
@@ -418,7 +425,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
 
     try {
       final response = await _chatSession.sendMessage(Content.text(text));
-      final aiText = response.text ?? "I didn't catch that.";
+      final aiText = response.text ?? t.translate('ai_error_catch'); // "I didn't catch that."
 
       if (mounted) {
         setState(() {
@@ -432,7 +439,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
       if (mounted) {
         setState(() {
           _isTyping = false;
-          _messages.add(ChatMessage(text: "Connection error. Please try again.", isUser: false, timestamp: DateTime.now()));
+          _messages.add(ChatMessage(text: t.translate('ai_error_connection'), isUser: false, timestamp: DateTime.now())); // "Connection error..."
         });
         _scrollToBottom();
       }
@@ -479,11 +486,18 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
     if (_isLoadingHistory) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (_hasConnectionError && _messages.isEmpty) {
       return Scaffold(
-        body: CommonErrorWidget(message: "Unable to connect to Spirit AI.", isConnectionError: true, onRetry: () => _startNewChat()),
+        body: CommonErrorWidget(
+          message: t.translate('ai_error_connect_spirit'), // "Unable to connect..."
+          isConnectionError: true, 
+          onRetry: () => _startNewChat()
+        ),
       );
     }
 
@@ -504,8 +518,8 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
             ],
             Column(
               children: [
-                Expanded(child: _messages.isEmpty ? _buildEmptyState(theme, isDark) : _buildChatList(theme, isDark)),
-                _buildInputArea(theme, isDark),
+                Expanded(child: _messages.isEmpty ? _buildEmptyState(theme, isDark, t) : _buildChatList(theme, isDark, t)),
+                _buildInputArea(theme, isDark, t),
               ],
             ),
           ],
@@ -514,7 +528,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     );
   }
 
-  Widget _buildEmptyState(ThemeData theme, bool isDark) {
+  Widget _buildEmptyState(ThemeData theme, bool isDark, AppLocalizations t) {
     return SingleChildScrollView(
       child: Container(
         height: MediaQuery.of(context).size.height, 
@@ -533,13 +547,15 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
             ),
             const SizedBox(height: 32),
             Text("Spirit AI", style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w900, color: TwitterTheme.blue)),
-            Text("Your Virtual Assistant", style: theme.textTheme.titleMedium?.copyWith(color: theme.hintColor, fontWeight: FontWeight.normal)),
+            Text(t.translate('ai_subtitle'), style: theme.textTheme.titleMedium?.copyWith(color: theme.hintColor, fontWeight: FontWeight.normal)), // "Your Virtual Assistant"
             const SizedBox(height: 40),
             Column(
               children: _activeSuggestions.map((suggestion) {
+                // Translate the key from the list
+                String displayText = t.translate(suggestion['text']);
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12.0),
-                  child: _buildShortcutCard(theme, suggestion['text'] as String, suggestion['icon'] as IconData),
+                  child: _buildShortcutCard(theme, displayText, suggestion['icon'] as IconData),
                 );
               }).toList(),
             ),
@@ -574,19 +590,19 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
     );
   }
 
-  Widget _buildChatList(ThemeData theme, bool isDark) {
+  Widget _buildChatList(ThemeData theme, bool isDark, AppLocalizations t) {
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 60, 16, 16),
       itemCount: _messages.length + (_isTyping ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == _messages.length) return _buildTypingIndicator(theme);
+        if (index == _messages.length) return _buildTypingIndicator(theme, t);
         return _ChatBubble(message: _messages[index], onSpeak: _speak, onCopy: _copyToClipboard, onShare: _shareResponse);
       },
     );
   }
 
-  Widget _buildTypingIndicator(ThemeData theme) {
+  Widget _buildTypingIndicator(ThemeData theme, AppLocalizations t) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16, left: 0),
       child: Row(
@@ -600,7 +616,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
               borderRadius: BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(20), bottomRight: Radius.circular(20), bottomLeft: Radius.circular(20)),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: Offset(0, 2))]
             ),
-            child: FadeTransition(opacity: _typingController, child: Text("Thinking...", style: TextStyle(color: theme.hintColor, fontSize: 12))),
+            child: FadeTransition(opacity: _typingController, child: Text(t.translate('ai_thinking'), style: TextStyle(color: theme.hintColor, fontSize: 12))), // "Thinking..."
           ),
         ],
       ),
@@ -608,7 +624,7 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
   }
 
   // --- MODIFIED INPUT AREA: Unified Button ---
-  Widget _buildInputArea(ThemeData theme, bool isDark) {
+  Widget _buildInputArea(ThemeData theme, bool isDark, AppLocalizations t) {
     final bool hasText = _textController.text.trim().isNotEmpty;
     // Show Mic if no text OR if actively recording (so button doesn't switch while holding)
     final bool showMic = !hasText || _isRecording;
@@ -637,7 +653,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> with TickerProviderSt
                 textCapitalization: TextCapitalization.sentences,
                 style: TextStyle(fontSize: 16),
                 decoration: InputDecoration(
-                  hintText: _isRecording ? 'Listening...' : 'Ask Spirit AI...',
+                  hintText: _isRecording 
+                      ? t.translate('ai_listening') // "Listening..."
+                      : t.translate('ai_hint'),     // "Ask Spirit AI..."
                   hintStyle: TextStyle(
                     color: _isRecording ? TwitterTheme.blue : theme.hintColor,
                     fontWeight: _isRecording ? FontWeight.bold : FontWeight.normal

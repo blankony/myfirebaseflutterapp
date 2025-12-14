@@ -10,7 +10,8 @@ import '../screens/dashboard/account_center_page.dart';
 import '../screens/dashboard/settings_page.dart';
 import '../screens/saved_posts_screen.dart'; 
 import '../screens/webview_screen.dart'; 
-import '../screens/drafts_screen.dart'; // Import Drafts Screen
+import '../screens/drafts_screen.dart'; 
+import '../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -32,14 +33,17 @@ class _SidePanelState extends State<SidePanel> {
   final String? _currentUserId = FirebaseAuth.instance.currentUser?.uid;
 
   Future<void> _signOut() async {
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    
     final didConfirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Sign Out'),
-        content: Text('Are you sure you want to sign out?'),
+        title: Text(t.translate('settings_logout')), // "Log Out"
+        content: Text(t.translate('settings_logout_confirm')), // "Are you sure..."
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text('Sign Out', style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(t.translate('general_cancel'))),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: Text(t.translate('settings_logout'), style: TextStyle(color: Colors.red))),
         ],
       ),
     ) ?? false;
@@ -83,6 +87,8 @@ class _SidePanelState extends State<SidePanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
     return Drawer(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -234,56 +240,56 @@ class _SidePanelState extends State<SidePanel> {
                   children: [
                     ListTile(
                       leading: Icon(Icons.account_circle_outlined), 
-                      title: Text('Account Center'), 
+                      title: Text(t.translate('settings_account')), // "Account Center"
                       onTap: () {
                         Navigator.pop(context); 
                         Navigator.of(context).push(_createSlideUpRoute(AccountCenterPage()));
-                      }
+                      },
                     ),
                     ListTile(
                       leading: Icon(Icons.groups_2_outlined), 
-                      title: Text('Communities'), 
+                      title: Text(t.translate('side_communities')), // "Communities"
                       onTap: () {
                         Navigator.pop(context);
                         widget.onCommunitySelected();
-                      }
+                      },
                     ),
                     
-                    // --- EXPANDABLE ACADEMIC MENU (UPDATED NAMES) ---
+                    // --- EXPANDABLE ACADEMIC MENU ---
                     Theme(
                       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                       child: ExpansionTile(
                         leading: Icon(Icons.school_outlined, color: TwitterTheme.blue),
                         title: Text(
-                          'Layanan PNJ', 
+                          t.translate('side_services'), // "PNJ Services" / "Layanan PNJ"
                           style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)
                         ),
                         childrenPadding: EdgeInsets.only(left: 16),
                         children: [
                           ListTile(
                             leading: Icon(Icons.fingerprint, color: Colors.teal, size: 20),
-                            title: Text('SPIRIT ACADEMIA'),
+                            title: Text('SPIRIT ACADEMIA'), // Proper name
                             trailing: Icon(Icons.arrow_forward_ios, size: 12),
                             dense: true,
                             onTap: () => _openWebService("SPIRIT ACADEMIA", "https://academia.pnj.ac.id/"),
                           ),
                           ListTile(
                             leading: Icon(Icons.laptop_chromebook, color: Colors.orange, size: 20),
-                            title: Text('E-Learning'),
+                            title: Text('E-Learning'), // Common term
                             trailing: Icon(Icons.arrow_forward_ios, size: 12),
                             dense: true,
                             onTap: () => _openWebService("E-Learning PNJ", "https://elearning.pnj.ac.id/"),
                           ),
                           ListTile(
                             leading: Icon(Icons.bar_chart, color: Colors.purple, size: 20),
-                            title: Text('Akademik PNJ'),
+                            title: Text('Akademik PNJ'), // Proper name
                             trailing: Icon(Icons.arrow_forward_ios, size: 12),
                             dense: true,
                             onTap: () => _openWebService("Akademik PNJ", "https://akademik.pnj.ac.id/"),
                           ),
                           ListTile(
                             leading: Icon(Icons.language, color: Colors.blueGrey, size: 20),
-                            title: Text('Website PNJ'),
+                            title: Text(t.translate('service_website')), // "Website PNJ"
                             trailing: Icon(Icons.arrow_forward_ios, size: 12),
                             dense: true,
                             onTap: () => _openWebService("Official Website", "https://pnj.ac.id/"),
@@ -295,19 +301,19 @@ class _SidePanelState extends State<SidePanel> {
 
                     ListTile(
                       leading: Icon(Icons.bookmark_border), 
-                      title: Text('Saved'), 
+                      title: Text(t.translate('side_saved')), // "Saved"
                       onTap: () {
                         Navigator.pop(context); 
                         Navigator.of(context).push(_createSlideUpRoute(SavedPostsScreen()));
-                      }
+                      },
                     ),
                     ListTile(
                       leading: Icon(Icons.settings_outlined), 
-                      title: Text('Settings'), 
+                      title: Text(t.translate('settings_title')), // "Settings"
                       onTap: () {
                         Navigator.pop(context); 
                         Navigator.of(context).push(_createSlideUpRoute(SettingsPage()));
-                      }
+                      },
                     ),
                   ],
                 ),
@@ -323,7 +329,7 @@ class _SidePanelState extends State<SidePanel> {
                     _ThemeSwitchTile(),
                     ListTile(
                       leading: Icon(Icons.logout, color: Colors.red), 
-                      title: Text('Logout', style: TextStyle(color: Colors.red)), 
+                      title: Text(t.translate('settings_logout'), style: TextStyle(color: Colors.red)), // "Logout"
                       onTap: _signOut,
                       contentPadding: EdgeInsets.symmetric(horizontal: 16),
                     ),
@@ -362,12 +368,15 @@ class _ThemeSwitchTileState extends State<_ThemeSwitchTile> {
   @override 
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final String subtitleText = _isDark ? 'Switch to Light' : 'Switch to Dark';
+    var t = AppLocalizations.of(context)!;
+    final String subtitleText = _isDark 
+        ? t.translate('theme_switch_light') // "Switch to Light"
+        : t.translate('theme_switch_dark'); // "Switch to Dark"
 
     return ListTile(
       onTap: () => _handleChange(!_isDark), 
       leading: Icon(Icons.color_lens_outlined, color: theme.primaryColor), 
-      title: Text('Theme'), 
+      title: Text(t.translate('settings_theme')), // "Theme"
       subtitle: Text(subtitleText), 
       trailing: Switch(
         value: _isDark, 

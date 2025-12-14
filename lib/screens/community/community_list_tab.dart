@@ -8,6 +8,7 @@ import 'community_detail_screen.dart';
 import 'browse_communities_screen.dart';
 import '../../widgets/blog_post_card.dart';
 import '../../main.dart';
+import '../../services/app_localizations.dart';
 
 class CommunityListTab extends StatefulWidget {
   const CommunityListTab({super.key});
@@ -38,9 +39,11 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
     super.build(context);
     final user = FirebaseAuth.instance.currentUser;
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
-    if (user == null) return Center(child: Text("Login required"));
+    if (user == null) return Center(child: Text(t.translate('login_required'))); // "Login required"
 
     // Calculate tighter top padding
     final double topPadding = MediaQuery.of(context).padding.top + kToolbarHeight - 10; 
@@ -65,7 +68,7 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
                     Expanded(
                       child: _buildHeaderAction(
                         context,
-                        "Discover",
+                        t.translate('community_discover'), // "Discover"
                         Icons.explore_outlined,
                         TwitterTheme.blue,
                         () => Navigator.push(context, _createSlideUpRoute(BrowseCommunitiesScreen())),
@@ -75,7 +78,7 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
                     Expanded(
                       child: _buildHeaderAction(
                         context,
-                        "Create",
+                        t.translate('community_create_short'), // "Create"
                         Icons.group_add_outlined,
                         Colors.green,
                         () => Navigator.push(context, _createSlideUpRoute(CreateCommunityScreen())),
@@ -107,7 +110,7 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                       child: Text(
-                        "Your Channels", 
+                        t.translate('community_your_channels'), // "Your Channels"
                         style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)
                       ),
                     ),
@@ -147,7 +150,8 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
                 children: [
                   Icon(Icons.dynamic_feed, color: theme.primaryColor, size: 20),
                   SizedBox(width: 8),
-                  Text("Broadcast Feed", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                  Text(t.translate('community_broadcast'), // "Broadcast Feed"
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
                 ],
               ),
             ),
@@ -170,7 +174,8 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
                       children: [
                         Icon(Icons.feed_outlined, size: 48, color: theme.disabledColor),
                         SizedBox(height: 16),
-                        Text("Join communities to see updates here.", style: TextStyle(color: theme.hintColor)),
+                        Text(t.translate('community_join_prompt'), // "Join communities to see updates here."
+                            style: TextStyle(color: theme.hintColor), textAlign: TextAlign.center),
                       ],
                     ),
                   ),
@@ -195,7 +200,8 @@ class _CommunityListTabState extends State<CommunityListTab> with AutomaticKeepA
                     return SliverToBoxAdapter(
                       child: Padding(
                         padding: EdgeInsets.all(40), 
-                        child: Center(child: Text("No recent broadcasts.", style: TextStyle(color: theme.hintColor)))
+                        child: Center(child: Text(t.translate('community_no_broadcasts'), // "No recent broadcasts."
+                            style: TextStyle(color: theme.hintColor)))
                       )
                     );
                   }

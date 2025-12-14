@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'forgot_password_screen.dart';
 import 'register_page.dart'; 
 import '../main.dart'; 
+import '../../services/app_localizations.dart'; // Import Localization
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -19,14 +20,12 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   
-  // 1. Tambahkan FocusNode untuk password
   final FocusNode _passwordFocusNode = FocusNode();
 
   String _errorMessage = '';
   bool _isLoading = false; 
   bool _isPasswordObscured = true;
 
-  // Helper for custom transition
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -52,6 +51,8 @@ class _LoginPageState extends State<LoginPage> {
       _errorMessage = ''; 
     });
 
+    final t = AppLocalizations.of(context)!; //
+
     try {
       await _auth.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
@@ -66,19 +67,19 @@ class _LoginPageState extends State<LoginPage> {
         case 'invalid-credential':
         case 'user-not-found':
         case 'wrong-password':
-          _errorMessage = 'Incorrect email or password. Please try again.';
+          _errorMessage = t.translate('error_invalid_credential');
           break;
         case 'invalid-email':
-          _errorMessage = 'The email address is badly formatted.';
+          _errorMessage = t.translate('error_invalid_email');
           break;
         case 'user-disabled':
-          _errorMessage = 'This user account has been disabled.';
+          _errorMessage = t.translate('error_user_disabled');
           break;
         default:
-          _errorMessage = 'An unknown error occurred. Please try again.';
+          _errorMessage = t.translate('general_error');
       }
     } catch (e) {
-       _errorMessage = 'An unknown error occurred: $e';
+       _errorMessage = '${t.translate('general_error')}: $e';
     } finally {
       if (mounted) {
         setState(() { _isLoading = false; });
@@ -87,15 +88,17 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Email cannot be empty.';
+    final t = AppLocalizations.of(context)!; //
+    if (value == null || value.trim().isEmpty) return t.translate('val_email_empty');
     String pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
     RegExp regex = RegExp(pattern);
-    if (!regex.hasMatch(value)) return 'Enter a valid email address.';
+    if (!regex.hasMatch(value)) return t.translate('val_email_invalid');
     return null;
   }
 
   String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) return 'Password cannot be empty.';
+    final t = AppLocalizations.of(context)!;
+    if (value == null || value.isEmpty) return t.translate('val_password_empty');
     return null;
   }
 
@@ -103,7 +106,6 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    // 2. Jangan lupa dispose FocusNode
     _passwordFocusNode.dispose();
     super.dispose();
   }
@@ -112,6 +114,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
+    final t = AppLocalizations.of(context)!;
 
     return Scaffold(
       extendBodyBehindAppBar: true, 
@@ -122,7 +125,6 @@ class _LoginPageState extends State<LoginPage> {
       ),
       body: Stack(
         children: [
-          // --- DECORATIVE BACKGROUND ---
           Positioned(
             top: -100,
             right: -100,
@@ -148,7 +150,6 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
 
-          // --- MAIN CONTENT ---
           TweenAnimationBuilder(
             tween: Tween<double>(begin: 1.0, end: 0.0),
             duration: const Duration(milliseconds: 800),
@@ -194,17 +195,16 @@ class _LoginPageState extends State<LoginPage> {
                       SizedBox(height: 40),
 
                       Text(
-                        "Sign in to your account",
+                        t.translate('auth_sign_in_title'), //
                         style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       SizedBox(height: 32),
                       
                       TextFormField( 
                         controller: _emailController,
-                        decoration: InputDecoration(labelText: 'Enter email'),
+                        decoration: InputDecoration(labelText: t.translate('auth_enter_email')), //
                         keyboardType: TextInputType.emailAddress,
                         
-                        // 3. Konfigurasi Enter -> Next
                         textInputAction: TextInputAction.next,
                         onFieldSubmitted: (_) {
                           FocusScope.of(context).requestFocus(_passwordFocusNode);
@@ -217,10 +217,10 @@ class _LoginPageState extends State<LoginPage> {
                       
                       TextFormField(
                         controller: _passwordController,
-                        focusNode: _passwordFocusNode, // 4. Pasang FocusNode
+                        focusNode: _passwordFocusNode,
                         obscureText: _isPasswordObscured,
                         decoration: InputDecoration(
-                          labelText: 'Enter password',
+                          labelText: t.translate('auth_enter_password'), //
                           suffixIcon: IconButton(
                             icon: Icon(
                               _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
@@ -233,7 +233,6 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                         
-                        // 5. Konfigurasi Enter -> Done/Login
                         textInputAction: TextInputAction.done,
                         onFieldSubmitted: (_) {
                           _signIn();
@@ -264,7 +263,7 @@ class _LoginPageState extends State<LoginPage> {
                               MaterialPageRoute(builder: (context) => ForgotPasswordScreen()),
                             );
                           },
-                          child: Text('Forgot password?', style: TextStyle(color: TwitterTheme.blue)),
+                          child: Text(t.translate('auth_forgot_pass'), style: TextStyle(color: TwitterTheme.blue)), //
                         ),
                       ),
                       SizedBox(height: 24),
@@ -273,7 +272,7 @@ class _LoginPageState extends State<LoginPage> {
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: _signIn,
-                          child: Text('Login'),
+                          child: Text(t.translate('auth_login')), //
                           style: ElevatedButton.styleFrom(
                             backgroundColor: TwitterTheme.blue,
                             foregroundColor: Colors.white,
@@ -291,13 +290,13 @@ class _LoginPageState extends State<LoginPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text("Don't have an account? ", style: TextStyle(color: theme.hintColor)),
+                          Text(t.translate('auth_no_account') + " ", style: TextStyle(color: theme.hintColor)), //
                           GestureDetector(
                             onTap: () {
                               Navigator.of(context).pushReplacement(_createSlideUpRoute(RegisterPage()));
                             },
                             child: Text(
-                              "Create one",
+                              t.translate('auth_create_one'), //
                               style: TextStyle(
                                 color: TwitterTheme.blue,
                                 fontWeight: FontWeight.bold,

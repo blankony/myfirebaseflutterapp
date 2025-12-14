@@ -17,11 +17,12 @@ import 'package:video_player/video_player.dart';
 import '../services/overlay_service.dart';
 import '../services/moderation_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-// --- DUMB WIDGET: Video Player ---
+// --- DUMB WIDGET: Video Player (Tidak Perlu Ubah) ---
 class _VideoPlayerWidget extends StatelessWidget {
   final VideoPlayerController controller;
   final bool isThumbnail;
@@ -45,7 +46,6 @@ class _VideoPlayerWidget extends StatelessWidget {
     Widget videoDisplay;
 
     if (isThumbnail) {
-      // Logic: Fill Center (Zoom/Crop to fill)
       videoDisplay = SizedBox.expand(
         child: FittedBox(
           fit: BoxFit.cover,
@@ -57,7 +57,6 @@ class _VideoPlayerWidget extends StatelessWidget {
         ),
       );
     } else {
-      // Logic: Contain (Show full video)
       videoDisplay = AspectRatio(
         aspectRatio: controller.value.aspectRatio,
         child: VideoPlayer(controller),
@@ -90,7 +89,7 @@ class _VideoPlayerWidget extends StatelessWidget {
   }
 }
 
-// --- SMART WIDGET: Media Preview ---
+// --- SMART WIDGET: Media Preview (Tidak Perlu Ubah) ---
 class _PostMediaPreview extends StatefulWidget {
   final List<String> mediaUrls;
   final String? mediaType;
@@ -137,7 +136,7 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
-        barrierColor: Colors.black, // Background color during transition
+        barrierColor: Colors.black, 
         pageBuilder: (_, __, ___) => ImageViewerScreen(
           imageUrl: url,
           mediaType: widget.mediaType,
@@ -146,9 +145,6 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
           heroTag: heroTag,
           videoController: widget.videoController,
         ),
-        // --- HYBRID ANIMATION LOGIC ---
-        // 1. The PageRoute performs a FADE.
-        // 2. The HERO widget (inside the child) performs the ZOOM/SCALE automatically.
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
@@ -161,7 +157,6 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // --- VIDEO PREVIEW (Uniform 4:3 Ratio) ---
     if (widget.mediaType == 'video' && widget.mediaUrls.isNotEmpty && widget.videoController != null) {
       final String videoUrl = widget.mediaUrls.first;
       final String heroTag = '${widget.heroContextId}_${widget.postId}_$videoUrl';
@@ -172,12 +167,11 @@ class _PostMediaPreviewState extends State<_PostMediaPreview> {
           onTap: () => _navigateToViewer(context, videoUrl),
           child: Hero(
             tag: heroTag,
-            // AspectRatio 4:3 ensures uniform height with single-image posts
             child: AspectRatio(
               aspectRatio: 4 / 3,
               child: _VideoPlayerWidget(
                 controller: widget.videoController!,
-                isThumbnail: true, // Forces "BoxFit.cover" logic
+                isThumbnail: true, 
               ),
             ),
           ),
@@ -548,13 +542,16 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final user = _auth.currentUser;
     if (user == null) return;
     if (hapticNotifier.value) HapticFeedback.lightImpact();
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
     final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
 
     if (!isCurrentlyBookmarked) {
-      OverlayService().showTopNotification(context, "Saved to bookmarks", Icons.bookmark, () {});
+      OverlayService().showTopNotification(context, t.translate('post_bookmark_saved'), Icons.bookmark, () {});
     } else {
-      OverlayService().showTopNotification(context, "Removed from bookmarks", Icons.bookmark_remove, () {});
+      OverlayService().showTopNotification(context, t.translate('post_bookmark_removed'), Icons.bookmark_remove, () {});
     }
 
     try {
@@ -564,13 +561,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         await docRef.delete();
       }
     } catch (e) {
-      OverlayService().showTopNotification(context, "Failed to bookmark", Icons.error, () {}, color: Colors.red);
+      OverlayService().showTopNotification(context, t.translate('post_bookmark_error'), Icons.error, () {}, color: Colors.red);
     }
   }
 
   void _toggleVisibility() async {
     final user = _auth.currentUser;
     if (user == null) return;
+    var t = AppLocalizations.of(context)!;
 
     final currentVis = widget.postData['visibility'] ?? 'public';
     String newVis;
@@ -588,14 +586,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     Color? color;
 
     if (newVis == 'private') {
-      msg = "Post hidden (Only Me)";
+      msg = t.translate('vis_toast_private');
       icon = Icons.visibility_off;
     } else if (newVis == 'followers') {
-      msg = "Post visible to Followers (Account is Private)";
+      msg = t.translate('vis_toast_followers');
       icon = Icons.people;
       color = Colors.orange;
     } else {
-      msg = "Post is now Public";
+      msg = t.translate('vis_toast_public');
       icon = Icons.public;
     }
 
@@ -607,7 +605,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       });
     } catch (e) {
       if (mounted) {
-        OverlayService().showTopNotification(context, "Failed to update visibility", Icons.error, () {}, color: Colors.red);
+        OverlayService().showTopNotification(context, t.translate('vis_toast_fail'), Icons.error, () {}, color: Colors.red);
       }
     }
   }
@@ -626,14 +624,15 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   Future<void> _deletePost() async {
+    var t = AppLocalizations.of(context)!;
     final confirm = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text('Delete Post'),
-            content: Text('Are you sure you want to delete this post?'),
+            title: Text(t.translate('delete_post_title')),
+            content: Text(t.translate('delete_post_confirm')),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel')),
-              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Delete', style: TextStyle(color: Colors.red))),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(t.translate('general_cancel'))),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(t.translate('general_delete'), style: TextStyle(color: Colors.red))),
             ],
           ),
         ) ??
@@ -641,9 +640,9 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     if (confirm) {
       try {
         await _firestore.collection('posts').doc(widget.postId).delete();
-        if (mounted) OverlayService().showTopNotification(context, "Post deleted", Icons.delete_outline, () {});
+        if (mounted) OverlayService().showTopNotification(context, t.translate('post_deleted'), Icons.delete_outline, () {});
       } catch (e) {
-        if (mounted) OverlayService().showTopNotification(context, "Failed to delete", Icons.error, () {}, color: Colors.red);
+        if (mounted) OverlayService().showTopNotification(context, t.translate('post_delete_fail'), Icons.error, () {}, color: Colors.red);
       }
     }
   }
@@ -651,6 +650,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Future<void> _togglePin() async {
     final user = _auth.currentUser;
     if (user == null) return;
+    var t = AppLocalizations.of(context)!;
     final bool newPinState = !_localIsPinned;
     setState(() {
       _localIsPinned = newPinState;
@@ -661,17 +661,17 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     try {
       if (!newPinState) {
         await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': FieldValue.delete()});
-        if (mounted) OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, () {});
+        if (mounted) OverlayService().showTopNotification(context, t.translate('profile_unpin_success'), Icons.push_pin_outlined, () {});
       } else {
         await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': widget.postId});
-        if (mounted) OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, () {});
+        if (mounted) OverlayService().showTopNotification(context, t.translate('profile_pin_success'), Icons.push_pin, () {});
       }
     } catch (e) {
       setState(() {
         _localIsPinned = !newPinState;
       });
       if (widget.onPinToggle != null) widget.onPinToggle!(widget.postId, !newPinState);
-      if (mounted) OverlayService().showTopNotification(context, "Failed to pin", Icons.error, () {}, color: Colors.red);
+      if (mounted) OverlayService().showTopNotification(context, t.translate('pin_fail'), Icons.error, () {}, color: Colors.red);
     }
   }
 
@@ -739,20 +739,21 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   Future<void> _showEditDialog() async {
+    var t = AppLocalizations.of(context)!;
     _editController.text = widget.postData['text'] ?? '';
     await showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Edit Post'),
+          title: Text(t.translate('edit_post_title')),
           content: TextField(
             controller: _editController,
             maxLines: 5,
-            decoration: InputDecoration(hintText: "Edit your post..."),
+            decoration: InputDecoration(hintText: t.translate('edit_post_hint')),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: Text('Cancel')),
-            ElevatedButton(onPressed: _submitEdit, child: Text('Save')),
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.translate('general_cancel'))),
+            ElevatedButton(onPressed: _submitEdit, child: Text(t.translate('general_save'))),
           ],
         );
       },
@@ -760,44 +761,48 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   Future<void> _submitEdit() async {
+    var t = AppLocalizations.of(context)!;
     try {
       await _firestore.collection('posts').doc(widget.postId).update({'text': _editController.text});
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
-        OverlayService().showTopNotification(context, "Edit failed", Icons.error, () {}, color: Colors.red);
+        OverlayService().showTopNotification(context, t.translate('edit_post_fail'), Icons.error, () {}, color: Colors.red);
         Navigator.of(context).pop();
       }
     }
   }
 
   void _reportPost() {
+    var t = AppLocalizations.of(context)!;
     showDialog(
         context: context,
         builder: (context) {
           return SimpleDialog(
-            title: Text("Report Post"),
+            title: Text(t.translate('report_post_title')),
             children: [
-              SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text('Spam')),
-              SimpleDialogOption(onPressed: () => _submitReport('Harassment'), child: Text('Harassment')),
-              SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Content'), child: Text('Inappropriate Content')),
-              SimpleDialogOption(onPressed: () => _submitReport('Misinformation'), child: Text('Misinformation')),
-              Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel"))),
+              SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text(t.translate('report_reason_spam'))),
+              SimpleDialogOption(onPressed: () => _submitReport('Harassment'), child: Text(t.translate('report_reason_harass'))),
+              SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Content'), child: Text(t.translate('report_reason_inappropriate'))),
+              SimpleDialogOption(onPressed: () => _submitReport('Misinformation'), child: Text(t.translate('report_reason_misinfo'))),
+              Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: () => Navigator.pop(context), child: Text(t.translate('general_cancel')))),
             ],
           );
         });
   }
 
   void _submitReport(String reason) {
+    var t = AppLocalizations.of(context)!;
     Navigator.pop(context);
     moderationService.reportContent(
         targetId: widget.postId,
         targetType: 'post',
         reason: reason);
-    OverlayService().showTopNotification(context, "Report submitted.", Icons.flag, () {});
+    OverlayService().showTopNotification(context, t.translate('report_submitted'), Icons.flag, () {});
   }
 
   void _reportCommunity() {
+    var t = AppLocalizations.of(context)!;
     final String? communityId = widget.postData['communityId'];
     if (communityId == null) return;
 
@@ -805,43 +810,45 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         context: context,
         builder: (context) {
           return SimpleDialog(
-            title: Text("Report Community"),
+            title: Text(t.translate('report_comm_title')),
             children: [
-              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Spam'), child: Text('Spam')),
-              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Harassment'), child: Text('Harassment')),
-              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Inappropriate Content'), child: Text('Inappropriate Content')),
-              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Misinformation'), child: Text('Misinformation')),
-              Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel"))),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Spam'), child: Text(t.translate('report_reason_spam'))),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Harassment'), child: Text(t.translate('report_reason_harass'))),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Inappropriate Content'), child: Text(t.translate('report_reason_inappropriate'))),
+              SimpleDialogOption(onPressed: () => _submitCommunityReport(communityId, 'Misinformation'), child: Text(t.translate('report_reason_misinfo'))),
+              Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: () => Navigator.pop(context), child: Text(t.translate('general_cancel')))),
             ],
           );
         });
   }
 
   void _submitCommunityReport(String communityId, String reason) {
+    var t = AppLocalizations.of(context)!;
     Navigator.pop(context);
     moderationService.reportContent(
         targetId: communityId,
         targetType: 'community',
         reason: reason);
-    OverlayService().showTopNotification(context, "Community report submitted.", Icons.flag, () {});
+    OverlayService().showTopNotification(context, t.translate('report_comm_submitted'), Icons.flag, () {});
   }
 
   void _blockUser() async {
+    var t = AppLocalizations.of(context)!;
     final didConfirm = await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
-                  title: Text("Block User?"),
-                  content: Text("They will not be able to follow you or view your posts, and you will not see their posts."),
+                  title: Text(t.translate('block_user_title')),
+                  content: Text(t.translate('block_user_confirm')),
                   actions: [
-                    TextButton(onPressed: () => Navigator.pop(context, false), child: Text("Cancel")),
-                    TextButton(onPressed: () => Navigator.pop(context, true), child: Text("Block", style: TextStyle(color: Colors.red))),
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t.translate('general_cancel'))),
+                    TextButton(onPressed: () => Navigator.pop(context, true), child: Text(t.translate('general_delete'), style: TextStyle(color: Colors.red))), // Using "Delete" key for block action
                   ],
                 )) ??
         false;
 
     if (didConfirm) {
       await moderationService.blockUser(widget.postData['userId']);
-      if (mounted) OverlayService().showTopNotification(context, "User blocked", Icons.block, () {});
+      if (mounted) OverlayService().showTopNotification(context, t.translate('user_blocked'), Icons.block, () {});
     }
   }
 
@@ -874,6 +881,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    var t = AppLocalizations.of(context)!; // GET LOCALIZATION
 
     return StreamBuilder<List<String>>(
         stream: moderationService.streamBlockedUsers(),
@@ -924,7 +932,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                         children: [
                           Icon(Icons.push_pin, size: 14, color: theme.hintColor),
                           SizedBox(width: 4),
-                          Text("Pinned Post", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.hintColor)),
+                          Text(t.translate('post_pinned'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.hintColor)), // "Pinned Post"
                         ],
                       ),
                     ),
@@ -954,7 +962,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                               Padding(
                                 padding: const EdgeInsets.only(top: 12.0),
                                 child: _PostMediaPreview(
-                                  mediaUrls: mediaUrls, // Pass List
+                                  mediaUrls: mediaUrls, 
                                   mediaType: mediaType,
                                   text: text,
                                   postData: widget.postData,
@@ -1248,6 +1256,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   Widget _buildOptionsButton() {
+    var t = AppLocalizations.of(context)!;
     return PopupMenuButton<String>(
       padding: EdgeInsets.zero,
       icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor, size: 18),
@@ -1276,34 +1285,34 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         if (widget.isOwner) {
           final isPrivate = (widget.postData['visibility'] ?? 'public') == 'private';
           options.addAll([
-            PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post")])),
-            PopupMenuItem(value: 'toggle_visibility', child: Row(children: [Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(isPrivate ? "Unhide Post" : "Hide Post (Only Me)")])),
-            PopupMenuItem(value: 'pin', child: Row(children: [Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(_localIsPinned ? "Unpin from Profile" : "Pin to Profile")])),
+            PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(t.translate('menu_edit'))])), // "Edit Post"
+            PopupMenuItem(value: 'toggle_visibility', child: Row(children: [Icon(isPrivate ? Icons.public : Icons.lock_outline, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(isPrivate ? t.translate('menu_unhide') : t.translate('menu_hide'))])), // "Unhide" / "Hide"
+            PopupMenuItem(value: 'pin', child: Row(children: [Icon(_localIsPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(_localIsPinned ? t.translate('menu_unpin') : t.translate('menu_pin'))])), // "Unpin" / "Pin"
             PopupMenuDivider(),
-            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post", style: TextStyle(color: Colors.red))])),
+            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text(t.translate('menu_delete'), style: TextStyle(color: Colors.red))])), // "Delete Post"
           ]);
         }
         // CASE 2: I am a Community Admin/Owner (Editing someone else's post)
         else if (_isCommunityAdmin) {
           options.addAll([
-            PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Edit Post (Admin)")])),
-            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text("Delete Post (Admin)", style: TextStyle(color: Colors.red))])),
+            PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(t.translate('menu_edit_admin'))])), // "Edit Post (Admin)"
+            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 20, color: Colors.red), SizedBox(width: 12), Text(t.translate('menu_delete_admin'), style: TextStyle(color: Colors.red))])), // "Delete Post (Admin)"
             PopupMenuDivider(),
-            PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Report Post")])),
-            PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text("Block User", style: TextStyle(color: Colors.red))])),
+            PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(t.translate('menu_report'))])), // "Report Post"
+            PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text(t.translate('menu_block'), style: TextStyle(color: Colors.red))])), // "Block User"
           ]);
         }
         // CASE 3: Standard User (Viewing someone else's post)
         else {
           options.addAll([
-            PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text("Report Post")])),
-            PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text("Block User", style: TextStyle(color: Colors.red))])),
+            PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20, color: Theme.of(context).textTheme.bodyLarge?.color), SizedBox(width: 12), Text(t.translate('menu_report'))])), // "Report Post"
+            PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 12), Text(t.translate('menu_block'), style: TextStyle(color: Colors.red))])), // "Block User"
           ]);
         }
 
         // Add "Report Community" for everyone if this is a community post
         if (widget.postData['communityId'] != null) {
-          options.add(PopupMenuItem(value: 'report_community', child: Row(children: [Icon(Icons.flag, size: 20, color: Colors.orange), SizedBox(width: 12), Text("Report Community")])));
+          options.add(PopupMenuItem(value: 'report_community', child: Row(children: [Icon(Icons.flag, size: 20, color: Colors.orange), SizedBox(width: 12), Text(t.translate('menu_report_comm'))]))); // "Report Community"
         }
 
         return options;

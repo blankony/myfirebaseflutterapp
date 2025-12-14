@@ -22,6 +22,7 @@ import '../../services/cloudinary_service.dart';
 import '../../services/moderation_service.dart'; 
 import '../follow_list_screen.dart'; 
 import '../ktm_verification_screen.dart'; 
+import '../../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -118,10 +119,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       _optimisticPinnedPostId = isPinned ? postId : ''; 
     });
     
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    
     if (isPinned) {
-      OverlayService().showTopNotification(context, "Post pinned to profile", Icons.push_pin, (){});
+      OverlayService().showTopNotification(context, t.translate('profile_pin_success'), Icons.push_pin, (){});
     } else {
-      OverlayService().showTopNotification(context, "Post unpinned", Icons.push_pin_outlined, (){});
+      OverlayService().showTopNotification(context, t.translate('profile_unpin_success'), Icons.push_pin_outlined, (){});
     }
   }
 
@@ -143,6 +147,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   OverlayEntry _showUploadingOverlay() {
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+
     OverlayEntry entry = OverlayEntry(
       builder: (context) => Positioned(
         top: MediaQuery.of(context).padding.top + 10,
@@ -161,7 +168,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   children: [
                     SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: TwitterTheme.blue)),
                     SizedBox(width: 12),
-                    Text("Uploading media...", style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(t.translate('profile_uploading'), style: TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
                 SizedBox(height: 10),
@@ -188,6 +195,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _showImageSourceSelection({required bool isBanner}) {
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -201,7 +211,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               SizedBox(height: 16),
               ListTile(
                 leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
-                title: Text("Take from Camera"),
+                title: Text(t.translate('profile_camera')),
                 onTap: () {
                   Navigator.pop(context);
                   _pickAndUploadImage(isBanner: isBanner, source: ImageSource.camera);
@@ -209,7 +219,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               ),
               ListTile(
                 leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
-                title: Text("Choose from Gallery"),
+                title: Text(t.translate('profile_gallery')),
                 onTap: () {
                   Navigator.pop(context);
                   _pickAndUploadImage(isBanner: isBanner, source: ImageSource.gallery);
@@ -224,6 +234,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Future<void> _pickAndUploadImage({required bool isBanner, required ImageSource source}) async {
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 70);
     if (pickedFile == null) return;
@@ -233,8 +246,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       compressQuality: 70,
       aspectRatio: isBanner ? CropAspectRatio(ratioX: 3, ratioY: 1) : CropAspectRatio(ratioX: 1, ratioY: 1),
       uiSettings: [
-        AndroidUiSettings(toolbarTitle: isBanner ? 'Crop Banner' : 'Crop Avatar', toolbarColor: TwitterTheme.blue, toolbarWidgetColor: Colors.white, initAspectRatio: isBanner ? CropAspectRatioPreset.ratio3x2 : CropAspectRatioPreset.square, lockAspectRatio: true),
-        IOSUiSettings(title: isBanner ? 'Crop Banner' : 'Crop Avatar', aspectRatioLockEnabled: true),
+        AndroidUiSettings(
+          toolbarTitle: isBanner ? t.translate('profile_crop_banner') : t.translate('profile_crop_avatar'), 
+          toolbarColor: TwitterTheme.blue, 
+          toolbarWidgetColor: Colors.white, 
+          initAspectRatio: isBanner ? CropAspectRatioPreset.ratio3x2 : CropAspectRatioPreset.square, 
+          lockAspectRatio: true
+        ),
+        IOSUiSettings(title: isBanner ? t.translate('profile_crop_banner') : t.translate('profile_crop_avatar'), aspectRatioLockEnabled: true),
       ],
     );
     if (croppedFile == null) return;
@@ -250,15 +269,16 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         
         await _firestore.collection('users').doc(_userId).update(updateData);
         if (!isBanner) _updateAllPastContent(downloadUrl);
-        if (mounted) OverlayService().showTopNotification(context, "Updated successfully!", Icons.check_circle, (){}, color: Colors.green);
+        if (mounted) OverlayService().showTopNotification(context, t.translate('profile_update_success'), Icons.check_circle, (){}, color: Colors.green);
       }
     } catch (e) {
       try { loadingOverlay.remove(); } catch(_) {}
-      if (mounted) OverlayService().showTopNotification(context, "Upload failed", Icons.error, (){}, color: Colors.red);
+      if (mounted) OverlayService().showTopNotification(context, t.translate('profile_upload_fail'), Icons.error, (){}, color: Colors.red);
     }
   }
 
   void _showBannerOptions(BuildContext context, String? currentBannerUrl, String heroTag) {
+    var t = AppLocalizations.of(context)!;
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -273,12 +293,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               if (currentBannerUrl != null && currentBannerUrl.isNotEmpty)
                 ListTile(
                   leading: Icon(Icons.visibility_outlined, color: TwitterTheme.blue),
-                  title: Text("View Banner"),
+                  title: Text(t.translate('profile_view_banner')),
                   onTap: () { Navigator.pop(context); _openFullImage(context, currentBannerUrl, heroTag); },
                 ),
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
-                title: Text("Change Banner"),
+                title: Text(t.translate('profile_change_banner')),
                 onTap: () { Navigator.pop(context); _showImageSourceSelection(isBanner: true); },
               ),
               SizedBox(height: 12),
@@ -290,6 +310,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _showProfileOptions(BuildContext context, String? currentImageUrl, String heroTag) {
+    var t = AppLocalizations.of(context)!;
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -304,12 +325,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               if (currentImageUrl != null && currentImageUrl.isNotEmpty)
                 ListTile(
                   leading: Icon(Icons.visibility_outlined, color: TwitterTheme.blue),
-                  title: Text("View Photo"),
+                  title: Text(t.translate('profile_view_photo')),
                   onTap: () { Navigator.pop(context); _openFullImage(context, currentImageUrl, heroTag); },
                 ),
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue),
-                title: Text("Change Photo"),
+                title: Text(t.translate('profile_change_photo')),
                 onTap: () { Navigator.pop(context); _showImageSourceSelection(isBanner: false); },
               ),
               SizedBox(height: 12),
@@ -323,6 +344,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Future<void> _followUser(bool isPrivate) async {
     if (_user == null || _isProcessingFollow) return;
     setState(() => _isProcessingFollow = true);
+    var t = AppLocalizations.of(context)!;
     
     try {
       if (isPrivate) {
@@ -338,7 +360,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           'isRead': false,
         });
         
-        if(mounted) OverlayService().showTopNotification(context, "Follow request sent", Icons.send, (){}, color: Colors.blue);
+        if(mounted) OverlayService().showTopNotification(context, t.translate('profile_req_sent'), Icons.send, (){}, color: Colors.blue);
       } else {
         final batch = _firestore.batch();
         final myDocRef = _firestore.collection('users').doc(_user!.uid);
@@ -352,7 +374,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         });
       }
     } catch (e) {
-       if(mounted) OverlayService().showTopNotification(context, "Failed to action: $e", Icons.error, (){}, color: Colors.red);
+       if(mounted) OverlayService().showTopNotification(context, "${t.translate('profile_action_fail')}: $e", Icons.error, (){}, color: Colors.red);
     } finally {
       if(mounted) setState(() => _isProcessingFollow = false);
     }
@@ -361,12 +383,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   Future<void> _unfollowUser(bool isRequestOnly) async {
     if (_user == null || _isProcessingFollow) return;
     setState(() => _isProcessingFollow = true);
+    var t = AppLocalizations.of(context)!;
 
     try {
       if (isRequestOnly) {
         await _firestore.collection('users').doc(_userId).collection('follow_requests').doc(_user!.uid).delete();
         await _firestore.collection('users').doc(_userId).collection('notifications').doc('request_${_user!.uid}').delete();
-        if(mounted) OverlayService().showTopNotification(context, "Request cancelled", Icons.close, (){});
+        if(mounted) OverlayService().showTopNotification(context, t.translate('profile_req_cancel'), Icons.close, (){});
       } else {
         final batch = _firestore.batch();
         final myDocRef = _firestore.collection('users').doc(_user!.uid);
@@ -376,48 +399,54 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         await batch.commit();
       }
     } catch (e) { 
-      if(mounted) OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red); 
+      if(mounted) OverlayService().showTopNotification(context, t.translate('profile_action_fail'), Icons.error, (){}, color: Colors.red); 
     } finally {
       if(mounted) setState(() => _isProcessingFollow = false);
     }
   }
 
-  void _shareProfile(String name) { Share.share("Check out $name's profile on Sapa PNJ!"); }
+  void _shareProfile(String name) { 
+    var t = AppLocalizations.of(context)!;
+    // Simple localization, assuming name doesn't need translation
+    Share.share(t.translate('profile_share_text')); 
+  }
   
   Future<void> _toggleBlock() async {
+    var t = AppLocalizations.of(context)!;
     if (_isBlocked) {
       await moderationService.unblockUser(_userId);
-      if(mounted) OverlayService().showTopNotification(context, "User unblocked", Icons.check_circle, (){});
+      if(mounted) OverlayService().showTopNotification(context, t.translate('profile_unblocked'), Icons.check_circle, (){});
     } else {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text("Block User?"),
-          content: Text("They will not be able to follow you or see your posts."),
+          title: Text(t.translate('profile_block_confirm_title')),
+          content: Text(t.translate('profile_block_confirm_desc')),
           actions: [
-            TextButton(onPressed: ()=>Navigator.pop(ctx, false), child: Text("Cancel")),
-            TextButton(onPressed: ()=>Navigator.pop(ctx, true), child: Text("Block", style: TextStyle(color: Colors.red))),
+            TextButton(onPressed: ()=>Navigator.pop(ctx, false), child: Text(t.translate('general_cancel'))),
+            TextButton(onPressed: ()=>Navigator.pop(ctx, true), child: Text(t.translate('general_delete'), style: TextStyle(color: Colors.red))), // Using general_delete as "Block" action often red
           ],
         )
       ) ?? false;
       if (confirm) {
         await moderationService.blockUser(_userId);
-        if(mounted) OverlayService().showTopNotification(context, "User blocked", Icons.block, (){});
+        if(mounted) OverlayService().showTopNotification(context, t.translate('profile_blocked'), Icons.block, (){});
       }
     }
   }
 
   void _reportUser() {
+    var t = AppLocalizations.of(context)!;
     showDialog(
       context: context,
       builder: (context) {
         return SimpleDialog(
-          title: Text("Report User"),
+          title: Text(t.translate('profile_report_title')),
           children: [
-            SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text('Spam Account')),
-            SimpleDialogOption(onPressed: () => _submitReport('Impersonation'), child: Text('Impersonation')),
-            SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Profile'), child: Text('Inappropriate Profile')),
-            Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: ()=>Navigator.pop(context), child: Text("Cancel"))),
+            SimpleDialogOption(onPressed: () => _submitReport('Spam'), child: Text(t.translate('profile_report_spam'))),
+            SimpleDialogOption(onPressed: () => _submitReport('Impersonation'), child: Text(t.translate('profile_report_imperson'))),
+            SimpleDialogOption(onPressed: () => _submitReport('Inappropriate Profile'), child: Text(t.translate('profile_report_inappr'))),
+            Padding(padding: EdgeInsets.all(8), child: TextButton(onPressed: ()=>Navigator.pop(context), child: Text(t.translate('general_cancel')))),
           ],
         );
       }
@@ -431,11 +460,21 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       targetType: 'user', 
       reason: reason
     );
-    OverlayService().showTopNotification(context, "Report submitted.", Icons.flag, (){});
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    OverlayService().showTopNotification(context, t.translate('profile_report_submitted'), Icons.flag, (){});
   }
 
   Future<void> _signOut(BuildContext context) async {
-    final didConfirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: Text('Sign Out'), content: Text('Are you sure?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel')), TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Sign Out', style: TextStyle(color: Colors.red)))])) ?? false;
+    var t = AppLocalizations.of(context)!;
+    final didConfirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: Text(t.translate('settings_logout')), 
+      content: Text(t.translate('settings_logout_confirm')), 
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t.translate('general_cancel'))), 
+        TextButton(onPressed: () => Navigator.pop(context, true), child: Text(t.translate('settings_logout'), style: TextStyle(color: Colors.red)))
+      ]
+    )) ?? false;
     if (didConfirm) { await _auth.signOut(); if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst); }
   }
 
@@ -447,8 +486,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   String _formatJoinedDate(Timestamp? timestamp) {
-    if (timestamp == null) return 'Joined date unknown';
-    return 'Joined ${DateFormat('MMMM yyyy').format(timestamp.toDate())}';
+    var t = AppLocalizations.of(context)!;
+    if (timestamp == null) return t.translate('profile_joined_unknown');
+    return '${t.translate('profile_joined')} ${DateFormat('MMMM yyyy').format(timestamp.toDate())}';
   }
 
   Future<void> _handleRefresh() async {
@@ -463,7 +503,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_userId == null) return Center(child: Text("Not logged in."));
+    var t = AppLocalizations.of(context)!;
+
+    if (_userId == null) return Center(child: Text(t.translate('profile_not_logged_in')));
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
     
@@ -474,7 +516,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       stream: _firestore.collection('users').doc(_userId).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Scaffold(appBar: AppBar(title: Text("Error")), body: Center(child: Text("Something went wrong.")));
+          return Scaffold(appBar: AppBar(title: Text(t.translate('profile_error_title'))), body: Center(child: Text(t.translate('profile_error_generic'))));
         }
 
         final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
@@ -533,7 +575,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                   ),
                   centerTitle: false,
                   actions: [
-                     _buildActionMenu(context, data, isMyProfile),
+                      _buildActionMenu(context, data, isMyProfile),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
                     background: _buildHeaderFlexibleSpace(context, data, isMyProfile, isPrivateAccount, amIFollowing),
@@ -550,7 +592,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                     delegate: _SliverAppBarDelegate(
                       TabBar(
                         controller: _tabController,
-                        tabs: const [Tab(text: 'Posts'), Tab(text: 'Reposts'), Tab(text: 'Replies')],
+                        tabs: [
+                          Tab(text: t.translate('profile_posts')),
+                          Tab(text: t.translate('profile_reposts')),
+                          Tab(text: t.translate('profile_replies'))
+                        ],
                         labelColor: theme.primaryColor,
                         unselectedLabelColor: theme.hintColor,
                         indicatorColor: theme.primaryColor,
@@ -588,6 +634,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   // --- Header Components ---
 
   Widget _buildActionMenu(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
+    var t = AppLocalizations.of(context)!;
     final name = data['name'] ?? '';
     return PopupMenuButton<String>(
       icon: Icon(Icons.more_vert),
@@ -599,11 +646,15 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         if (value == 'report') _reportUser();
       },
       itemBuilder: (context) => isMyProfile 
-        ? [PopupMenuItem(value: 'share', child: Text('Share Profile')), PopupMenuItem(value: 'settings', child: Text('Settings')), PopupMenuItem(value: 'logout', child: Text('Logout', style: TextStyle(color: Colors.red)))]
+        ? [
+            PopupMenuItem(value: 'share', child: Text(t.translate('profile_menu_share'))), 
+            PopupMenuItem(value: 'settings', child: Text(t.translate('profile_menu_settings'))), 
+            PopupMenuItem(value: 'logout', child: Text(t.translate('settings_logout'), style: TextStyle(color: Colors.red)))
+          ]
         : [
-            PopupMenuItem(value: 'share', child: Text('Share Account')), 
-            PopupMenuItem(value: 'report', child: Text('Report User')),
-            PopupMenuItem(value: 'block', child: Text(_isBlocked ? 'Unblock' : 'Block', style: TextStyle(color: Colors.red))),
+            PopupMenuItem(value: 'share', child: Text(t.translate('profile_menu_share_account'))), 
+            PopupMenuItem(value: 'report', child: Text(t.translate('profile_report_title'))),
+            PopupMenuItem(value: 'block', child: Text(_isBlocked ? t.translate('profile_unblocked') : t.translate('general_delete'), style: TextStyle(color: Colors.red))), // Using Delete/Block key
           ],
     );
   }
@@ -616,6 +667,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     bool amIFollowing
   ) {
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!;
+    
     final String? bannerImageUrl = data['bannerImageUrl'];
     final String? profileImageUrl = data['profileImageUrl'];
     final String? dept = data['department'];
@@ -672,9 +725,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 SizedBox(width: 8),
               ],
               isMyProfile 
-              ? OutlinedButton(onPressed: () async { if(await Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfileScreen())) == true) setState((){}); }, child: Text("Edit Profile"), style: OutlinedButton.styleFrom(shape: StadiumBorder()))
+              ? OutlinedButton(onPressed: () async { if(await Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfileScreen())) == true) setState((){}); }, child: Text(t.translate('profile_edit')), style: OutlinedButton.styleFrom(shape: StadiumBorder()))
               : _isBlocked 
-                ? ElevatedButton(onPressed: _toggleBlock, child: Text("Unblock"), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white))
+                ? ElevatedButton(onPressed: _toggleBlock, child: Text(t.translate('profile_unblocked')), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white))
                 : _buildFollowButton(isPrivate, amIFollowing)
             ],
           ),
@@ -684,10 +737,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildFollowButton(bool isPrivate, bool amIFollowing) {
+    var t = AppLocalizations.of(context)!;
     if (amIFollowing) {
       return OutlinedButton(
         onPressed: _isProcessingFollow ? null : () => _unfollowUser(false), 
-        child: Text("Unfollow")
+        child: Text(t.translate('profile_unfollow'))
       );
     }
 
@@ -695,7 +749,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
       return ElevatedButton(
         onPressed: _isProcessingFollow ? null : () => _followUser(false), 
         style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
-        child: Text("Follow"),
+        child: Text(t.translate('community_follow')),
       );
     }
 
@@ -714,14 +768,14 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               backgroundColor: Theme.of(context).cardColor,
               side: BorderSide(color: Theme.of(context).dividerColor),
             ),
-            child: Text("Requested", style: TextStyle(color: Theme.of(context).hintColor)),
+            child: Text(t.translate('profile_requested'), style: TextStyle(color: Theme.of(context).hintColor)),
           );
         }
         
         return ElevatedButton(
           onPressed: _isProcessingFollow ? null : () => _followUser(true), 
           style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
-          child: Text("Follow"),
+          child: Text(t.translate('community_follow')),
         );
       },
     );
@@ -729,6 +783,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   Widget _buildProfileInfoBody(BuildContext context, Map<String, dynamic> data, bool isMyProfile) {
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!;
+    
     final String name = data['name'] ?? 'Name';
     final String handle = "@${(data['email'] ?? '').split('@')[0]}";
     final String displayBio = _isBioExpanded ? (data['bio'] ?? '') : ((data['bio'] ?? '').length > 100 ? (data['bio'] ?? '').substring(0, 100) + '...' : (data['bio'] ?? ''));
@@ -737,18 +793,13 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
     final bool isVerified = verificationStatus == 'verified';
     final bool isPending = verificationStatus == 'pending';
     
-    // VERIFICATION FLOW LOGIC
-    // 1. Email must be verified first.
-    // 2. Then KTM verification.
     bool showEmailVerifyBtn = false;
     bool showKtmVerifyBtn = false;
 
     if (isMyProfile) {
-      // Check current auth user email status
       if (_user != null && !_user!.emailVerified) {
         showEmailVerifyBtn = true;
       } else if (!isVerified && !isPending) {
-        // Only show KTM verify if Email IS verified AND KTM not yet verified/pending
         showKtmVerifyBtn = true;
       }
     }
@@ -780,9 +831,9 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               onTap: () async {
                 try {
                   await _user!.sendEmailVerification();
-                  if(mounted) OverlayService().showTopNotification(context, "Verification email sent", Icons.mark_email_read, (){});
+                  if(mounted) OverlayService().showTopNotification(context, t.translate('profile_verify_sent'), Icons.mark_email_read, (){});
                 } catch (e) {
-                  if(mounted) OverlayService().showTopNotification(context, "Please wait before retrying.", Icons.timer, (){}, color: Colors.orange);
+                  if(mounted) OverlayService().showTopNotification(context, t.translate('profile_verify_wait'), Icons.timer, (){}, color: Colors.orange);
                 }
               },
               child: Container(
@@ -794,10 +845,10 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min, 
-                  children: const [
+                  children: [
                     Icon(Icons.warning, size: 16, color: Colors.red), 
                     SizedBox(width: 6), 
-                    Text("Verify Email", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12))
+                    Text(t.translate('profile_verify_email'), style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12))
                   ]
                 ),
               ),
@@ -809,7 +860,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
             child: Container(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.orange)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: const [Icon(Icons.hourglass_top, size: 16, color: Colors.orange), SizedBox(width: 6), Text("Verification Pending", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12))]),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.hourglass_top, size: 16, color: Colors.orange), SizedBox(width: 6), Text(t.translate('profile_verify_pending'), style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 12))]),
             ),
           )
         else if (showKtmVerifyBtn)
@@ -820,23 +871,23 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               child: Container(
                 padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: TwitterTheme.blue)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: const [Icon(Icons.verified_outlined, size: 16, color: TwitterTheme.blue), SizedBox(width: 6), Text("Get Verified Badge", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold, fontSize: 12))]),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.verified_outlined, size: 16, color: TwitterTheme.blue), SizedBox(width: 6), Text(t.translate('profile_verify_get'), style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold, fontSize: 12))]),
               ),
             ),
           ),
         
         SizedBox(height: 8),
         if (!_isBlocked) ...[
-          Text(displayBio.isEmpty ? "No bio set." : displayBio, style: theme.textTheme.bodyLarge),
-          if ((data['bio'] ?? '').length > 100) GestureDetector(onTap: () => setState(() => _isBioExpanded = !_isBioExpanded), child: Text(_isBioExpanded ? "Show less" : "Read more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold))),
+          Text(displayBio.isEmpty ? t.translate('profile_no_bio') : displayBio, style: theme.textTheme.bodyLarge),
+          if ((data['bio'] ?? '').length > 100) GestureDetector(onTap: () => setState(() => _isBioExpanded = !_isBioExpanded), child: Text(_isBioExpanded ? t.translate('general_show_less') : t.translate('general_show_more'), style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold))),
           SizedBox(height: 8),
           Row(children: [Icon(Icons.calendar_today, size: 14, color: theme.hintColor), SizedBox(width: 4), Text(_formatJoinedDate(data['createdAt']), style: theme.textTheme.titleSmall)]),
           SizedBox(height: 8),
           Row(
             children: [
-              _buildStatText(context, (data['following'] ?? []).length, "Following", 1), 
+              _buildStatText(context, (data['following'] ?? []).length, t.translate('profile_following'), 1), 
               SizedBox(width: 16), 
-              _buildStatText(context, (data['followers'] ?? []).length, "Followers", 2)
+              _buildStatText(context, (data['followers'] ?? []).length, t.translate('profile_followers'), 2)
             ]
           ),
           SizedBox(height: 16),
@@ -846,6 +897,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildBlockedBody() {
+    var t = AppLocalizations.of(context)!;
     return Container(
       alignment: Alignment.center,
       padding: EdgeInsets.all(32),
@@ -854,11 +906,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         children: [
           Icon(Icons.block, size: 64, color: Colors.grey),
           SizedBox(height: 16),
-          Text("You have blocked this user.", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          Text(t.translate('profile_blocked_title'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           SizedBox(height: 8),
-          Text("You cannot see their posts or interact with them.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          Text(t.translate('profile_blocked_desc'), textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
           SizedBox(height: 16),
-          OutlinedButton(onPressed: _toggleBlock, child: Text("Unblock"))
+          OutlinedButton(onPressed: _toggleBlock, child: Text(t.translate('profile_unblocked')))
         ],
       ),
     );
@@ -866,6 +918,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
 
   Widget _buildPrivateAccountBody() {
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!;
     return Container(
       alignment: Alignment.center,
       padding: EdgeInsets.symmetric(horizontal: 40),
@@ -882,12 +935,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           ),
           SizedBox(height: 24),
           Text(
-            "This account is private",
+            t.translate('profile_private_title'),
             style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
           SizedBox(height: 8),
           Text(
-            "Follow this account to see their posts and replies.",
+            t.translate('profile_private_desc'),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
           ),
@@ -897,7 +950,12 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   void _showBadgeInfo(BuildContext context, String dept, String prodi) {
-    showDialog(context: context, builder: (context) => AlertDialog(title: Text("Academic Info"), content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Department", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(dept, style: TextStyle(fontSize: 16)), SizedBox(height: 16), Text("Study Program", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(prodi, style: TextStyle(fontSize: 16))]), actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("Close", style: TextStyle(color: TwitterTheme.blue)))]));
+    var t = AppLocalizations.of(context)!;
+    showDialog(context: context, builder: (context) => AlertDialog(
+      title: Text(t.translate('profile_academic_title')), 
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t.translate('profile_dept'), style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(dept, style: TextStyle(fontSize: 16)), SizedBox(height: 16), Text(t.translate('profile_prodi'), style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)), Text(prodi, style: TextStyle(fontSize: 16))]), 
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(t.translate('general_cancel'), style: TextStyle(color: TwitterTheme.blue)))]
+    ));
   }
 
   Widget _buildDepartmentBadge(String code, String? fullDeptName, String? fullProdiName) {
@@ -941,10 +999,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildMyPosts(BuildContext context, String userId) {
+    var t = AppLocalizations.of(context)!;
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(userId).get(),
       builder: (context, userSnapshot) {
-        if (userSnapshot.hasError) return CommonErrorWidget(message: "Failed to load posts.", isConnectionError: true);
+        if (userSnapshot.hasError) return CommonErrorWidget(message: t.translate('profile_load_posts_fail'), isConnectionError: true);
         
         final firestorePinned = (userSnapshot.data?.data() as Map<String, dynamic>?)?['pinnedPostId'];
         final activePinnedId = _optimisticPinnedPostId == '' ? null : (_optimisticPinnedPostId ?? firestorePinned);
@@ -952,7 +1011,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         return StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
           builder: (context, snapshot) {
-            if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load posts stream.", isConnectionError: true);
+            if (snapshot.hasError) return CommonErrorWidget(message: t.translate('profile_load_stream_fail'), isConnectionError: true);
             
             List<Widget> slivers = [];
             if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
@@ -962,11 +1021,8 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               
               final visibleDocs = allDocs.where((doc) {
                 final data = doc.data() as Map<String, dynamic>;
-                
-                // --- NEW FILTER: HIDE OFFICIAL COMMUNITY POSTS FROM PERSONAL PROFILE ---
                 final bool isCommunityIdentityPost = data['isCommunityPost'] ?? false;
                 if (isCommunityIdentityPost) return false;
-                // ---------------------------------------------------------------------
 
                 final visibility = data['visibility'] ?? 'public';
                 final ownerId = data['userId'];
@@ -979,7 +1035,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
               }).toList();
 
               if (visibleDocs.isEmpty) {
-                slivers.add(SliverFillRemaining(child: Center(child: Text("No posts yet."))));
+                slivers.add(SliverFillRemaining(child: Center(child: Text(t.translate('profile_no_posts')))));
               } else {
                 if (activePinnedId != null) {
                   final index = visibleDocs.indexWhere((d) => d.id == activePinnedId);
@@ -1021,10 +1077,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildMyReplies(BuildContext context, String userId) {
+    var t = AppLocalizations.of(context)!;
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collectionGroup('comments').where('userId', isEqualTo: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load replies.", isConnectionError: true);
+        if (snapshot.hasError) return CommonErrorWidget(message: t.translate('profile_load_replies_fail'), isConnectionError: true);
         
         List<Widget> slivers = [];
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
@@ -1032,7 +1089,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
         } else {
           final docs = snapshot.data?.docs ?? [];
           if (docs.isEmpty) {
-            slivers.add(SliverFillRemaining(child: Center(child: Text("No replies yet."))));
+            slivers.add(SliverFillRemaining(child: Center(child: Text(t.translate('profile_no_replies')))));
           } else {
             slivers.add(SliverList(delegate: SliverChildBuilderDelegate((context, index) {
               final doc = docs[index];
@@ -1079,10 +1136,11 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
   }
 
   Widget _buildMyReposts(BuildContext context, String userId) {
+    var t = AppLocalizations.of(context)!;
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('posts').where('repostedBy', arrayContains: userId).orderBy('timestamp', descending: true).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return CommonErrorWidget(message: "Failed to load reposts.", isConnectionError: true);
+        if (snapshot.hasError) return CommonErrorWidget(message: t.translate('profile_load_reposts_fail'), isConnectionError: true);
         List<Widget> slivers = [];
         if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           slivers.add(SliverFillRemaining(child: Center(child: CircularProgressIndicator())));
@@ -1102,7 +1160,7 @@ class _ProfilePageState extends State<ProfilePage> with TickerProviderStateMixin
           }).toList();
 
           if (visibleDocs.isEmpty) {
-            slivers.add(SliverFillRemaining(child: Center(child: Text("No reposts yet."))));
+            slivers.add(SliverFillRemaining(child: Center(child: Text(t.translate('profile_no_reposts')))));
           } else {
             slivers.add(SliverList(delegate: SliverChildBuilderDelegate((context, index) {
               final doc = visibleDocs[index];

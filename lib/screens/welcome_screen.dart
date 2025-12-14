@@ -4,17 +4,17 @@ import 'package:flutter/material.dart';
 import 'login_page.dart';
 import 'register_page.dart';
 import '../main.dart'; 
+import '../services/app_localizations.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
-  // Helper for the "Fly In From Bottom" Page Transition
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(0.0, 1.0); // Start from bottom
-        const end = Offset.zero;        // End at center
+        const begin = Offset(0.0, 1.0); 
+        const end = Offset.zero;       
         const curve = Curves.easeInOutQuart;
 
         var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
@@ -33,10 +33,11 @@ class WelcomeScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
 
+    var t = AppLocalizations.of(context)!;
+
     return Scaffold(
       body: Stack(
         children: [
-          // --- DECORATIVE BACKGROUND ELEMENTS ---
           Positioned(
             top: -100,
             right: -100,
@@ -62,7 +63,6 @@ class WelcomeScreen extends StatelessWidget {
             ),
           ),
 
-          // --- MAIN CONTENT ---
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 24.0),
@@ -106,7 +106,7 @@ class WelcomeScreen extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.only(left: 12.0),
                       child: Text(
-                        "Sarana Pengguna\nAplikasi Politeknik\nNegeri Jakarta",
+                        t.translate('slogan'),
                         style: theme.textTheme.titleLarge?.copyWith(
                           color: theme.hintColor,
                           fontWeight: FontWeight.w500,
@@ -119,7 +119,7 @@ class WelcomeScreen extends StatelessWidget {
                   Spacer(flex: 3), 
 
                   Text(
-                    "Join the community today.",
+                    t.translate('welcome_join_message'),
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -130,10 +130,9 @@ class WelcomeScreen extends StatelessWidget {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        // Use custom slide-up route
                         Navigator.of(context).push(_createSlideUpRoute(RegisterPage()));
                       },
-                      child: Text('Create account'),
+                      child: Text(t.translate('welcome_create_account')), // 5. MENGGUNAKAN KEY BARU
                       style: ElevatedButton.styleFrom(
                         backgroundColor: TwitterTheme.blue,
                         foregroundColor: Colors.white,
@@ -155,9 +154,9 @@ class WelcomeScreen extends StatelessWidget {
                       text: TextSpan(
                         style: theme.textTheme.bodyMedium?.copyWith(fontSize: 15),
                         children: [
-                          TextSpan(text: "Have an account? "),
+                          TextSpan(text: "${t.translate('auth_have_account')} "), // 6. TRANSLATE
                           TextSpan(
-                            text: "Log in",
+                            text: t.translate('auth_login'), // 7. TRANSLATE
                             style: TextStyle(
                               color: TwitterTheme.blue,
                               fontWeight: FontWeight.bold,

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../main.dart';
 import 'login_page.dart'; 
 import 'setup/setup_profile_screen.dart'; 
+import '../services/app_localizations.dart'; // IMPORT SERVICE LOCALIZATION
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -25,7 +26,6 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _namaController = TextEditingController(); 
   final TextEditingController _nimController = TextEditingController(); 
   
-  // 1. Tambahkan FocusNode untuk navigasi
   final FocusNode _nimFocus = FocusNode();
   final FocusNode _emailFocus = FocusNode();
   final FocusNode _passwordFocus = FocusNode();
@@ -37,7 +37,6 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _isConfirmPasswordObscured = true;
   bool _isLoading = false; 
 
-  // Helper for custom transition
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
       pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -60,7 +59,6 @@ class _RegisterPageState extends State<RegisterPage> {
     }
 
     try {
-      // 1. Create Auth User first (to get read permissions)
       UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -69,22 +67,20 @@ class _RegisterPageState extends State<RegisterPage> {
       if (userCredential.user != null) {
         final String nim = _nimController.text.trim();
 
-        // 2. Check for Unique NIM
         final nimQuery = await _firestore
             .collection('users')
             .where('nim', isEqualTo: nim)
             .get();
 
         if (nimQuery.docs.isNotEmpty) {
-          // NIM exists! Delete the auth user we just created and throw error
           await userCredential.user!.delete();
+          // Error ini mungkin spesifik API, tapi kita bisa bungkus jika perlu
           throw FirebaseAuthException(
             code: 'nim-already-in-use', 
             message: 'The NIM $nim is already registered.'
           );
         }
 
-        // 3. Create User Document if NIM is unique
         await _firestore.collection('users').doc(userCredential.user!.uid).set({
           'uid': userCredential.user!.uid,
           'email': _emailController.text.trim(),
@@ -112,49 +108,57 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
+  // --- VALIDATORS (Updated with Localization) ---
+  
   String? _validateName(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Name cannot be empty.';
+    // Kita panggil AppLocalizations.of(context) di dalam sini
+    var t = AppLocalizations.of(context)!;
+    if (value == null || value.trim().isEmpty) return t.translate('val_name_empty');
     return null;
   }
 
   String? _validateNIM(String? value) {
-    if (value == null || value.trim().isEmpty) return 'NIM cannot be empty.';
-    if (value.length != 10) return 'NIM must be exactly 10 digits.';
+    var t = AppLocalizations.of(context)!;
+    if (value == null || value.trim().isEmpty) return t.translate('val_nim_empty');
+    if (value.length != 10) return t.translate('val_nim_length');
     return null;
   }
 
   String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Email cannot be empty.';
+    var t = AppLocalizations.of(context)!;
+    if (value == null || value.trim().isEmpty) return t.translate('val_email_empty');
     
     String pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$';
     RegExp regex = RegExp(pattern);
     
     if (!regex.hasMatch(value)) {
-        return 'Enter a valid email address.';
+        return t.translate('val_email_invalid');
     }
 
     if (!value.endsWith('@stu.pnj.ac.id')) {
-        return 'Registration is restricted to @stu.pnj.ac.id emails only.';
+        return t.translate('val_email_domain');
     }
 
     return null;
   }
 
   String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) return 'Password cannot be empty.';
-    if (value.length < 6) return 'Password must be at least 6 characters long.';
+    var t = AppLocalizations.of(context)!;
+    if (value == null || value.isEmpty) return t.translate('val_pass_empty');
+    if (value.length < 6) return t.translate('val_pass_length');
     bool hasLetter = value.contains(RegExp(r'[a-zA-Z]'));
     bool hasNumber = value.contains(RegExp(r'[0-9]'));
     bool hasSpecialChar = value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'));
     if (!hasLetter || !hasNumber || !hasSpecialChar) {
-      return 'Password must contain letters, numbers, and symbols.';
+      return t.translate('val_pass_complexity');
     }
     return null;
   }
 
   String? _validateConfirmPassword(String? value) {
-    if (value == null || value.isEmpty) return 'Please confirm your password.';
-    if (value != _passwordController.text) return 'Passwords do not match.';
+    var t = AppLocalizations.of(context)!;
+    if (value == null || value.isEmpty) return t.translate('val_confirm_empty');
+    if (value != _passwordController.text) return t.translate('val_pass_mismatch');
     return null;
   }
 
@@ -166,7 +170,6 @@ class _RegisterPageState extends State<RegisterPage> {
     _namaController.dispose();
     _nimController.dispose();
     
-    // 2. Dispose FocusNodes
     _nimFocus.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
@@ -178,6 +181,9 @@ class _RegisterPageState extends State<RegisterPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
+    
+    // Inisialisasi localization helper
+    var t = AppLocalizations.of(context)!;
     
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -247,17 +253,15 @@ class _RegisterPageState extends State<RegisterPage> {
                       SizedBox(height: 40),
 
                       Text(
-                        "Create your account",
+                        t.translate('auth_create_title'), // "Create your account"
                         style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       SizedBox(height: 32),
                       
-                      // 3. Chain Focus Logic: Name -> NIM -> Email -> Password -> Confirm
-                      
                       // NAME
                       TextFormField( 
                         controller: _namaController,
-                        decoration: const InputDecoration(labelText: 'Name'),
+                        decoration: InputDecoration(labelText: t.translate('auth_name')), // "Name"
                         textInputAction: TextInputAction.next,
                         onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_nimFocus),
                         validator: _validateName,
@@ -269,7 +273,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       TextFormField( 
                         controller: _nimController,
                         focusNode: _nimFocus,
-                        decoration: const InputDecoration(labelText: 'NIM'),
+                        decoration: InputDecoration(labelText: t.translate('auth_nim')), // "NIM"
                         keyboardType: TextInputType.number, 
                         textInputAction: TextInputAction.next,
                         onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_emailFocus),
@@ -286,7 +290,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       TextFormField( 
                         controller: _emailController,
                         focusNode: _emailFocus,
-                        decoration: const InputDecoration(labelText: 'Enter email (must be @stu.pnj.ac.id)'),
+                        decoration: InputDecoration(labelText: t.translate('auth_email_hint')), // "Enter email..."
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
                         onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_passwordFocus),
@@ -301,7 +305,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         focusNode: _passwordFocus,
                         obscureText: _isPasswordObscured,
                         decoration: InputDecoration(
-                          labelText: 'Enter password',
+                          labelText: t.translate('auth_pass_hint'), // "Enter password"
                           suffixIcon: IconButton(
                             icon: Icon(
                               _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
@@ -326,7 +330,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         focusNode: _confirmPasswordFocus,
                         obscureText: _isConfirmPasswordObscured,
                         decoration: InputDecoration(
-                          labelText: 'Confirm password',
+                          labelText: t.translate('auth_confirm_pass_hint'), // "Confirm password"
                           suffixIcon: IconButton(
                             icon: Icon(
                               _isConfirmPasswordObscured ? Icons.visibility_off : Icons.visibility,
@@ -363,7 +367,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           onPressed: _isLoading ? null : _signUp, 
                           child: _isLoading 
                             ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : const Text('Sign up'),
+                            : Text(t.translate('auth_signup')), // "Sign up"
                            style: ElevatedButton.styleFrom(
                             backgroundColor: TwitterTheme.blue,
                             foregroundColor: Colors.white,
@@ -381,13 +385,13 @@ class _RegisterPageState extends State<RegisterPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text("Have an account? ", style: TextStyle(color: theme.hintColor)),
+                          Text(t.translate('auth_have_account') + " ", style: TextStyle(color: theme.hintColor)), // "Have an account? "
                           GestureDetector(
                             onTap: () {
                               Navigator.of(context).pushReplacement(_createSlideUpRoute(LoginPage()));
                             },
                             child: Text(
-                              "Log in",
+                              t.translate('auth_login'), // "Log in"
                               style: TextStyle(
                                 color: TwitterTheme.blue,
                                 fontWeight: FontWeight.bold,

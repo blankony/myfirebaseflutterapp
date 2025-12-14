@@ -3,11 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // IMPORT PENTING
 import 'firebase_options.dart'; 
 import 'screens/splash_screen.dart'; 
+import 'services/app_localizations.dart'; // IMPORT SERVICE LOCALIZATION
 
+// Notifiers Global
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 final ValueNotifier<bool> hapticNotifier = ValueNotifier(true);
+final ValueNotifier<Locale> languageNotifier = ValueNotifier(const Locale('en')); // NOTIFIER BAHASA BARU
 
 class TwitterTheme {
   static const Color blue = Color(0xFF1DA1F2);
@@ -208,10 +212,15 @@ Future<void> main() async {
     print("WARNING: Failed to load .env file: $e");
   }
 
-  // LOAD THEME PERSISTENCE
   final prefs = await SharedPreferences.getInstance();
+  
   final bool isDark = prefs.getBool('is_dark_mode') ?? false;
   themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+
+  final String? savedLang = prefs.getString('language_code');
+  if (savedLang != null) {
+    languageNotifier.value = Locale(savedLang);
+  }
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -225,18 +234,43 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
-      builder: (context, currentMode, child) {
-        return MaterialApp(
-          title: 'Sapa PNJ', 
-          theme: TwitterTheme.lightTheme, 
-          darkTheme: TwitterTheme.darkTheme, 
-          themeMode: currentMode, 
-          home: const SplashScreen(),
-          debugShowCheckedModeBanner: false, 
+    return ValueListenableBuilder<Locale>(
+      valueListenable: languageNotifier,
+      builder: (context, currentLocale, _) {
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: themeNotifier,
+          builder: (context, currentMode, child) {
+            return MaterialApp(
+              title: 'Sapa PNJ', 
+              theme: TwitterTheme.lightTheme, 
+              darkTheme: TwitterTheme.darkTheme, 
+              themeMode: currentMode, 
+              
+              locale: currentLocale,
+              supportedLocales: const [
+                Locale('en', 'US'),
+                Locale('id', 'ID'),
+              ],
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              localeResolutionCallback: (locale, supportedLocales) {
+                for (var supportedLocale in supportedLocales) {
+                  if (supportedLocale.languageCode == locale?.languageCode) {
+                    return supportedLocale;
+                  }
+                }
+                return supportedLocales.first;
+              },
+              home: const SplashScreen(),
+              debugShowCheckedModeBanner: false, 
+            );
+          },
         );
-      },
+      }
     );
   }
 }

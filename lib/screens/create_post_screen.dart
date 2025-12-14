@@ -15,8 +15,9 @@ import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/overlay_service.dart';
-import '../services/draft_service.dart'; // Pastikan import ini ada
+import '../services/draft_service.dart'; 
 import 'video_trimmer_screen.dart';
+import '../services/app_localizations.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -138,10 +139,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _checkCanPost();
   }
 
-  // Cek apakah ada perubahan dari kondisi awal (untuk menghindari prompt save yang tidak perlu)
+  // Cek apakah ada perubahan dari kondisi awal
   bool _hasChanges() {
     bool textChanged = _postController.text.trim() != _initialText.trim();
-    // Cek sederhana: jika ada file baru dipilih ATAU jumlah url server berbeda
     bool mediaChanged = _selectedMediaFiles.isNotEmpty || 
                         _existingMediaUrls.length != _initialMediaUrls.length;
     return textChanged || mediaChanged;
@@ -153,15 +153,25 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       try { await user.reload(); } catch (_) {}
       if (!user.emailVerified) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
+          // LOCALIZATION
+          var t = AppLocalizations.of(context)!;
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (context) => AlertDialog(
-              title: Row(children: const [Icon(Icons.mark_email_unread, color: Colors.orange), SizedBox(width: 8), Expanded(child: Text("Verification Required", overflow: TextOverflow.ellipsis))]),
-              content: const Text("You must verify your email address to create posts."),
+              title: Row(children: [Icon(Icons.mark_email_unread, color: Colors.orange), SizedBox(width: 8), Expanded(child: Text(t.translate('verify_required'), overflow: TextOverflow.ellipsis))]),
+              content: Text(t.translate('verify_email_msg')),
               actions: [
-                TextButton(onPressed: () { user.sendEmailVerification(); Navigator.pop(context); Navigator.pop(context); OverlayService().showTopNotification(context, "Verification email sent!", Icons.check, (){}); }, child: const Text("Resend Email")),
-                ElevatedButton(onPressed: () { Navigator.pop(context); Navigator.pop(context); }, child: const Text("Close")),
+                TextButton(
+                  onPressed: () { 
+                    user.sendEmailVerification(); 
+                    Navigator.pop(context); 
+                    Navigator.pop(context); 
+                    OverlayService().showTopNotification(context, t.translate('post_verify_sent'), Icons.check, (){}); 
+                  }, 
+                  child: Text(t.translate('verify_resend'))
+                ),
+                ElevatedButton(onPressed: () { Navigator.pop(context); Navigator.pop(context); }, child: Text(t.translate('general_close'))),
               ],
             ),
           );
@@ -244,7 +254,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
     setState(() => _isProcessing = true);
-    OverlayService().showTopNotification(context, "Scanning images...", Icons.remove_red_eye, (){}, color: Colors.orange);
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    OverlayService().showTopNotification(context, t.translate('post_scan_images'), Icons.remove_red_eye, (){}, color: Colors.orange);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
@@ -263,13 +276,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
         for (var word in dangerKeywords) {
           if (description.contains(word)) {
-            if (mounted) _showRejectDialog("Image ${i+1} contains sensitive content ($word).");
+            if (mounted) _showRejectDialog(t.translate('post_sensitive_content')); // "Image contains sensitive content"
             return false;
           }
         }
 
         if (_badwordGuard.containsBadLanguage(description)) {
-          if (mounted) _showRejectDialog("Image ${i+1} flagged as inappropriate.");
+          if (mounted) _showRejectDialog(t.translate('post_image_inappropriate')); // "Image flagged..."
           return false;
         }
       }
@@ -282,12 +295,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _showRejectDialog(String reason) {
+    var t = AppLocalizations.of(context)!;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Row(children: const [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text("Rejected")]),
-        content: Text("Your content cannot be posted.\n\nReason: $reason"),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Edit", style: TextStyle(color: TwitterTheme.blue)))],
+        title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text(t.translate('general_rejected'))]),
+        content: Text("${t.translate('post_rejected_desc')}$reason"),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t.translate('general_edit'), style: TextStyle(color: TwitterTheme.blue)))],
       ),
     );
   }
@@ -314,11 +328,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _showMediaSourceSelection({required bool isVideo}) {
+    var t = AppLocalizations.of(context)!;
     FocusScope.of(context).unfocus();
     showModalBottomSheet(context: context, builder: (context) {
       return SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(leading: const Icon(Icons.camera_alt), title: const Text("Camera"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
-        ListTile(leading: const Icon(Icons.photo_library), title: const Text("Gallery"), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
+        ListTile(leading: const Icon(Icons.camera_alt), title: Text(t.translate('profile_camera')), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.camera, isVideo: isVideo); }),
+        ListTile(leading: const Icon(Icons.photo_library), title: Text(t.translate('profile_gallery')), onTap: () { Navigator.pop(context); _pickMedia(ImageSource.gallery, isVideo: isVideo); }),
       ]));
     });
   }
@@ -380,6 +395,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   void _showVisibilityPicker() {
+    var t = AppLocalizations.of(context)!;
     FocusScope.of(context).unfocus(); 
     showModalBottomSheet(
       context: context,
@@ -393,13 +409,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
               Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: const Text("Who can see this?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                child: Text(t.translate('post_visibility_title'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), // "Who can see this?"
               ),
               if (_isAccountPrivate) ...[
                  ListTile(
                   leading: const Icon(Icons.people, color: TwitterTheme.blue),
-                  title: const Text("Followers"),
-                  subtitle: const Text("Only your followers can see this"),
+                  title: Text(t.translate('profile_followers')), // "Followers"
+                  subtitle: Text(t.translate('post_vis_followers_desc')), // "Only your followers..."
                   trailing: _visibility == 'followers' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                   onTap: () {
                     setState(() => _visibility = 'followers');
@@ -408,15 +424,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.public, color: Colors.grey),
-                  title: const Text("Public"),
-                  subtitle: const Text("Account is private (Switch in settings)"),
+                  title: Text(t.translate('post_vis_public')), // "Public"
+                  subtitle: Text(t.translate('post_vis_private_warn')), // "Account is private..."
                   enabled: false, 
                 ),
               ] else ...[
                 ListTile(
                   leading: const Icon(Icons.public, color: TwitterTheme.blue),
-                  title: const Text("Public"),
-                  subtitle: const Text("Anyone on Sapa PNJ"),
+                  title: Text(t.translate('post_vis_public')), // "Public"
+                  subtitle: Text(t.translate('post_vis_public_desc')), // "Anyone on Sapa PNJ"
                   trailing: _visibility == 'public' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                   onTap: () {
                     setState(() => _visibility = 'public');
@@ -426,7 +442,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ],
               ListTile(
                 leading: const Icon(Icons.lock, color: Colors.red),
-                title: const Text("Only Me"),
+                title: Text(t.translate('post_vis_me')), // "Only Me"
                 trailing: _visibility == 'private' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                 onTap: () {
                   setState(() => _visibility = 'private');
@@ -442,20 +458,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Widget _buildVisibilityButtonContent() {
+    var t = AppLocalizations.of(context)!;
     IconData icon;
     String label;
     Color color = TwitterTheme.blue;
 
     if (_visibility == 'private') {
       icon = Icons.lock;
-      label = "Only Me";
+      label = t.translate('post_vis_me'); // "Only Me"
       color = Colors.red;
     } else if (_visibility == 'followers') {
       icon = Icons.people;
-      label = "Followers";
+      label = t.translate('profile_followers'); // "Followers"
     } else {
       icon = Icons.public;
-      label = "Public";
+      label = t.translate('post_vis_public'); // "Public"
     }
 
     return Row(
@@ -472,10 +489,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   // --- INTERCEPT BACK NAVIGATION ---
   Future<bool> _onWillPop() async {
+    var t = AppLocalizations.of(context)!;
+
     // 1. Jika kosong total dan bukan draft, langsung keluar
     if (!_canPost && _currentDraftId == null) return true;
 
-    // 2. Jika Draft sudah ada DAN TIDAK ADA PERUBAHAN, langsung keluar (BUG FIX)
+    // 2. Jika Draft sudah ada DAN TIDAK ADA PERUBAHAN, langsung keluar
     if (_currentDraftId != null && !_hasChanges()) {
       return true;
     }
@@ -485,16 +504,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text("Discard changes?"),
-          content: const Text("You have unsaved changes. Are you sure you want to discard them?"),
+          title: Text(t.translate('post_discard_title')), // "Discard changes?"
+          content: Text(t.translate('post_discard_desc')), // "You have unsaved changes..."
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text("Keep Editing"),
+              child: Text(t.translate('post_keep_editing')), // "Keep Editing"
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text("Discard", style: TextStyle(color: Colors.red)),
+              child: Text(t.translate('post_discard'), style: TextStyle(color: Colors.red)), // "Discard"
             ),
           ],
         ),
@@ -503,8 +522,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
 
     // 4. Untuk Post Baru atau Draft yang diubah -> Tawarkan Save
-    final String title = _currentDraftId != null ? "Update Draft?" : "Save Draft?";
-    final String content = _currentDraftId != null ? "Save changes to your draft?" : "Save this as a draft?";
+    final String title = _currentDraftId != null ? t.translate('post_draft_update_title') : t.translate('post_draft_save_title');
+    final String content = _currentDraftId != null ? t.translate('post_draft_update_desc') : t.translate('post_draft_save_desc');
 
     final result = await showDialog<String>(
       context: context,
@@ -514,16 +533,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop('discard'),
-            child: const Text("Discard", style: TextStyle(color: Colors.red)),
+            child: Text(t.translate('post_discard'), style: TextStyle(color: Colors.red)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop('cancel'),
-            child: const Text("Cancel"),
+            child: Text(t.translate('general_cancel')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop('save'),
             style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white),
-            child: const Text("Save"),
+            child: Text(t.translate('general_save')),
           ),
         ],
       ),
@@ -531,7 +550,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     if (result == 'save') {
       await _saveToDrafts();
-      return true; // _saveToDrafts logic will show notification, then we pop
+      return true; 
     } else if (result == 'discard') {
       return true;
     }
@@ -542,21 +561,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   // --- SAVE DRAFT LOGIC ---
   Future<void> _saveToDrafts() async {
     setState(() => _isSavingDraft = true);
+    var t = AppLocalizations.of(context)!;
     
-    // Upload new media files to Cloudinary FIRST (so the draft persists URLs)
     try {
       List<String> finalUrls = [..._existingMediaUrls];
       List<String> finalPublicIds = [..._existingPublicIds];
 
       if (_selectedMediaFiles.isNotEmpty) {
-        OverlayService().showTopNotification(context, "Uploading media for draft...", Icons.cloud_upload, (){});
+        OverlayService().showTopNotification(context, t.translate('post_draft_uploading'), Icons.cloud_upload, (){});
         
         for (var file in _selectedMediaFiles) {
           File fileToUp = file;
           if (_mediaType == 'video') {
              try {
-                final MediaInfo? info = await VideoCompress.compressVideo(file.path, quality: VideoQuality.MediumQuality, deleteOrigin: false);
-                if (info != null && info.file != null) fileToUp = info.file!;
+               final MediaInfo? info = await VideoCompress.compressVideo(file.path, quality: VideoQuality.MediumQuality, deleteOrigin: false);
+               if (info != null && info.file != null) fileToUp = info.file!;
              } catch(e) {}
           }
           
@@ -583,15 +602,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         communityIcon: _communityIcon,
       );
 
-      // Save Locally
       await _draftService.saveDraft(draft);
 
       if (mounted) {
-        OverlayService().showTopNotification(context, "Draft saved", Icons.save, (){}, color: Colors.green);
-        // Do not pop here manually, let the WillPopScope flow handle it if triggered by back
+        OverlayService().showTopNotification(context, t.translate('post_draft_saved'), Icons.save, (){}, color: Colors.green);
       }
     } catch (e) {
-      if(mounted) OverlayService().showTopNotification(context, "Failed to save draft", Icons.error, (){}, color: Colors.red);
+      if(mounted) OverlayService().showTopNotification(context, t.translate('post_draft_failed'), Icons.error, (){}, color: Colors.red);
     } finally {
       if(mounted) setState(() => _isSavingDraft = false);
     }
@@ -600,12 +617,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<void> _submitPost() async {
     if (!_canPost) return;
     
+    var t = AppLocalizations.of(context)!;
     final user = _auth.currentUser;
     if (user == null) return;
 
     final text = _postController.text;
     if (_badwordGuard.containsBadLanguage(text)) {
-      _showRejectDialog("Caption contains prohibited words.");
+      _showRejectDialog(t.translate('post_bad_words'));
       return;
     }
 
@@ -617,12 +635,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     final OverlayState? overlayState = Overlay.maybeOf(context);
     
+    // Prepare translated status strings
+    final Map<String, String> localizedStrings = {
+      'uploading': t.translate('post_uploading_count'), // "Uploading..."
+      'no_content': t.translate('post_no_content'),
+      'posted': t.translate('post_success'),
+      'failed': t.translate('post_failed'),
+    };
+
     if (overlayState != null) {
       _BackgroundUploader.startUploadSequence(
         overlayState: overlayState,
         text: _postController.text,
         filesToUpload: _selectedMediaFiles, 
-        existingMediaUrls: _existingMediaUrls, // Pass Cloudinary URLs from draft here
+        existingMediaUrls: _existingMediaUrls, 
         mediaType: _mediaType,
         visibility: _visibility,
         isEditing: _isEditing,
@@ -641,7 +667,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         communityVerified: _communityVerified,
         isCommunityIdentity: _postAsCommunity,
         
-        draftIdToDelete: _currentDraftId, // Tell uploader to clean up local draft
+        draftIdToDelete: _currentDraftId,
+        localizedStrings: localizedStrings, // PASS LOCALIZED STRINGS
       );
     }
   }
@@ -659,6 +686,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_isRestricted) return const SizedBox.shrink(); 
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    var t = AppLocalizations.of(context)!;
 
     final String? currentAvatarUrl = _postAsCommunity ? _communityIcon : _myAvatarUrl;
     final String currentDisplayName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
@@ -686,11 +714,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     Flexible(child: Text(_communityName ?? "Community", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                   ],
                 ) 
-              : Text(_isEditing ? "Edit Post" : "Create Post", style: const TextStyle(fontWeight: FontWeight.bold)),
+              : Text(_isEditing ? t.translate('post_edit_title') : t.translate('post_create_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
           centerTitle: false,
           actions: [
-            // TOMBOL SAVE DRAFT DIHAPUS DARI SINI
-            
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: ElevatedButton(
@@ -700,7 +726,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   foregroundColor: Colors.white,
                   shape: const StadiumBorder()
                 ),
-                child: const Text("Post"),
+                child: Text(t.translate('post_button')), // "Post"
               ),
             )
           ],
@@ -724,17 +750,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         ),
                         child: Row(
                           children: [
-                            const Text("Post Identity:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text(t.translate('post_identity_label'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             const Spacer(),
                             ChoiceChip(
-                              label: const Text("Me"),
+                              label: Text(t.translate('post_identity_me')), // "Me"
                               selected: !_postAsCommunity,
                               onSelected: (val) => setState(() => _postAsCommunity = false),
                               visualDensity: VisualDensity.compact,
                             ),
                             const SizedBox(width: 8),
                             ChoiceChip(
-                              label: const Text("Community"),
+                              label: Text(t.translate('nav_community')), // "Community"
                               selected: _postAsCommunity,
                               onSelected: (val) => setState(() => _postAsCommunity = true),
                               selectedColor: TwitterTheme.blue.withOpacity(0.2),
@@ -774,11 +800,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               if (_isCommunityContext)
                                 Text(
                                   _postAsCommunity 
-                                    ? "Posting as Community Identity"
-                                    : "Posting in $_communityName",
+                                    ? t.translate('post_as_comm_id')
+                                    : "${t.translate('post_in_comm')} $_communityName",
                                   style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)
                                 ),
-                              
+                            
                               TextField(
                                 controller: _postController,
                                 focusNode: _postFocusNode,
@@ -787,7 +813,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                 maxLines: null,
                                 style: const TextStyle(fontSize: 18),
                                 decoration: InputDecoration(
-                                  hintText: _postAsCommunity ? "What's the official news?" : "What's happening?",
+                                  hintText: _postAsCommunity ? t.translate('post_hint_official') : t.translate('post_hint'),
                                   border: InputBorder.none,
                                 ),
                               ),
@@ -804,7 +830,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                     ],
                                   ),
                                 ),
-                              
+                            
                               if (_predictedText != null)
                                 GestureDetector(
                                   onTap: _acceptPrediction,
@@ -812,7 +838,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                     margin: const EdgeInsets.only(top: 8),
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(color: TwitterTheme.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                                    child: Text("Suggestion: $_predictedText", style: const TextStyle(color: TwitterTheme.blue)),
+                                    child: Text("${t.translate('search_suggestion_prefix')} $_predictedText", style: const TextStyle(color: TwitterTheme.blue)),
                                   ),
                                 )
                             ],
@@ -872,7 +898,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
-// Background Uploader Class (unchanged)
+// Background Uploader Class (Modified to accept localized strings)
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
@@ -894,7 +920,8 @@ class _BackgroundUploader {
     String? communityIcon,
     bool? communityVerified,
     bool isCommunityIdentity = false,
-    String? draftIdToDelete, // Parameter untuk menghapus draft jika sukses
+    String? draftIdToDelete,
+    required Map<String, String> localizedStrings, // NEW PARAMETER
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -905,6 +932,7 @@ class _BackgroundUploader {
         onDismissRequest: () {
           overlayKey.currentState?.dismissToIcon();
         },
+        initialMessage: localizedStrings['uploading'] ?? "Uploading...", // Use localized
       ),
     );
 
@@ -914,13 +942,14 @@ class _BackgroundUploader {
       text, filesToUpload, existingMediaUrls, mediaType, visibility, isEditing, postId,
       uid, userName, userEmail, avatarIconId, avatarHex, profileImageUrl, communityId,
       communityName, communityIcon, communityVerified, isCommunityIdentity, draftIdToDelete,
+      localizedStrings,
       (status) => overlayKey.currentState?.updateStatus(status),
       () {
-        overlayKey.currentState?.handleSuccess();
+        overlayKey.currentState?.handleSuccess(localizedStrings['posted'] ?? "Posted");
         Future.delayed(const Duration(seconds: 7), () { if (overlayEntry.mounted) overlayEntry.remove(); });
       },
       (error) {
-        overlayKey.currentState?.handleFailure(error.toString());
+        overlayKey.currentState?.handleFailure(localizedStrings['failed'] ?? "Failed");
         Future.delayed(const Duration(seconds: 4), () { if (overlayEntry.mounted) overlayEntry.remove(); });
       },
     );
@@ -930,6 +959,7 @@ class _BackgroundUploader {
     String text, List<File> files, List<String> urls, String? type, String vis, bool edit, String? pid,
     String uid, String uName, String uEmail, int icon, String hex, String? img, String? comId,
     String? comName, String? comIcon, bool? comVerified, bool isCommunityIdentity, String? draftId,
+    Map<String, String> locStrings,
     Function(String) onProgress, VoidCallback onSuccess, Function(dynamic) onFailure,
   ) async {
     try {
@@ -937,12 +967,17 @@ class _BackgroundUploader {
       if (files.isNotEmpty) {
         int count = 1;
         for (var file in files) {
-          onProgress("Uploading ${count}/${files.length}...");
+          // Replace placeholders manually if needed or just use "Uploading..."
+          // Ideally: "Uploading 1/3..."
+          // We can use a simple replace if we want better localization support, but for now:
+          String msg = locStrings['uploading'] ?? "Uploading...";
+          onProgress("$msg ($count/${files.length})");
+          
           File fileToUp = file;
           if (type == 'video') {
              try {
-                final MediaInfo? info = await VideoCompress.compressVideo(file.path, quality: VideoQuality.MediumQuality, deleteOrigin: false);
-                if (info != null && info.file != null) fileToUp = info.file!;
+               final MediaInfo? info = await VideoCompress.compressVideo(file.path, quality: VideoQuality.MediumQuality, deleteOrigin: false);
+               if (info != null && info.file != null) fileToUp = info.file!;
              } catch(e) {}
           }
           String? url = await CloudinaryService().uploadMedia(fileToUp);
@@ -951,7 +986,7 @@ class _BackgroundUploader {
         }
       }
 
-      if (finalUrls.isEmpty && text.isEmpty) { onFailure("No content"); return; }
+      if (finalUrls.isEmpty && text.isEmpty) { onFailure(locStrings['no_content'] ?? "No content"); return; }
 
       final Map<String, dynamic> postData = {
         'text': text,
@@ -989,7 +1024,6 @@ class _BackgroundUploader {
 
         await FirebaseFirestore.instance.collection('posts').add(postData);
         
-        // HAPUS DRAFT JIKA SUKSES
         if (draftId != null) {
           await DraftService().discardDraftAfterPosting(draftId);
         }
@@ -1005,7 +1039,8 @@ class _BackgroundUploader {
 
 class _PostUploadOverlay extends StatefulWidget {
   final VoidCallback onDismissRequest;
-  const _PostUploadOverlay({super.key, required this.onDismissRequest});
+  final String initialMessage; // Added
+  const _PostUploadOverlay({super.key, required this.onDismissRequest, required this.initialMessage});
   @override State<_PostUploadOverlay> createState() => _PostUploadOverlayState();
 }
 
@@ -1014,8 +1049,14 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isMiniVisible = false;
   bool _isSuccess = false;
   bool _isError = false;
-  String _message = "Uploading media...";
+  late String _message; 
   Timer? _autoDismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _message = widget.initialMessage;
+  }
 
   double get _targetTop => MediaQuery.of(context).padding.top + 10;
   double get _targetRight => 12.0;
@@ -1036,8 +1077,8 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
     });
   }
 
-  void handleSuccess() { setState(() { _isSuccess = true; _message = "Posted"; }); if (_isMiniVisible) Future.delayed(const Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); }); else if (_isCardVisible) Future.delayed(const Duration(seconds: 5), () { if (mounted) setState(() => _isCardVisible = false); }); }
-  void handleFailure(String error) { setState(() { _isError = true; _message = "Failed"; }); if (!_isCardVisible) setState(() => _isCardVisible = true); }
+  void handleSuccess(String msg) { setState(() { _isSuccess = true; _message = msg; }); if (_isMiniVisible) Future.delayed(const Duration(seconds: 5), () { if (mounted) setState(() => _isMiniVisible = false); }); else if (_isCardVisible) Future.delayed(const Duration(seconds: 5), () { if (mounted) setState(() => _isCardVisible = false); }); }
+  void handleFailure(String msg) { setState(() { _isError = true; _message = msg; }); if (!_isCardVisible) setState(() => _isCardVisible = true); }
 
   @override
   Widget build(BuildContext context) {

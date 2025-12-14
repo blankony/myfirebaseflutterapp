@@ -8,10 +8,11 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/common_error_widget.dart';
 import '../../main.dart';
 import '../dashboard/profile_page.dart';
-import '../community/community_detail_screen.dart'; // NEW
+import '../community/community_detail_screen.dart';
 import '../../services/prediction_service.dart';
 import '../../services/overlay_service.dart';
 import '../../services/voice_service.dart';
+import '../../services/app_localizations.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -51,7 +52,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    // CHANGED length to 3 to include Communities
     _tabController = TabController(length: 3, vsync: this);
     _micAnimController = AnimationController(
       vsync: this,
@@ -231,6 +231,9 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+
     final screenWidth = MediaQuery.of(context).size.width;
     final theme = Theme.of(context);
     
@@ -254,8 +257,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             child: Padding(
               padding: EdgeInsets.only(top: contentTopPadding),
               child: _searchText.isEmpty && !widget.isSearching
-                  ? _buildExplorePage(theme)
-                  : _buildSearchResults(theme),
+                  ? _buildExplorePage(theme, t)
+                  : _buildSearchResults(theme, t),
             ),
           ),
           Positioned(
@@ -287,7 +290,9 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                       autofocus: false, 
                                       readOnly: _isListening, 
                                       decoration: InputDecoration(
-                                        hintText: _isListening ? 'Listening...' : 'Search PNJ...',
+                                        hintText: _isListening 
+                                            ? t.translate('search_listening') // "Listening..."
+                                            : t.translate('search_hint'), // "Search PNJ..."
                                         hintStyle: TextStyle(
                                           color: _isListening ? TwitterTheme.blue : theme.hintColor,
                                           fontStyle: _isListening ? FontStyle.italic : FontStyle.normal,
@@ -350,7 +355,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                               text: TextSpan(
                                                 style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
                                                 children: [
-                                                  TextSpan(text: "Suggestion: "),
+                                                  TextSpan(text: t.translate('search_suggestion_prefix')), // "Suggestion: "
                                                   TextSpan(text: _searchSuggestion, style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)),
                                                 ],
                                               ),
@@ -374,7 +379,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildExplorePage(ThemeData theme) {
+  Widget _buildExplorePage(ThemeData theme, AppLocalizations t) {
     return RefreshIndicator(
       notificationPredicate: (notification) => !_isListening,
       onRefresh: () async {
@@ -395,7 +400,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 children: [
                   Icon(Icons.trending_up, color: TwitterTheme.blue),
                   SizedBox(width: 8),
-                  Text("Trending at PNJ", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                  Text(t.translate('search_trending_title'),
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
                 ],
               ),
             ),
@@ -403,7 +409,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             StreamBuilder<QuerySnapshot>(
               stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Unable to load trends"));
+                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_trends_error')));
                 if (!snapshot.hasData) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
 
                 final allPosts = snapshot.data!.docs.where((doc) {
@@ -416,7 +422,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 if (trends.isEmpty) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Text("No trending topics yet.", style: TextStyle(color: Colors.grey)),
+                    child: Text(t.translate('search_trends_empty'), style: TextStyle(color: Colors.grey)),
                   );
                 }
 
@@ -462,7 +468,10 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                           onTap: () => setState(() => _showAllTrending = !_showAllTrending),
                           child: Row(
                             children: [
-                              Text(_showAllTrending ? "Show less" : "Show more", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
+                              Text(
+                                _showAllTrending ? t.translate('general_show_less') : t.translate('general_show_more'), 
+                                style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)
+                              ),
                               Icon(_showAllTrending ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: TwitterTheme.blue, size: 16)
                             ],
                           ),
@@ -475,14 +484,14 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
 
-            // --- NEW: RECOMMENDED COMMUNITIES SECTION ---
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
                   Icon(Icons.groups_outlined, color: Colors.orange),
                   SizedBox(width: 8),
-                  Text("Communities for You", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                  Text(t.translate('search_communities_title'),
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
                 ],
               ),
             ),
@@ -499,7 +508,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 return StreamBuilder<QuerySnapshot>(
                   stream: _firestore.collection('communities').limit(50).snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Error loading communities"));
+                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_communities_error')));
                     if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
 
                     final allCommunities = snapshot.data!.docs;
@@ -513,7 +522,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     if (recommended.isEmpty) {
                       return Padding(
                         padding: const EdgeInsets.all(16.0),
-                        child: Text("No new communities to recommend right now.", style: TextStyle(color: Colors.grey)),
+                        child: Text(t.translate('search_communities_empty'), style: TextStyle(color: Colors.grey)),
                       );
                     }
 
@@ -552,11 +561,11 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                         radius: 28,
                                         backgroundColor: TwitterTheme.blue.withOpacity(0.1),
                                         backgroundImage: imageUrl != null ? CachedNetworkImageProvider(imageUrl) : null,
-                                        child: imageUrl == null ? Text(name[0].toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
+                                        child: imageUrl == null ? Text(name.isNotEmpty ? name[0].toUpperCase() : 'C', style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)) : null,
                                       ),
                                       SizedBox(height: 8),
                                       Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold)),
-                                      Text("$membersCount members", style: TextStyle(fontSize: 11, color: Colors.grey)),
+                                      Text("$membersCount ${t.translate('general_members')}", style: TextStyle(fontSize: 11, color: Colors.grey)),
                                     ],
                                   ),
                                 ),
@@ -566,7 +575,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                         },
                       ),
                     );
-                  }
+                  },
                 );
               }
             ),
@@ -579,7 +588,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 children: [
                   Icon(Icons.explore_outlined, color: Colors.purple),
                   SizedBox(width: 8),
-                  Text("Discover For You", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                  Text(t.translate('search_discover_title'),
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
                 ],
               ),
             ),
@@ -596,7 +606,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 return StreamBuilder<QuerySnapshot>(
                   stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: "Couldn't load discovery.", isConnectionError: true));
+                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: t.translate('search_discover_error'), isConnectionError: true));
                     if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
                     
                     final publicPosts = snapshot.data!.docs.where((doc) {
@@ -613,7 +623,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     if (discoverDocs.isEmpty) {
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
-                        child: Center(child: Text("No new discoveries. Follow more people to help us learn!")),
+                        child: Center(child: Text(t.translate('search_discover_empty'))),
                       );
                     }
 
@@ -646,7 +656,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 children: [
                   Icon(Icons.person_add_alt_1_outlined, color: Colors.blueAccent),
                   SizedBox(width: 8),
-                  Text("People You Might Know", style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                  Text(t.translate('search_people_title'),
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
                 ],
               ),
             ),
@@ -655,8 +666,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               future: _getSuggestedUsers(_auth.currentUser?.uid),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
-                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text("Couldn't load suggestions (Offline)."));
-                if (!snapshot.hasData || snapshot.data!.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text("No suggestions available right now."));
+                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_people_error')));
+                if (!snapshot.hasData || snapshot.data!.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text(t.translate('search_people_empty')));
                 return Column(
                   children: snapshot.data!.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
@@ -671,7 +682,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildSearchResults(ThemeData theme) {
+  Widget _buildSearchResults(ThemeData theme, AppLocalizations t) {
     return Column(
       children: [
         Container(
@@ -681,21 +692,25 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             labelColor: theme.primaryColor,
             unselectedLabelColor: theme.hintColor,
             indicatorColor: theme.primaryColor,
-            tabs: const [Tab(text: 'Posts'), Tab(text: 'Users'), Tab(text: 'Communities')], // Added Tab
+            // REMOVED 'const'
+            tabs: [
+              Tab(text: t.translate('search_tab_posts')),
+              Tab(text: t.translate('search_tab_users')),
+              Tab(text: t.translate('search_tab_communities')),
+            ], 
           ),
         ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: [_buildPostResults(), _buildUserResults(), _buildCommunityResults()], // Added View
+            children: [_buildPostResults(t), _buildUserResults(t), _buildCommunityResults(t)], 
           ),
         ),
       ],
     );
   }
 
-  // --- EXISTING POST & USER RESULTS METHODS (UNCHANGED) ---
-  Widget _buildPostResults() {
+  Widget _buildPostResults(AppLocalizations t) {
     final currentUserId = _auth.currentUser?.uid;
     return StreamBuilder<DocumentSnapshot>(
       stream: currentUserId != null ? _firestore.collection('users').doc(currentUserId).snapshots() : null,
@@ -708,7 +723,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         return StreamBuilder<QuerySnapshot>(
           stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
           builder: (context, snapshot) {
-            if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
+            if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_failed'), isConnectionError: true);
             if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
             final docs = snapshot.data?.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
@@ -724,7 +739,9 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               }
               return isVisible && text.contains(_searchText);
             }).toList() ?? [];
-            if (docs.isEmpty) return Center(child: Text('No posts found for "$_searchText"'));
+            
+            if (docs.isEmpty) return Center(child: Text('${t.translate('search_no_results')} "$_searchText"'));
+            
             return ListView.builder(
               padding: EdgeInsets.only(bottom: 100),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -740,12 +757,12 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildUserResults() {
+  Widget _buildUserResults(AppLocalizations t) {
     final myUid = _auth.currentUser?.uid;
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('users').limit(100).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return CommonErrorWidget(message: "User search failed.", isConnectionError: true);
+        if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_user_failed'), isConnectionError: true);
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
@@ -753,7 +770,9 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           final email = (data['email'] ?? '').toString().toLowerCase();
           return name.contains(_searchText) || email.contains(_searchText);
         }).toList() ?? [];
-        if (docs.isEmpty) return Center(child: Text('No users found for "$_searchText"'));
+        
+        if (docs.isEmpty) return Center(child: Text('${t.translate('search_no_results')} "$_searchText"'));
+        
         return ListView.builder(
           padding: EdgeInsets.only(bottom: 100),
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -769,12 +788,11 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
-  // --- NEW: COMMUNITY RESULTS ---
-  Widget _buildCommunityResults() {
+  Widget _buildCommunityResults(AppLocalizations t) {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('communities').snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return CommonErrorWidget(message: "Search failed.", isConnectionError: true);
+        if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_failed'), isConnectionError: true);
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
 
         final docs = snapshot.data?.docs.where((doc) {
@@ -784,7 +802,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           return name.contains(_searchText) || desc.contains(_searchText);
         }).toList() ?? [];
 
-        if (docs.isEmpty) return Center(child: Text('No communities found for "$_searchText"'));
+        if (docs.isEmpty) return Center(child: Text('${t.translate('search_no_results')} "$_searchText"'));
 
         return ListView.builder(
           padding: EdgeInsets.only(bottom: 100),
@@ -804,7 +822,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 child: imageUrl == null ? Icon(Icons.groups, color: TwitterTheme.blue) : null,
               ),
               title: Text(name, style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text("$memberCount members"),
+              subtitle: Text("$memberCount ${t.translate('general_members')}"),
               trailing: Icon(Icons.arrow_forward_ios, size: 14),
               onTap: () {
                 Navigator.push(context, MaterialPageRoute(
@@ -829,18 +847,25 @@ class _UserSearchTile extends StatefulWidget {
 
 class _UserSearchTileState extends State<_UserSearchTile> {
   bool _isFollowing = false;
+  
   @override void initState() { super.initState(); _checkFollowStatus(); }
+  
   @override void didUpdateWidget(covariant _UserSearchTile oldWidget) { super.didUpdateWidget(oldWidget); if (widget.userData != oldWidget.userData) _checkFollowStatus(); }
+  
   void _checkFollowStatus() {
     if (widget.currentUserId == null) return;
     final followers = List<dynamic>.from(widget.userData['followers'] ?? []);
     setState(() { _isFollowing = followers.contains(widget.currentUserId); });
   }
+  
   Future<void> _toggleFollow() async {
     if (widget.currentUserId == null) return;
     final myDocRef = _firestore.collection('users').doc(widget.currentUserId);
     final targetDocRef = _firestore.collection('users').doc(widget.userId);
     final batch = _firestore.batch();
+    
+    // NOTE: Localized strings for "Following" and "Follow" button text are handled in build
+    
     if (_isFollowing) {
       batch.update(myDocRef, {'following': FieldValue.arrayRemove([widget.userId])});
       batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([widget.currentUserId])});
@@ -855,7 +880,11 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     }
     try { await batch.commit(); } catch (e) { _checkFollowStatus(); if (mounted) OverlayService().showTopNotification(context, "Action failed: $e", Icons.error, (){}, color: Colors.red); }
   }
+  
   @override Widget build(BuildContext context) {
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
+    
     final theme = Theme.of(context);
     final name = widget.userData['name'] ?? 'User';
     final email = widget.userData['email'] ?? '';
@@ -881,8 +910,16 @@ class _UserSearchTileState extends State<_UserSearchTile> {
             ])),
             SizedBox(width: 8),
             _isFollowing
-              ? OutlinedButton(onPressed: _toggleFollow, style: OutlinedButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 16), side: BorderSide(color: theme.dividerColor), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), child: Text("Following", style: TextStyle(color: theme.textTheme.bodyMedium?.color)))
-              : ElevatedButton(onPressed: _toggleFollow, style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white, elevation: 0, padding: EdgeInsets.symmetric(horizontal: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), child: Text("Follow"))
+              ? OutlinedButton(
+                  onPressed: _toggleFollow, 
+                  style: OutlinedButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 16), side: BorderSide(color: theme.dividerColor), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), 
+                  child: Text(t.translate('community_following'), style: TextStyle(color: theme.textTheme.bodyMedium?.color)) // "Following"
+                )
+              : ElevatedButton(
+                  onPressed: _toggleFollow, 
+                  style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white, elevation: 0, padding: EdgeInsets.symmetric(horizontal: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), 
+                  child: Text(t.translate('community_follow')) // "Follow"
+                )
           ],
         ),
       ),

@@ -1,5 +1,5 @@
 // ignore_for_file: prefer_const_constructors
-import 'dart:ui'; // REQUIRED FOR BLUR
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +7,7 @@ import '../../widgets/blog_post_card.dart';
 import '../../widgets/common_error_widget.dart';
 import '../../main.dart';
 import '../../services/prediction_service.dart';
+import '../../services/app_localizations.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -27,7 +28,6 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   late TabController _tabController;
-  // Kita butuh controller lokal untuk NestedScrollView
   final ScrollController _localScrollController = ScrollController(); 
   bool _isScrolled = false;
 
@@ -36,7 +36,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     
-    // Listener untuk efek blur saat scroll
     _localScrollController.addListener(() {
       if (_localScrollController.hasClients) {
         bool scrolled = _localScrollController.offset > 0;
@@ -61,41 +60,39 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
   Widget build(BuildContext context) {
     super.build(context);
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    var t = AppLocalizations.of(context)!;
 
     return NestedScrollView(
       controller: _localScrollController,
       headerSliverBuilder: (context, innerBoxIsScrolled) {
         return [
-          // --- 1. SLIVER APP BAR (UNTUK EFEK BLUR & RESIZE) ---
           SliverAppBar(
             pinned: true,
             floating: true,
             snap: true,
             elevation: 0,
-            backgroundColor: Colors.transparent, // Transparan agar blur terlihat
-            automaticallyImplyLeading: false, // Hilangkan back button default (karena ini tab)
-            toolbarHeight: 0, // Sembunyikan toolbar (karena App Bar utama ada di HomeDashboard)
+            backgroundColor: Colors.transparent, 
+            automaticallyImplyLeading: false, 
+            toolbarHeight: 0,
             collapsedHeight: 0,
-            expandedHeight: 0, // Kita buat 0 karena App Bar dihandle Dashboard, kita hanya butuh TabBar yang Sticky
+            expandedHeight: 0,
             
-            // --- TAB BAR YANG STICKY & BLURRY ---
             bottom: PreferredSize(
               preferredSize: Size.fromHeight(48),
-              child: ClipRRect( // Clip agar blur tidak bocor
+              child: ClipRRect( 
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0), // EFEK BLUR
+                  filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
                   child: Container(
-                    color: theme.scaffoldBackgroundColor.withOpacity(0.85), // Semi-transparan
+                    color: theme.scaffoldBackgroundColor.withOpacity(0.85),
                     child: TabBar(
                       controller: _tabController,
                       labelColor: TwitterTheme.blue,
                       unselectedLabelColor: theme.hintColor,
                       indicatorColor: TwitterTheme.blue,
                       indicatorSize: TabBarIndicatorSize.label,
-                      tabs: const [
-                        Tab(text: 'Recent'),
-                        Tab(text: 'Recommended'),
+                      tabs: [
+                        Tab(text: t.translate('home_recent')),
+                        Tab(text: t.translate('home_recommended')),
                       ],
                     ),
                   ),
@@ -111,7 +108,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin,
           _PostFeedList(
             scrollController: widget.scrollController,
             feedType: 'recent',
-            refreshOffset: 60, // Tambah offset agar loading spinner tidak ketutup tab bar
+            refreshOffset: 60, 
           ),
           _PostFeedList(
             scrollController: widget.recommendedScrollController,
@@ -162,6 +159,9 @@ class _PostFeedListState extends State<_PostFeedList> with AutomaticKeepAliveCli
     super.build(context);
     final user = _auth.currentUser;
     final bool isRec = widget.feedType == 'recommended';
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
     return StreamBuilder<DocumentSnapshot>(
       stream: user != null ? _firestore.collection('users').doc(user.uid).snapshots() : null,
@@ -175,11 +175,10 @@ class _PostFeedListState extends State<_PostFeedList> with AutomaticKeepAliveCli
           stream: _stream,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              // Shimmer loading placeholder bisa ditaruh di sini
               return Center(child: CircularProgressIndicator()); 
             }
             
-            if (snapshot.hasError) return CommonErrorWidget(message: "Error loading posts");
+            if (snapshot.hasError) return CommonErrorWidget(message: t.translate('home_error_loading'));
 
             final allDocs = snapshot.data?.docs ?? [];
             
@@ -207,7 +206,7 @@ class _PostFeedListState extends State<_PostFeedList> with AutomaticKeepAliveCli
                    children: [
                      Icon(Icons.feed_outlined, size: 64, color: Colors.grey.withOpacity(0.5)),
                      SizedBox(height: 16),
-                     Text("No posts to show", style: TextStyle(color: Colors.grey)),
+                     Text(t.translate('home_no_posts'), style: TextStyle(color: Colors.grey)),
                    ],
                  ),
                );
@@ -215,7 +214,7 @@ class _PostFeedListState extends State<_PostFeedList> with AutomaticKeepAliveCli
 
             return RefreshIndicator(
               onRefresh: _refresh,
-              edgeOffset: widget.refreshOffset, // Offset agar spinner di bawah tab bar
+              edgeOffset: widget.refreshOffset,
               child: ListView.builder(
                 key: PageStorageKey('${widget.feedType}_$_refreshKey'),
                 controller: widget.scrollController,
