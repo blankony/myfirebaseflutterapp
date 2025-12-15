@@ -47,7 +47,20 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   String? _searchSuggestion;
   Timer? _debounce;
   
+  // State untuk Toggle Show More
   bool _showAllTrending = false;
+  bool _showAllDiscover = false; // Add this
+
+  // Optimasi: Cache User Data
+  List<String> _blockedUserIds = [];
+  List<String> _followingIds = [];
+  bool _userDataLoaded = false;
+  
+  // Optimasi: Cache Future
+  Future<List<Map<String, dynamic>>>? _trendingFuture;
+  Future<List<DocumentSnapshot>>? _discoverFuture;
+  Future<List<DocumentSnapshot>>? _communityRecFuture;
+  Future<List<DocumentSnapshot>>? _peopleRecFuture;
 
   @override
   void initState() {
@@ -61,6 +74,96 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
     
     voiceService.initialize();
+    _fetchUserDataAndInitFutures();
+  }
+
+  Future<void> _fetchUserDataAndInitFutures() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        final userDoc = await _firestore.collection('users').doc(user.uid).get();
+        if (userDoc.exists) {
+            final data = userDoc.data()!;
+            _followingIds = List<String>.from(data['following'] ?? []);
+            
+            final blockDoc = await _firestore.collection('users').doc(user.uid).collection('moderation').doc('blocked').get();
+            if (blockDoc.exists) {
+                _blockedUserIds = List<String>.from(blockDoc.data()?['ids'] ?? []);
+            }
+        }
+      } catch (e) {
+        debugPrint("Error fetching user cache: $e");
+      }
+    }
+    
+    if (mounted) {
+      setState(() {
+        _userDataLoaded = true;
+        _refreshContent();
+      });
+    }
+  }
+
+  void _refreshContent() {
+    setState(() {
+       _trendingFuture = _fetchTrendingTopics();
+       _discoverFuture = _fetchDiscoverContent();
+       _communityRecFuture = _fetchCommunityRecs();
+       _peopleRecFuture = _getSuggestedUsers(_auth.currentUser?.uid);
+    });
+  }
+
+  // --- OPTIMIZED FETCHERS ---
+
+  Future<List<Map<String, dynamic>>> _fetchTrendingTopics() async {
+     try {
+       final snapshot = await _firestore.collection('posts')
+           .orderBy('timestamp', descending: true)
+           .limit(50) 
+           .get();
+           
+       final allPosts = snapshot.docs.where((doc) {
+          final data = doc.data();
+          return (data['visibility'] ?? 'public') == 'public';
+       }).toList();
+       
+       return _predictionService.analyzeTrendingTopics(allPosts);
+     } catch (e) {
+       return [];
+     }
+  }
+  
+  Future<List<DocumentSnapshot>> _fetchDiscoverContent() async {
+     try {
+       // Fetch sedikit lebih banyak untuk cadangan rekomendasi
+       final snapshot = await _firestore.collection('posts')
+           .orderBy('timestamp', descending: true)
+           .limit(40) 
+           .get();
+           
+        final publicPosts = snapshot.docs.where((doc) {
+          final data = doc.data();
+          return (data['visibility'] ?? 'public') == 'public' && 
+                 !_blockedUserIds.contains(data['userId']);
+        }).toList();
+
+        return _predictionService.getDiscoverRecommendations(
+           publicPosts, _auth.currentUser?.uid ?? '', _followingIds
+        );
+     } catch (e) {
+       return [];
+     }
+  }
+
+  Future<List<DocumentSnapshot>> _fetchCommunityRecs() async {
+    try {
+      final snapshot = await _firestore.collection('communities').limit(20).get();
+      return _predictionService.getRecommendedCommunities(
+        snapshot.docs, _auth.currentUser?.uid ?? '', _followingIds
+      );
+    } catch(e) {
+      return [];
+    }
   }
 
   @override
@@ -147,15 +250,18 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   void _onSearchChanged(String value) {
-    setState(() {
-      _searchText = value.toLowerCase().trim();
-      _searchSuggestion = null;
-    });
-
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    _debounce = Timer(const Duration(milliseconds: 300), () async { 
+    _debounce = Timer(const Duration(milliseconds: 400), () async { 
+      if (!mounted) return;
+      
+      setState(() {
+        _searchText = value.toLowerCase().trim();
+        _searchSuggestion = null;
+      });
+      
       if (value.trim().isEmpty) return;
+      
       final suggestion = await _predictionService.getLocalPrediction(value);
       if (mounted && suggestion != null && suggestion.toLowerCase() != _searchText) {
         setState(() { _searchSuggestion = suggestion; });
@@ -194,26 +300,23 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   Future<List<DocumentSnapshot>> _getSuggestedUsers(String? currentUserId) async {
     if (currentUserId == null) return [];
     try {
-      final currentUserDoc = await _firestore.collection('users').doc(currentUserId).get();
-      if (!currentUserDoc.exists) return [];
-      final currentUserData = currentUserDoc.data() as Map<String, dynamic>;
-      final List<dynamic> following = currentUserData['following'] ?? [];
-
       Set<String> suggestedUserIds = {};
+      final List<String> following = _followingIds;
+
       if (following.isNotEmpty) {
-        for (String followedUserId in following) {
-          final followedUserDoc = await _firestore.collection('users').doc(followedUserId).get();
+        final firstFollowId = following.first;
+         final followedUserDoc = await _firestore.collection('users').doc(firstFollowId).get();
           if (followedUserDoc.exists) {
             final followedUserData = followedUserDoc.data() as Map<String, dynamic>;
             final List<dynamic> theirFollowing = followedUserData['following'] ?? [];
-            for (String potentialFriend in theirFollowing) {
-              if (potentialFriend != currentUserId && !following.contains(potentialFriend)) {
-                suggestedUserIds.add(potentialFriend);
-              }
+            for (var potential in theirFollowing) {
+               if (potential != currentUserId && !following.contains(potential)) {
+                 suggestedUserIds.add(potential.toString());
+               }
             }
           }
-        }
       }
+      
       if (suggestedUserIds.isNotEmpty) {
         List<DocumentSnapshot> suggestions = [];
         for (String userId in suggestedUserIds.take(5)) {
@@ -222,7 +325,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         }
         return suggestions;
       }
-      final allUsersSnapshot = await _firestore.collection('users').limit(20).get();
+      
+      final allUsersSnapshot = await _firestore.collection('users').limit(10).get();
       final randomUsers = allUsersSnapshot.docs.where((doc) => doc.id != currentUserId && !following.contains(doc.id)).toList();
       randomUsers.shuffle();
       return randomUsers.take(5).toList();
@@ -231,9 +335,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    // LOCALIZATION
     var t = AppLocalizations.of(context)!;
-
     final screenWidth = MediaQuery.of(context).size.width;
     final theme = Theme.of(context);
     
@@ -291,8 +393,8 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                       readOnly: _isListening, 
                                       decoration: InputDecoration(
                                         hintText: _isListening 
-                                            ? t.translate('search_listening') // "Listening..."
-                                            : t.translate('search_hint'), // "Search PNJ..."
+                                            ? t.translate('search_listening') 
+                                            : t.translate('search_hint'), 
                                         hintStyle: TextStyle(
                                           color: _isListening ? TwitterTheme.blue : theme.hintColor,
                                           fontStyle: _isListening ? FontStyle.italic : FontStyle.normal,
@@ -355,7 +457,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                               text: TextSpan(
                                                 style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 13),
                                                 children: [
-                                                  TextSpan(text: t.translate('search_suggestion_prefix')), // "Suggestion: "
+                                                  TextSpan(text: t.translate('search_suggestion_prefix')), 
                                                   TextSpan(text: _searchSuggestion, style: TextStyle(fontWeight: FontWeight.bold, color: TwitterTheme.blue)),
                                                 ],
                                               ),
@@ -380,10 +482,12 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   Widget _buildExplorePage(ThemeData theme, AppLocalizations t) {
+    if (!_userDataLoaded) return Center(child: CircularProgressIndicator());
+
     return RefreshIndicator(
       notificationPredicate: (notification) => !_isListening,
       onRefresh: () async {
-        setState(() {}); 
+        _refreshContent();
         await Future.delayed(Duration(seconds: 1));
       },
       child: SingleChildScrollView(
@@ -406,18 +510,13 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               ),
             ),
             
-            StreamBuilder<QuerySnapshot>(
-              stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: _trendingFuture,
               builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
                 if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_trends_error')));
-                if (!snapshot.hasData) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
 
-                final allPosts = snapshot.data!.docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  return (data['visibility'] ?? 'public') == 'public';
-                }).toList();
-
-                final trends = _predictionService.analyzeTrendingTopics(allPosts);
+                final trends = snapshot.data ?? [];
 
                 if (trends.isEmpty) {
                   return Padding(
@@ -496,37 +595,22 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               ),
             ),
 
-            StreamBuilder<DocumentSnapshot>(
-              stream: _auth.currentUser != null ? _firestore.collection('users').doc(_auth.currentUser!.uid).snapshots() : null,
-              builder: (context, userSnapshot) {
-                List<dynamic> followingList = [];
-                if (userSnapshot.hasData && userSnapshot.data!.exists) {
-                  final uData = userSnapshot.data!.data() as Map<String, dynamic>;
-                  followingList = uData['following'] ?? [];
-                }
+            FutureBuilder<List<DocumentSnapshot>>(
+              future: _communityRecFuture,
+              builder: (context, snapshot) {
+                 if (snapshot.connectionState == ConnectionState.waiting) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
+                 if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_communities_error')));
+                 
+                 final recommended = snapshot.data ?? [];
 
-                return StreamBuilder<QuerySnapshot>(
-                  stream: _firestore.collection('communities').limit(50).snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_communities_error')));
-                    if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-
-                    final allCommunities = snapshot.data!.docs;
-                    
-                    final recommended = _predictionService.getRecommendedCommunities(
-                      allCommunities, 
-                      _auth.currentUser?.uid ?? '', 
-                      followingList
+                 if (recommended.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(t.translate('search_communities_empty'), style: TextStyle(color: Colors.grey)),
                     );
+                 }
 
-                    if (recommended.isEmpty) {
-                      return Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(t.translate('search_communities_empty'), style: TextStyle(color: Colors.grey)),
-                      );
-                    }
-
-                    return SizedBox(
+                 return SizedBox(
                       height: 160,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
@@ -575,9 +659,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                         },
                       ),
                     );
-                  },
-                );
-              }
+              },
             ),
 
             Divider(thickness: 8, color: theme.dividerColor.withOpacity(0.1)),
@@ -594,56 +676,60 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               ),
             ),
 
-            StreamBuilder<DocumentSnapshot>(
-              stream: _auth.currentUser != null ? _firestore.collection('users').doc(_auth.currentUser!.uid).snapshots() : null,
-              builder: (context, userSnapshot) {
-                List<dynamic> followingList = [];
-                if (userSnapshot.hasData && userSnapshot.data!.exists) {
-                  final uData = userSnapshot.data!.data() as Map<String, dynamic>;
-                  followingList = uData['following'] ?? [];
+            FutureBuilder<List<DocumentSnapshot>>(
+              future: _discoverFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) return SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
+                if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: t.translate('search_discover_error'), isConnectionError: true));
+                
+                final allPosts = snapshot.data ?? [];
+
+                if (allPosts.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
+                    child: Center(child: Text(t.translate('search_discover_empty'))),
+                  );
                 }
 
-                return StreamBuilder<QuerySnapshot>(
-                  stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: CommonErrorWidget(message: t.translate('search_discover_error'), isConnectionError: true));
-                    if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
-                    
-                    final publicPosts = snapshot.data!.docs.where((doc) {
+                // --- LOGIKA TAMPILKAN 5 POST + SHOW MORE ---
+                final int initialCount = 5;
+                final bool showAll = _showAllDiscover;
+                final int totalCount = allPosts.length;
+                
+                final int visibleCount = showAll ? totalCount : (totalCount > initialCount ? initialCount : totalCount);
+                final displayedPosts = allPosts.take(visibleCount).toList();
+                final bool canExpand = totalCount > initialCount;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ...displayedPosts.map((doc) {
                       final data = doc.data() as Map<String, dynamic>;
-                      return (data['visibility'] ?? 'public') == 'public';
-                    }).toList();
-
-                    final discoverDocs = _predictionService.getDiscoverRecommendations(
-                      publicPosts, 
-                      _auth.currentUser?.uid ?? '',
-                      followingList,
-                    );
-
-                    if (discoverDocs.isEmpty) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 32.0),
-                        child: Center(child: Text(t.translate('search_discover_empty'))),
+                      return BlogPostCard(
+                        postId: doc.id,
+                        postData: data,
+                        isOwner: false,
+                        heroContextId: 'discover',
+                        blockedUserIds: _blockedUserIds, 
                       );
-                    }
+                    }).toList(),
 
-                    final displayedPosts = discoverDocs.take(10).toList();
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ...displayedPosts.map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          return BlogPostCard(
-                            postId: doc.id,
-                            postData: data,
-                            isOwner: false,
-                            heroContextId: 'discover',
-                          );
-                        }).toList(),
-                      ],
-                    );
-                  },
+                    if (canExpand)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Center(
+                          child: TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _showAllDiscover = !_showAllDiscover;
+                              });
+                            },
+                            icon: Icon(_showAllDiscover ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                            label: Text(_showAllDiscover ? t.translate('general_show_less') : t.translate('general_show_more')),
+                          ),
+                        ),
+                      ),
+                  ],
                 );
               }
             ),
@@ -663,7 +749,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
 
             FutureBuilder<List<DocumentSnapshot>>(
-              future: _getSuggestedUsers(_auth.currentUser?.uid),
+              future: _peopleRecFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
                 if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_people_error')));
@@ -692,7 +778,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             labelColor: theme.primaryColor,
             unselectedLabelColor: theme.hintColor,
             indicatorColor: theme.primaryColor,
-            // REMOVED 'const'
             tabs: [
               Tab(text: t.translate('search_tab_posts')),
               Tab(text: t.translate('search_tab_users')),
@@ -712,58 +797,61 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   Widget _buildPostResults(AppLocalizations t) {
     final currentUserId = _auth.currentUser?.uid;
-    return StreamBuilder<DocumentSnapshot>(
-      stream: currentUserId != null ? _firestore.collection('users').doc(currentUserId).snapshots() : null,
-      builder: (context, userSnapshot) {
-        List<dynamic> followingList = [];
-        if (userSnapshot.hasData && userSnapshot.data!.exists) {
-          final uData = userSnapshot.data!.data() as Map<String, dynamic>;
-          followingList = uData['following'] ?? [];
-        }
-        return StreamBuilder<QuerySnapshot>(
-          stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(100).snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_failed'), isConnectionError: true);
-            if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
-            final docs = snapshot.data?.docs.where((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              final text = (data['text'] ?? '').toString().toLowerCase();
-              final visibility = data['visibility'] ?? 'public';
-              final ownerId = data['userId'];
-              bool isVisible = false;
-              if (visibility == 'public') isVisible = true;
-              else if (visibility == 'followers') {
-                if (ownerId == currentUserId || followingList.contains(ownerId)) isVisible = true;
-              } else if (visibility == 'private') {
-                if (ownerId == currentUserId) isVisible = true;
-              }
-              return isVisible && text.contains(_searchText);
-            }).toList() ?? [];
-            
-            if (docs.isEmpty) return Center(child: Text('${t.translate('search_no_results')} "$_searchText"'));
-            
-            return ListView.builder(
-              padding: EdgeInsets.only(bottom: 100),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              itemCount: docs.length,
-              itemBuilder: (context, index) {
-                final data = docs[index].data() as Map<String, dynamic>;
-                return BlogPostCard(postId: docs[index].id, postData: data, isOwner: data['userId'] == currentUserId, heroContextId: 'search_results');
-              },
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore.collection('posts').orderBy('timestamp', descending: true).limit(50).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_failed'), isConnectionError: true);
+        if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
+        
+        if (_searchText.isEmpty) return SizedBox();
+
+        final docs = snapshot.data?.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final text = (data['text'] ?? '').toString().toLowerCase();
+          final visibility = data['visibility'] ?? 'public';
+          final ownerId = data['userId'];
+          
+          if (_blockedUserIds.contains(ownerId)) return false;
+
+          bool isVisible = false;
+          if (visibility == 'public') isVisible = true;
+          else if (visibility == 'followers') {
+            if (ownerId == currentUserId || _followingIds.contains(ownerId)) isVisible = true;
+          } else if (visibility == 'private') {
+            if (ownerId == currentUserId) isVisible = true;
+          }
+          return isVisible && text.contains(_searchText);
+        }).toList() ?? [];
+        
+        if (docs.isEmpty) return Center(child: Text('${t.translate('search_no_results')} "$_searchText"'));
+        
+        return ListView.builder(
+          padding: EdgeInsets.only(bottom: 100),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            return BlogPostCard(
+                postId: docs[index].id, 
+                postData: data, 
+                isOwner: data['userId'] == currentUserId, 
+                heroContextId: 'search_results',
+                blockedUserIds: _blockedUserIds
             );
           },
         );
-      }
+      },
     );
   }
 
   Widget _buildUserResults(AppLocalizations t) {
     final myUid = _auth.currentUser?.uid;
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection('users').limit(100).snapshots(),
+      stream: _firestore.collection('users').limit(50).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_user_failed'), isConnectionError: true);
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
+        
         final docs = snapshot.data?.docs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final name = (data['name'] ?? '').toString().toLowerCase();
@@ -790,7 +878,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   Widget _buildCommunityResults(AppLocalizations t) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection('communities').snapshots(),
+      stream: _firestore.collection('communities').limit(50).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return CommonErrorWidget(message: t.translate('search_failed'), isConnectionError: true);
         if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
@@ -864,8 +952,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
     final targetDocRef = _firestore.collection('users').doc(widget.userId);
     final batch = _firestore.batch();
     
-    // NOTE: Localized strings for "Following" and "Follow" button text are handled in build
-    
     if (_isFollowing) {
       batch.update(myDocRef, {'following': FieldValue.arrayRemove([widget.userId])});
       batch.update(targetDocRef, {'followers': FieldValue.arrayRemove([widget.currentUserId])});
@@ -882,7 +968,6 @@ class _UserSearchTileState extends State<_UserSearchTile> {
   }
   
   @override Widget build(BuildContext context) {
-    // LOCALIZATION
     var t = AppLocalizations.of(context)!;
     
     final theme = Theme.of(context);
@@ -901,7 +986,12 @@ class _UserSearchTileState extends State<_UserSearchTile> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CircleAvatar(radius: 24, backgroundColor: profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(colorHex), backgroundImage: profileImageUrl != null ? CachedNetworkImageProvider(profileImageUrl) : null, child: profileImageUrl == null ? Icon(AvatarHelper.getIcon(iconId), size: 24, color: Colors.white) : null),
+            CircleAvatar(
+                radius: 24, 
+                backgroundColor: profileImageUrl != null ? Colors.transparent : AvatarHelper.getColor(colorHex), 
+                backgroundImage: profileImageUrl != null ? CachedNetworkImageProvider(profileImageUrl) : null, 
+                child: profileImageUrl == null ? Icon(AvatarHelper.getIcon(iconId), size: 24, color: Colors.white) : null
+            ),
             SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
@@ -913,12 +1003,12 @@ class _UserSearchTileState extends State<_UserSearchTile> {
               ? OutlinedButton(
                   onPressed: _toggleFollow, 
                   style: OutlinedButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 16), side: BorderSide(color: theme.dividerColor), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), 
-                  child: Text(t.translate('community_following'), style: TextStyle(color: theme.textTheme.bodyMedium?.color)) // "Following"
+                  child: Text(t.translate('community_following'), style: TextStyle(color: theme.textTheme.bodyMedium?.color)) 
                 )
               : ElevatedButton(
                   onPressed: _toggleFollow, 
                   style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white, elevation: 0, padding: EdgeInsets.symmetric(horizontal: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), 
-                  child: Text(t.translate('community_follow')) // "Follow"
+                  child: Text(t.translate('community_follow')) 
                 )
           ],
         ),

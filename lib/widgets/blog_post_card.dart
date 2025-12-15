@@ -36,6 +36,10 @@ class BlogPostCard extends StatefulWidget {
   final Function(String, bool)? onPinToggle;
   final String? currentProfileUserId;
 
+  // [OPTIMASI 1 & 2] Parameter baru untuk menghindari fetch database berulang
+  final bool isCommunityAdmin;
+  final List<String> blockedUserIds;
+
   const BlogPostCard({
     super.key,
     required this.postId,
@@ -48,6 +52,10 @@ class BlogPostCard extends StatefulWidget {
     this.isPinned = false,
     this.onPinToggle,
     this.currentProfileUserId,
+    // Default value diberikan agar tidak error saat compile, 
+    // tapi WAJIB diisi dari parent untuk performa maksimal
+    this.isCommunityAdmin = false, 
+    this.blockedUserIds = const [], 
   });
 
   @override
@@ -73,17 +81,25 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   VideoPlayerController? _videoController;
   bool _isVideoOwner = false;
-
-  StreamSubscription? _communityRoleSubscription;
-  bool _isCommunityAdmin = false;
+  // [OPTIMASI 3] Flag untuk Lazy Loading Video
+  bool _isVideoInitialized = false; 
+  bool _isVideoLoading = false;
 
   @override
   void initState() {
     super.initState();
     _localIsPinned = widget.isPinned;
     _syncState();
-    _initVideoController();
-    _checkCommunityPermissions();
+    
+    // [OPTIMASI 3] Jangan init video otomatis. Hanya setup jika preloaded.
+    if (widget.preloadedController != null) {
+      _videoController = widget.preloadedController;
+      _isVideoInitialized = true;
+      _isVideoOwner = false;
+    } 
+    // Jika tidak preloaded, kita tunggu user tap (Lazy Load)
+
+    // [OPTIMASI 1] Hapus _checkCommunityPermissions() karena data sudah dipass via constructor
 
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
@@ -95,51 +111,36 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
   }
 
-  void _checkCommunityPermissions() {
-    final user = _auth.currentUser;
-    final String? communityId = widget.postData['communityId'];
+  // [OPTIMASI 3] Method manual untuk init video saat dibutuhkan
+  Future<void> _initializeVideo() async {
+    if (_isVideoInitialized || _videoController != null || _isVideoLoading) return;
 
-    if (user != null && communityId != null) {
-      _communityRoleSubscription = _firestore.collection('communities').doc(communityId).snapshots().listen((snapshot) {
-        if (mounted && snapshot.exists) {
-          final data = snapshot.data();
-          if (data != null) {
-            final String ownerId = data['ownerId'];
-            final List admins = data['admins'] ?? [];
-            final bool isAdmin = (user.uid == ownerId) || admins.contains(user.uid);
-
-            if (_isCommunityAdmin != isAdmin) {
-              setState(() => _isCommunityAdmin = isAdmin);
-            }
-          }
-        }
-      });
-    }
-  }
-
-  void _initVideoController() {
     final String? singleUrl = widget.postData['mediaUrl'];
     final List<dynamic> urls = widget.postData['mediaUrls'] ?? [];
-    final String? mediaType = widget.postData['mediaType'];
-
     final String? videoUrl = (urls.isNotEmpty) ? urls.first : singleUrl;
 
-    if (mediaType == 'video' && videoUrl != null) {
-      if (widget.preloadedController != null) {
-        _videoController = widget.preloadedController;
-        _isVideoOwner = false;
-      } else {
-        _videoController = VideoPlayerController.networkUrl(Uri.parse(videoUrl))
-          ..initialize().then((_) {
-            final duration = _videoController!.value.duration;
-            final targetPosition = duration.inSeconds > 10 ? Duration(seconds: 10) : duration;
-            _videoController!.seekTo(targetPosition).then((_) {
-              if (mounted) setState(() {});
-            });
-            _videoController!.setVolume(0);
-            _videoController!.pause();
+    if (videoUrl != null) {
+      setState(() => _isVideoLoading = true);
+      
+      try {
+        final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+        await controller.initialize();
+        controller.setLooping(true); // Optional: looping
+        
+        if (mounted) {
+          setState(() {
+            _videoController = controller;
+            _isVideoInitialized = true;
+            _isVideoOwner = true;
+            _isVideoLoading = false;
           });
-        _isVideoOwner = true;
+          _videoController!.play();
+        } else {
+          controller.dispose();
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isVideoLoading = false);
+        debugPrint("Error initializing video: $e");
       }
     }
   }
@@ -150,16 +151,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     if (oldWidget.postData != widget.postData) {
       _syncState();
       
-      if (oldWidget.postData['communityId'] != widget.postData['communityId']) {
-        _communityRoleSubscription?.cancel();
-        _checkCommunityPermissions();
-      }
-
+      // Reset video jika URL berubah
       if (oldWidget.postData['mediaUrl'] != widget.postData['mediaUrl']) {
         if (_isVideoOwner) {
           _videoController?.dispose();
+          _videoController = null;
+          _isVideoInitialized = false;
         }
-        _initVideoController();
+        // Jangan auto-init, tunggu tap lagi
       }
     }
     if (oldWidget.isPinned != widget.isPinned) {
@@ -186,7 +185,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   @override
   void dispose() {
-    _communityRoleSubscription?.cancel();
+    // Tidak perlu cancel subscription community karena sudah dihapus
     _likeController.dispose();
     _shareController.dispose();
     _repostController.dispose();
@@ -314,7 +313,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
     if (currentVis == 'private') {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
-      final bool isPrivateAccount = userDoc.exists && (userDoc.data()?['isPrivate'] ?? false);
+      final bool isPrivateAccount = userDoc.data()?['isPrivate'] ?? false;
       newVis = isPrivateAccount ? 'followers' : 'public';
     } else {
       newVis = 'private';
@@ -632,132 +631,166 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.build(context);
     final theme = Theme.of(context);
 
-    return StreamBuilder<List<String>>(
-        stream: moderationService.streamBlockedUsers(),
-        builder: (context, snapshot) {
-          final blockedUsers = snapshot.data ?? [];
-          if (blockedUsers.contains(widget.postData['userId'])) {
-            return const SizedBox.shrink();
-          }
+    // [OPTIMASI 2] Cek blocked user secara langsung dari parameter, BUKAN STREAM
+    if (widget.blockedUserIds.contains(widget.postData['userId'])) {
+      return const SizedBox.shrink();
+    }
 
-          final text = widget.postData['text'] ?? '';
-          final mediaType = widget.postData['mediaType'];
-          final isUploading = widget.postData['isUploading'] == true;
-          final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
-          final uploadFailed = widget.postData['uploadFailed'] == true;
-          final int commentCount = widget.postData['commentCount'] ?? 0;
+    final text = widget.postData['text'] ?? '';
+    final mediaType = widget.postData['mediaType'];
+    final isUploading = widget.postData['isUploading'] == true;
+    final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
+    final uploadFailed = widget.postData['uploadFailed'] == true;
+    final int commentCount = widget.postData['commentCount'] ?? 0;
 
-          List<String> mediaUrls = [];
-          if (widget.postData['mediaUrls'] != null) {
-            mediaUrls = List<String>.from(widget.postData['mediaUrls']);
-          } else if (widget.postData['mediaUrl'] != null) {
-            mediaUrls = [widget.postData['mediaUrl']];
-          }
+    List<String> mediaUrls = [];
+    if (widget.postData['mediaUrls'] != null) {
+      mediaUrls = List<String>.from(widget.postData['mediaUrls']);
+    } else if (widget.postData['mediaUrl'] != null) {
+      mediaUrls = [widget.postData['mediaUrl']];
+    }
 
-          if (uploadFailed) {
-            return Container(
-              padding: const EdgeInsets.all(12.0),
-              color: Colors.red.withOpacity(0.1),
-              child: Text("Post upload failed: $text", style: const TextStyle(color: Colors.red)),
-            );
-          }
+    if (uploadFailed) {
+      return Container(
+        padding: const EdgeInsets.all(12.0),
+        color: Colors.red.withOpacity(0.1),
+        child: Text("Post upload failed: $text", style: const TextStyle(color: Colors.red)),
+      );
+    }
 
-          return GestureDetector(
-            onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
-                color: theme.cardColor,
+    return GestureDetector(
+      onTap: (widget.isClickable && !widget.isDetailView) ? _navigateToDetail : null,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
+          color: theme.cardColor,
+        ),
+        child: Stack(
+          children: [
+            if (widget.isDetailView && commentCount > 0)
+              Positioned(
+                left: 32, 
+                top: 36, 
+                bottom: 0,
+                child: Container(
+                  width: 2,
+                  color: theme.dividerColor,
+                ),
               ),
-              child: Stack(
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (widget.isDetailView && commentCount > 0)
-                    Positioned(
-                      left: 32, // Match CommentTile thread line position (x=32)
-                      top: 36, // Start from center of avatar (16 padding + 20 radius)
-                      bottom: 0,
-                      child: Container(
-                        width: 2,
-                        color: theme.dividerColor,
-                      ),
-                    ),
+                  // --- HEADER (Avatar, Name, Timestamp, Menu) ---
+                  PostHeader(
+                    postData: widget.postData,
+                    isOwner: widget.isOwner,
+                    // [OPTIMASI 1] Gunakan parameter langsung
+                    isCommunityAdmin: widget.isCommunityAdmin,
+                    isPinned: _localIsPinned,
+                    onNavigateToSource: _navigateToSource,
+                    onMenuAction: _onMenuAction,
+                  ),
+                  
+                  // --- BODY CONTENT ---
                   Padding(
-                    padding: const EdgeInsets.all(16.0),
+                    padding: const EdgeInsets.only(left: 60.0), 
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // --- HEADER (Avatar, Name, Timestamp, Menu) ---
-                        PostHeader(
-                          postData: widget.postData,
-                          isOwner: widget.isOwner,
-                          isCommunityAdmin: _isCommunityAdmin,
-                          isPinned: _localIsPinned,
-                          onNavigateToSource: _navigateToSource,
-                          onMenuAction: _onMenuAction,
-                        ),
-                        
-                        // --- BODY CONTENT ---
-                        Padding(
-                          padding: const EdgeInsets.only(left: 60.0), // Indent content to align with text
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (text.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Text(
-                                    text,
-                                    style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
-                                    maxLines: widget.isDetailView ? null : 10,
-                                    overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              if (isUploading)
-                                _buildUploadStatus(uploadProgress)
-                              else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 12.0),
-                                  child: PostMediaPreview(
-                                    mediaUrls: mediaUrls,
-                                    mediaType: mediaType,
-                                    text: text,
-                                    postData: widget.postData,
-                                    postId: widget.postId,
-                                    heroContextId: widget.heroContextId,
-                                    videoController: _videoController,
-                                  ),
-                                ),
-
-                              // --- ACTION BAR (Likes, Reposts, etc) ---
-                              if (!isUploading)
-                                PostActionBar(
-                                  postId: widget.postId,
-                                  commentCount: commentCount,
-                                  repostCount: _repostCount,
-                                  likeCount: _likeCount,
-                                  isReposted: _isReposted,
-                                  isLiked: _isLiked,
-                                  isSharing: _isSharing,
-                                  isDetailView: widget.isDetailView,
-                                  onCommentTap: _navigateToDetail,
-                                  onRepostTap: _toggleRepost,
-                                  onLikeTap: _toggleLike,
-                                  onShareTap: _sharePost,
-                                  onBookmarkTap: _handleBookmarkToggle,
-                                  likeAnimation: _likeAnimation,
-                                  repostAnimation: _repostAnimation,
-                                  shareAnimation: _shareAnimation,
-                                ),
-                            ],
+                        if (text.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4.0),
+                            child: Text(
+                              text,
+                              style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
+                              maxLines: widget.isDetailView ? null : 10,
+                              overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
+                        if (isUploading)
+                          _buildUploadStatus(uploadProgress)
+                        else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12.0),
+                            child: Builder(
+                              builder: (context) {
+                                // [OPTIMASI 3] Wrapper untuk Lazy Video Load
+                                // Jika mediaType adalah video dan controller belum init, tampilkan wrapper tap-to-play
+                                if (mediaType == 'video' && !_isVideoInitialized) {
+                                    return GestureDetector(
+                                      onTap: _initializeVideo,
+                                      child: Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          // Tampilkan Preview tanpa controller (akan menampilkan thumbnail dari PostMediaPreview jika menghandle null)
+                                          PostMediaPreview(
+                                            mediaUrls: mediaUrls,
+                                            mediaType: mediaType,
+                                            text: text,
+                                            postData: widget.postData,
+                                            postId: widget.postId,
+                                            heroContextId: widget.heroContextId,
+                                            videoController: null, // Pass null saat belum init
+                                          ),
+                                          // Overlay tombol play atau loading
+                                          Container(
+                                            color: Colors.black26,
+                                            child: Center(
+                                              child: _isVideoLoading 
+                                                ? const CircularProgressIndicator(color: Colors.white)
+                                                : const Icon(Icons.play_circle_fill, size: 64, color: Colors.white70),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                }
+                                
+                                // Jika video sudah init atau bukan video, tampilkan normal
+                                return PostMediaPreview(
+                                  mediaUrls: mediaUrls,
+                                  mediaType: mediaType,
+                                  text: text,
+                                  postData: widget.postData,
+                                  postId: widget.postId,
+                                  heroContextId: widget.heroContextId,
+                                  videoController: _videoController,
+                                );
+                              }
+                            ),
+                          ),
+
+                        // --- ACTION BAR (Likes, Reposts, etc) ---
+                        if (!isUploading)
+                          PostActionBar(
+                            postId: widget.postId,
+                            commentCount: commentCount,
+                            repostCount: _repostCount,
+                            likeCount: _likeCount,
+                            isReposted: _isReposted,
+                            isLiked: _isLiked,
+                            isSharing: _isSharing,
+                            isDetailView: widget.isDetailView,
+                            onCommentTap: _navigateToDetail,
+                            onRepostTap: _toggleRepost,
+                            onLikeTap: _toggleLike,
+                            onShareTap: _sharePost,
+                            onBookmarkTap: _handleBookmarkToggle,
+                            likeAnimation: _likeAnimation,
+                            repostAnimation: _repostAnimation,
+                            shareAnimation: _shareAnimation,
+                          ),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-          );
-        });
+          ],
+        ),
+      ),
+    );
   }
 }
