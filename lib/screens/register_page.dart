@@ -1,12 +1,16 @@
-// ignore_for_file: prefer_const_constructors
+// ignore_for_file: prefer_const_constructors, use_build_context_synchronously
+import 'dart:io'; 
+import 'package:flutter/gestures.dart'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart'; 
+import 'package:open_filex/open_filex.dart'; // IMPORT DIPERBAIKI (GANTI KE OPEN_FILEX)
 import '../main.dart';
 import 'login_page.dart'; 
 import 'setup/setup_profile_screen.dart'; 
-import '../services/app_localizations.dart'; // IMPORT SERVICE LOCALIZATION
+import '../services/app_localizations.dart';
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -36,6 +40,8 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _isPasswordObscured = true;
   bool _isConfirmPasswordObscured = true;
   bool _isLoading = false; 
+  
+  bool _isAgreed = false;
 
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
@@ -50,8 +56,48 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
+  // FUNGSI UNTUK MEMBUKA PDF DARI ASSETS
+  Future<void> _openTermsAndConditions() async {
+    try {
+      // 1. Load file dari assets
+      final ByteData data = await rootBundle.load('documents/syarat_dan_ketentuan.pdf');
+      final Uint8List bytes = data.buffer.asUint8List();
+
+      // 2. Dapatkan direktori temporary
+      final Directory tempDir = await getTemporaryDirectory();
+      final File file = File('${tempDir.path}/syarat_dan_ketentuan.pdf');
+
+      // 3. Tulis file ke storage lokal sementara
+      await file.writeAsBytes(bytes, flush: true);
+
+      // 4. Buka file menggunakan OpenFilex
+      // PERBAIKAN: Menggunakan 'OpenFilex'
+      final result = await OpenFilex.open(file.path);
+
+      if (result.type != ResultType.done) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Tidak dapat membuka dokumen: ${result.message}')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error opening PDF: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal memuat dokumen Syarat dan Ketentuan.')),
+      );
+    }
+  }
+
   Future<void> _signUp() async {
      setState(() { _errorMessage = ''; _isLoading = true; });
+
+    // VALIDASI PERSETUJUAN
+    if (!_isAgreed) {
+      setState(() { 
+        _isLoading = false; 
+        _errorMessage = 'Anda wajib menyetujui Syarat dan Ketentuan PNJ untuk mendaftar.'; 
+      });
+      return;
+    }
 
     if (!_formKey.currentState!.validate()) {
       setState(() { _isLoading = false; });
@@ -74,7 +120,6 @@ class _RegisterPageState extends State<RegisterPage> {
 
         if (nimQuery.docs.isNotEmpty) {
           await userCredential.user!.delete();
-          // Error ini mungkin spesifik API, tapi kita bisa bungkus jika perlu
           throw FirebaseAuthException(
             code: 'nim-already-in-use', 
             message: 'The NIM $nim is already registered.'
@@ -90,6 +135,8 @@ class _RegisterPageState extends State<RegisterPage> {
           'createdAt': FieldValue.serverTimestamp(),
           'following': [],
           'followers': [],
+          'agreedToTerms': true,
+          'agreedAt': FieldValue.serverTimestamp(),
         });
         
         if (mounted) {
@@ -108,10 +155,9 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  // --- VALIDATORS (Updated with Localization) ---
+  // --- VALIDATORS ---
   
   String? _validateName(String? value) {
-    // Kita panggil AppLocalizations.of(context) di dalam sini
     var t = AppLocalizations.of(context)!;
     if (value == null || value.trim().isEmpty) return t.translate('val_name_empty');
     return null;
@@ -182,7 +228,6 @@ class _RegisterPageState extends State<RegisterPage> {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
     
-    // Inisialisasi localization helper
     var t = AppLocalizations.of(context)!;
     
     return Scaffold(
@@ -346,6 +391,58 @@ class _RegisterPageState extends State<RegisterPage> {
                         onFieldSubmitted: (_) => _signUp(),
                         validator: _validateConfirmPassword,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
+                      ),
+                      SizedBox(height: 24),
+
+                      // --- TERMS AND CONDITIONS CHECKBOX ---
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: Checkbox(
+                              value: _isAgreed,
+                              activeColor: TwitterTheme.blue,
+                              onChanged: (bool? value) {
+                                setState(() {
+                                  _isAgreed = value ?? false;
+                                  if (_isAgreed) _errorMessage = ''; // Clear error if checked
+                                });
+                              },
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: RichText(
+                              text: TextSpan(
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  height: 1.4,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: 'Saya menyetujui ',
+                                    style: TextStyle(color: theme.textTheme.bodyMedium?.color),
+                                  ),
+                                  TextSpan(
+                                    text: 'Syarat dan Ketentuan PNJ',
+                                    style: TextStyle(
+                                      color: TwitterTheme.blue,
+                                      fontWeight: FontWeight.bold,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = _openTermsAndConditions,
+                                  ),
+                                  TextSpan(
+                                    text: ' dan kebijakan privasi yang berlaku.',
+                                    style: TextStyle(color: theme.textTheme.bodyMedium?.color),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       SizedBox(height: 24),
                       
