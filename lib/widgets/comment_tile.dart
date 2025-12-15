@@ -25,6 +25,9 @@ class CommentTile extends StatefulWidget {
   
   // NEW: To prevent loop when on profile page
   final String? currentProfileUserId;
+  
+  // NEW: Determines if the thread line should terminate at this tile
+  final bool isLast;
 
   const CommentTile({
     super.key,
@@ -35,6 +38,7 @@ class CommentTile extends StatefulWidget {
     this.showPostContext = false, 
     this.heroContextId = 'comment', 
     this.currentProfileUserId,
+    this.isLast = true, // Default to true so isolated comments (e.g. Profile) don't have dangling lines
   });
 
   @override
@@ -313,6 +317,7 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
         builder: (context, snapshot) {
           if (!snapshot.hasData) return SizedBox.shrink(); 
           if (!snapshot.data!.exists) {
+             // Use default isLast behavior if parent doesn't exist (likely standalone)
              return _buildReplyTile(context, isThreaded: false, profileImageUrl: profileImageUrl); 
           }
           final parentData = snapshot.data!.data() as Map<String, dynamic>;
@@ -321,6 +326,7 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildParentPostSnippet(context, parentData),
+              // Force isThreaded true to show connection from parent
               _buildReplyTile(context, isThreaded: true, profileImageUrl: profileImageUrl),
             ],
           );
@@ -443,32 +449,15 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
               Container(
                 width: 48,
                 color: Colors.transparent,
-                child: Stack(
-                  children: [
-                    // THREAD VISUALS: Full vertical line
-                    if (isThreaded)
-                      Positioned(
-                        top: 0,
-                        bottom: -10, // Extend below to connect
-                        left: 20, 
-                        child: Container(
-                          width: 2,
-                          color: theme.dividerColor, 
-                        ),
+                // Using CustomPaint for precise, connected lines
+                child: isThreaded 
+                  ? CustomPaint(
+                      painter: ThreadLinePainter(
+                        context: context,
+                        isLast: widget.isLast,
                       ),
-                    // Curve connector
-                    if (isThreaded)
-                      Positioned(
-                        top: 24, 
-                        left: 20, 
-                        width: 16, 
-                        child: Container(
-                          height: 2,
-                          color: theme.dividerColor,
-                        ),
-                      ),
-                  ],
-                ),
+                    )
+                  : null,
               ),
 
               Padding(
@@ -649,5 +638,65 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
       },
       child: Icon(Icons.more_horiz, color: Theme.of(context).textTheme.titleSmall?.color, size: 18),
     );
+  }
+}
+
+class ThreadLinePainter extends CustomPainter {
+  final BuildContext context;
+  final bool isLast;
+
+  ThreadLinePainter({required this.context, required this.isLast});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final theme = Theme.of(context);
+    final paint = Paint()
+      ..color = theme.dividerColor
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    // ALIGNMENT LOGIC:
+    // The parent post avatar (in _buildParentPostSnippet) is located as follows:
+    // - Padding left: 12.0
+    // - SizedBox width: 40.0 (Centered in this box -> +20.0)
+    // - Total center X = 12.0 + 20.0 = 32.0
+    //
+    // The reply tile starts at 0.0 inside its 48.0 wide container.
+    // So the vertical line must be drawn at x = 32.0 to align with the parent.
+    final double x = 32.0;
+    
+    // Avatar Vertical Alignment:
+    // Avatar is inside Padding(vertical: 8.0). Radius is 18.0.
+    // Center Y = 8.0 + 18.0 = 26.0.
+    final double avatarCenterY = 26.0; 
+    final double curveRadius = 12.0;
+
+    Path path = Path();
+    path.moveTo(x, 0);
+
+    if (isLast) {
+      // Draw "L" shape: Vertical down to start of curve, then curve to right
+      path.lineTo(x, avatarCenterY - curveRadius);
+      path.quadraticBezierTo(x, avatarCenterY, x + curveRadius, avatarCenterY);
+      path.lineTo(size.width, avatarCenterY); // Line extends to the avatar (which starts at 48.0)
+    } else {
+      // Draw "|-" shape: Full vertical line for next sibling, with a branch
+      path.lineTo(x, size.height);
+      
+      // Branch off for the current avatar
+      Path branchPath = Path();
+      branchPath.moveTo(x, avatarCenterY - curveRadius);
+      branchPath.quadraticBezierTo(x, avatarCenterY, x + curveRadius, avatarCenterY);
+      branchPath.lineTo(size.width, avatarCenterY);
+      
+      canvas.drawPath(branchPath, paint);
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant ThreadLinePainter oldDelegate) {
+    return oldDelegate.isLast != isLast;
   }
 }

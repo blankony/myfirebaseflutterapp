@@ -250,19 +250,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         if (snapshot.connectionState == ConnectionState.waiting) return Padding(padding: const EdgeInsets.all(16.0), child: Center(child: CircularProgressIndicator()));
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return Padding(padding: const EdgeInsets.all(32.0), child: Center(child: Text("No replies yet. Be the first!", style: TextStyle(color: Colors.grey))));
 
+        final docs = snapshot.data!.docs;
         return ListView.builder(
-          itemCount: snapshot.data!.docs.length,
+          itemCount: docs.length,
           shrinkWrap: true,
           physics: NeverScrollableScrollPhysics(),
           itemBuilder: (context, index) {
-            final doc = snapshot.data!.docs[index];
+            final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;
+            final bool isLast = index == docs.length - 1;
+
             return CommentTile(
               commentId: doc.id,
               commentData: data,
               postId: widget.postId, 
               isOwner: data['userId'] == _currentUser?.uid,
               heroContextId: '${widget.heroContextId}_comments', 
+              isLast: isLast,
             );
           },
         );
