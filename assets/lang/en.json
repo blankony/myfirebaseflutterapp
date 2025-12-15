@@ -380,6 +380,15 @@
   "comm_create_error_generic": "Error creating community",
 
   "comm_explore_title": "Explore Channels",
-  "comm_followers_count": "Followers"
+  "comm_followers_count": "Followers",
+  
+  "about_page_title": "About SAPA PNJ",
+  "about_app_section": "About Application",
+  "about_app_desc": "SAPA PNJ is a social media platform for the Jakarta State Polytechnic community. Facilitating communication between students and lecturers to share campus news, academic updates, and daily life moments.",
+  "about_identity_section": "Our Identity",
+  "about_identity_desc": "The application logo displays the official PNJ logo, symbolizing the commitment to serving the academic ecosystem.",
+  "about_dev_team": "Development Team",
+  "about_view_source": "View Source Code",
+  "about_version": "Version"
 
 }

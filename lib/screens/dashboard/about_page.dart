@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
+import '../../services/app_localizations.dart';
 
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
@@ -22,11 +23,15 @@ class AboutPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
+    final loc = AppLocalizations.of(context);
+
+    // Helper to safely get strings (fallback to key if null)
+    String t(String key) => loc?.translate(key) ?? key;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('About SAPA PNJ'),
+        title: Text(t('about_page_title')),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: theme.primaryColor),
@@ -93,7 +98,7 @@ class AboutPage extends StatelessWidget {
 
                   // App Title
                   Text(
-                    'SAPA PNJ',
+                    t('app_name'), // Uses existing key
                     style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w900,
                       color: TwitterTheme.blue,
@@ -102,7 +107,7 @@ class AboutPage extends StatelessWidget {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Sarana Pengguna Aplikasi\nPoliteknik Negeri Jakarta',
+                    t('slogan'), // Uses existing key
                     style: theme.textTheme.titleMedium?.copyWith(
                       color: theme.hintColor,
                       height: 1.4,
@@ -136,7 +141,7 @@ class AboutPage extends StatelessWidget {
                             ),
                             SizedBox(width: 12),
                             Text(
-                              "Tentang Aplikasi",
+                              t('about_app_section'),
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: TwitterTheme.blue,
@@ -146,7 +151,7 @@ class AboutPage extends StatelessWidget {
                         ),
                         SizedBox(height: 16),
                         Text(
-                          'SAPA PNJ adalah platform media sosial untuk komunitas Politeknik Negeri Jakarta. Memfasilitasi komunikasi antara mahasiswa dan dosen untuk berbagi berita kampus, update akademik, dan momen kehidupan sehari-hari.',
+                          t('about_app_desc'),
                           style: theme.textTheme.bodyMedium?.copyWith(
                             height: 1.5,
                             color: theme.textTheme.bodyMedium?.color?.withOpacity(0.85),
@@ -165,14 +170,14 @@ class AboutPage extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    "Identitas Kami",
+                                    t('about_identity_section'),
                                     style: theme.textTheme.titleSmall?.copyWith(
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                   SizedBox(height: 4),
                                   Text(
-                                    "Logo aplikasi menampilkan logo resmi PNJ, melambangkan komitmen melayani ekosistem akademik.",
+                                    t('about_identity_desc'),
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       height: 1.4,
                                       color: theme.hintColor,
@@ -191,7 +196,7 @@ class AboutPage extends StatelessWidget {
 
                   // Creators Section Header
                   Text(
-                    'Tim Pengembang',
+                    t('about_dev_team'),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: TwitterTheme.blue,
@@ -234,7 +239,7 @@ class AboutPage extends StatelessWidget {
                     ),
                     icon: Icon(Icons.code, size: 20, color: TwitterTheme.blue),
                     label: Text(
-                      "Lihat Source Code",
+                      t('about_view_source'),
                       style: TextStyle(
                         color: TwitterTheme.blue,
                         fontWeight: FontWeight.w600,
@@ -246,7 +251,7 @@ class AboutPage extends StatelessWidget {
 
                   // Version
                   Text(
-                    'Version 1.0.0',
+                    '${t('about_version')} 1.0.0',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.hintColor,
                     ),

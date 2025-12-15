@@ -380,5 +380,14 @@
   "comm_create_error_generic": "Gagal membuat komunitas",
 
   "comm_explore_title": "Jelajahi Channel",
-  "comm_followers_count": "Pengikut"
+  "comm_followers_count": "Pengikut",
+
+  "about_page_title": "Tentang SAPA PNJ",
+  "about_app_section": "Tentang Aplikasi",
+  "about_app_desc": "SAPA PNJ adalah platform media sosial untuk komunitas Politeknik Negeri Jakarta. Memfasilitasi komunikasi antara mahasiswa dan dosen untuk berbagi berita kampus, update akademik, dan momen kehidupan sehari-hari.",
+  "about_identity_section": "Identitas Kami",
+  "about_identity_desc": "Logo aplikasi menampilkan logo resmi PNJ, melambangkan komitmen melayani ekosistem akademik.",
+  "about_dev_team": "Tim Pengembang",
+  "about_view_source": "Lihat Source Code",
+  "about_version": "Versi"
 }
