@@ -111,18 +111,19 @@ class _RegisterPageState extends State<RegisterPage> {
       );
 
       if (userCredential.user != null) {
-        final String nim = _nimController.text.trim();
+        final String idNumber = _nimController.text.trim();
 
+        // Check against Firestore (using 'nim' field for both NIM and NIP)
         final nimQuery = await _firestore
             .collection('users')
-            .where('nim', isEqualTo: nim)
+            .where('nim', isEqualTo: idNumber)
             .get();
 
         if (nimQuery.docs.isNotEmpty) {
           await userCredential.user!.delete();
           throw FirebaseAuthException(
             code: 'nim-already-in-use', 
-            message: 'The NIM $nim is already registered.'
+            message: 'The NIM/NIP $idNumber is already registered.'
           );
         }
 
@@ -130,8 +131,8 @@ class _RegisterPageState extends State<RegisterPage> {
           'uid': userCredential.user!.uid,
           'email': _emailController.text.trim(),
           'name': _namaController.text.trim(), 
-          'nim': nim, 
-          'bio': 'Student at PNJ', 
+          'nim': idNumber, // Stores NIM or NIP
+          'bio': 'Member of PNJ', 
           'createdAt': FieldValue.serverTimestamp(),
           'following': [],
           'followers': [],
@@ -163,10 +164,12 @@ class _RegisterPageState extends State<RegisterPage> {
     return null;
   }
 
-  String? _validateNIM(String? value) {
+  String? _validateIDNumber(String? value) {
     var t = AppLocalizations.of(context)!;
     if (value == null || value.trim().isEmpty) return t.translate('val_nim_empty');
-    if (value.length != 10) return t.translate('val_nim_length');
+    
+    // Allow 10 digits (NIM) or 18 digits (NIP)
+    if (value.length != 10 && value.length != 18) return t.translate('val_nim_length');
     return null;
   }
 
@@ -181,8 +184,15 @@ class _RegisterPageState extends State<RegisterPage> {
         return t.translate('val_email_invalid');
     }
 
-    if (!value.endsWith('@stu.pnj.ac.id')) {
+    // Check if domain part contains "pnj" (e.g., @stu.pnj.ac.id, @pnj.ac.id)
+    List<String> parts = value.split('@');
+    if (parts.length == 2) {
+      String domain = parts[1];
+      if (!domain.contains('pnj')) {
         return t.translate('val_email_domain');
+      }
+    } else {
+       return t.translate('val_email_invalid');
     }
 
     return null;
@@ -314,19 +324,19 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                       SizedBox(height: 16),
                       
-                      // NIM
+                      // NIM / NIP
                       TextFormField( 
                         controller: _nimController,
                         focusNode: _nimFocus,
-                        decoration: InputDecoration(labelText: t.translate('auth_nim')), // "NIM"
+                        decoration: InputDecoration(labelText: t.translate('auth_nim')), // "NIM/NIP"
                         keyboardType: TextInputType.number, 
                         textInputAction: TextInputAction.next,
                         onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_emailFocus),
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(10),
+                          LengthLimitingTextInputFormatter(18), // Supports NIP (18 chars)
                         ],
-                        validator: _validateNIM, 
+                        validator: _validateIDNumber, 
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                       ),
                       SizedBox(height: 16),
@@ -335,7 +345,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       TextFormField( 
                         controller: _emailController,
                         focusNode: _emailFocus,
-                        decoration: InputDecoration(labelText: t.translate('auth_email_hint')), // "Enter email..."
+                        decoration: InputDecoration(labelText: t.translate('auth_email_hint')), // "Enter PNJ email..."
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
                         onFieldSubmitted: (_) => FocusScope.of(context).requestFocus(_passwordFocus),
