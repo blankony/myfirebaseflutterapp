@@ -255,6 +255,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           itemCount: docs.length,
           shrinkWrap: true,
           physics: NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero, // ADDED: prevents gaps between list items
           itemBuilder: (context, index) {
             final doc = docs[index];
             final data = doc.data() as Map<String, dynamic>;

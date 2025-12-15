@@ -444,7 +444,8 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
         color: theme.cardColor,
         child: IntrinsicHeight(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start, 
+            // CHANGED: stretch to make the thread line fill the height
+            crossAxisAlignment: CrossAxisAlignment.stretch, 
             children: [
               Container(
                 width: 48,
@@ -460,11 +461,15 @@ class _CommentTileState extends State<CommentTile> with SingleTickerProviderStat
                   : null,
               ),
 
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0), 
-                child: GestureDetector(
-                  onTap: _navigateToUserProfile,
-                  child: avatarWidget, 
+              // ADDED: Align to top center so the avatar doesn't stretch
+              Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0), 
+                  child: GestureDetector(
+                    onTap: _navigateToUserProfile,
+                    child: avatarWidget, 
+                  ),
                 ),
               ),
 

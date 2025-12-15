@@ -669,72 +669,88 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                 border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5)),
                 color: theme.cardColor,
               ),
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Stack(
                 children: [
-                  // --- HEADER (Avatar, Name, Timestamp, Menu) ---
-                  PostHeader(
-                    postData: widget.postData,
-                    isOwner: widget.isOwner,
-                    isCommunityAdmin: _isCommunityAdmin,
-                    isPinned: _localIsPinned,
-                    onNavigateToSource: _navigateToSource,
-                    onMenuAction: _onMenuAction,
-                  ),
-                  
-                  // --- BODY CONTENT ---
+                  if (widget.isDetailView && commentCount > 0)
+                    Positioned(
+                      left: 32, // Match CommentTile thread line position (x=32)
+                      top: 36, // Start from center of avatar (16 padding + 20 radius)
+                      bottom: 0,
+                      child: Container(
+                        width: 2,
+                        color: theme.dividerColor,
+                      ),
+                    ),
                   Padding(
-                    padding: const EdgeInsets.only(left: 60.0), // Indent content to align with text
+                    padding: const EdgeInsets.all(16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (text.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              text,
-                              style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
-                              maxLines: widget.isDetailView ? null : 10,
-                              overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
-                            ),
-                          ),
-                        if (isUploading)
-                          _buildUploadStatus(uploadProgress)
-                        else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12.0),
-                            child: PostMediaPreview(
-                              mediaUrls: mediaUrls,
-                              mediaType: mediaType,
-                              text: text,
-                              postData: widget.postData,
-                              postId: widget.postId,
-                              heroContextId: widget.heroContextId,
-                              videoController: _videoController,
-                            ),
-                          ),
+                        // --- HEADER (Avatar, Name, Timestamp, Menu) ---
+                        PostHeader(
+                          postData: widget.postData,
+                          isOwner: widget.isOwner,
+                          isCommunityAdmin: _isCommunityAdmin,
+                          isPinned: _localIsPinned,
+                          onNavigateToSource: _navigateToSource,
+                          onMenuAction: _onMenuAction,
+                        ),
+                        
+                        // --- BODY CONTENT ---
+                        Padding(
+                          padding: const EdgeInsets.only(left: 60.0), // Indent content to align with text
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (text.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Text(
+                                    text,
+                                    style: theme.textTheme.bodyLarge?.copyWith(fontSize: widget.isDetailView ? 18 : 15),
+                                    maxLines: widget.isDetailView ? null : 10,
+                                    overflow: widget.isDetailView ? null : TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              if (isUploading)
+                                _buildUploadStatus(uploadProgress)
+                              else if (mediaUrls.isNotEmpty || (text.contains('http') && !widget.isDetailView))
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 12.0),
+                                  child: PostMediaPreview(
+                                    mediaUrls: mediaUrls,
+                                    mediaType: mediaType,
+                                    text: text,
+                                    postData: widget.postData,
+                                    postId: widget.postId,
+                                    heroContextId: widget.heroContextId,
+                                    videoController: _videoController,
+                                  ),
+                                ),
 
-                        // --- ACTION BAR (Likes, Reposts, etc) ---
-                        if (!isUploading)
-                          PostActionBar(
-                            postId: widget.postId,
-                            commentCount: commentCount,
-                            repostCount: _repostCount,
-                            likeCount: _likeCount,
-                            isReposted: _isReposted,
-                            isLiked: _isLiked,
-                            isSharing: _isSharing,
-                            isDetailView: widget.isDetailView,
-                            onCommentTap: _navigateToDetail,
-                            onRepostTap: _toggleRepost,
-                            onLikeTap: _toggleLike,
-                            onShareTap: _sharePost,
-                            onBookmarkTap: _handleBookmarkToggle,
-                            likeAnimation: _likeAnimation,
-                            repostAnimation: _repostAnimation,
-                            shareAnimation: _shareAnimation,
+                              // --- ACTION BAR (Likes, Reposts, etc) ---
+                              if (!isUploading)
+                                PostActionBar(
+                                  postId: widget.postId,
+                                  commentCount: commentCount,
+                                  repostCount: _repostCount,
+                                  likeCount: _likeCount,
+                                  isReposted: _isReposted,
+                                  isLiked: _isLiked,
+                                  isSharing: _isSharing,
+                                  isDetailView: widget.isDetailView,
+                                  onCommentTap: _navigateToDetail,
+                                  onRepostTap: _toggleRepost,
+                                  onLikeTap: _toggleLike,
+                                  onShareTap: _sharePost,
+                                  onBookmarkTap: _handleBookmarkToggle,
+                                  likeAnimation: _likeAnimation,
+                                  repostAnimation: _repostAnimation,
+                                  shareAnimation: _shareAnimation,
+                                ),
+                            ],
                           ),
+                        ),
                       ],
                     ),
                   ),
