@@ -14,6 +14,7 @@ import '../create_post_screen.dart';
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../image_viewer_screen.dart'; 
+import '../../services/moderation_service.dart'; // Pastikan import service ini ada
 
 class CommunityDetailScreen extends StatefulWidget {
   final String communityId;
@@ -31,7 +32,114 @@ class CommunityDetailScreen extends StatefulWidget {
 
 class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   final CloudinaryService _cloudinaryService = CloudinaryService();
+  final ScrollController _scrollController = ScrollController();
+  final int _postsLimit = 10;
+  
   bool _isUploadingImage = false;
+  
+  // Pagination State
+  List<DocumentSnapshot> _posts = [];
+  bool _isLoadingPosts = true;
+  bool _hasMorePosts = true;
+  bool _isLoadingMore = false;
+  DocumentSnapshot? _lastDocument;
+  
+  // Data Cache
+  List<String> _blockedUserIds = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchBlockedUsers();
+    _fetchInitialPosts();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      _fetchMorePosts();
+    }
+  }
+
+  Future<void> _fetchBlockedUsers() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    
+    // Ambil data block user sekali saja di awal
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).collection('moderation').doc('blocked').get();
+    if (doc.exists && mounted) {
+      setState(() {
+        _blockedUserIds = List<String>.from(doc.data()?['ids'] ?? []);
+      });
+    } else {
+       // Fallback jika menggunakan implementation lain (misal fetch dari subcollection documents)
+       // Untuk performa, disarankan simpan list ID di satu dokumen array.
+    }
+  }
+
+  Future<void> _fetchInitialPosts() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingPosts = true;
+      _posts = [];
+    });
+
+    try {
+      Query query = FirebaseFirestore.instance
+          .collection('posts')
+          .where('communityId', isEqualTo: widget.communityId)
+          .orderBy('timestamp', descending: true)
+          .limit(_postsLimit);
+
+      QuerySnapshot snapshot = await query.get();
+      
+      if (mounted) {
+        setState(() {
+          _posts = snapshot.docs;
+          _isLoadingPosts = false;
+          _lastDocument = snapshot.docs.isNotEmpty ? snapshot.docs.last : null;
+          _hasMorePosts = snapshot.docs.length == _postsLimit;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingPosts = false);
+      debugPrint("Error fetching posts: $e");
+    }
+  }
+
+  Future<void> _fetchMorePosts() async {
+    if (_isLoadingMore || !_hasMorePosts || _lastDocument == null) return;
+
+    setState(() => _isLoadingMore = true);
+
+    try {
+      Query query = FirebaseFirestore.instance
+          .collection('posts')
+          .where('communityId', isEqualTo: widget.communityId)
+          .orderBy('timestamp', descending: true)
+          .startAfterDocument(_lastDocument!)
+          .limit(_postsLimit);
+
+      QuerySnapshot snapshot = await query.get();
+
+      if (mounted) {
+        setState(() {
+          _posts.addAll(snapshot.docs);
+          _lastDocument = snapshot.docs.isNotEmpty ? snapshot.docs.last : null;
+          _hasMorePosts = snapshot.docs.length == _postsLimit;
+          _isLoadingMore = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingMore = false);
+    }
+  }
 
   Route _createSlideUpRoute(Widget page) {
     return PageRouteBuilder(
@@ -124,6 +232,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
 
         return Scaffold(
           body: NestedScrollView(
+            controller: _scrollController,
             physics: BouncingScrollPhysics(),
             headerSliverBuilder: (context, innerBoxIsScrolled) {
               return [
@@ -145,7 +254,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                       children: [
                         GestureDetector(
                           onTap: () => _showImageOptions(context, bannerUrl, true, hasFullControl),
-                          child: Hero(tag: 'community_banner', child: bannerUrl != null ? CachedNetworkImage(imageUrl: bannerUrl, fit: BoxFit.cover) : Container(color: isDarkMode ? Colors.grey[800] : Colors.grey[300], child: hasFullControl ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo, color: Colors.white), Text("Add Banner", style: TextStyle(color: Colors.white, fontSize: 12))])) : null)),
+                          child: Hero(tag: 'community_banner', child: bannerUrl != null ? CachedNetworkImage(imageUrl: bannerUrl, fit: BoxFit.cover, memCacheWidth: 800) : Container(color: isDarkMode ? Colors.grey[800] : Colors.grey[300], child: hasFullControl ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo, color: Colors.white), Text("Add Banner", style: TextStyle(color: Colors.white, fontSize: 12))])) : null)),
                         ),
                         Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(0.8)]))),
                         Positioned(
@@ -200,19 +309,33 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                 ),
               ];
             },
-            body: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('posts').where('communityId', isEqualTo: widget.communityId).orderBy('timestamp', descending: true).snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) return Center(child: CircularProgressIndicator());
-                final docs = snapshot.data?.docs ?? [];
-                if (docs.isEmpty) return Center(child: Padding(padding: EdgeInsets.only(top: 40), child: Text("No broadcasts yet.", style: TextStyle(color: Colors.grey))));
-                return ListView.builder(padding: EdgeInsets.only(bottom: 80), itemCount: docs.length, itemBuilder: (context, index) {
-                  final post = docs[index];
-                  final pData = post.data() as Map<String, dynamic>;
-                  return BlogPostCard(postId: post.id, postData: pData, isOwner: hasFullControl || pData['userId'] == user?.uid, heroContextId: 'community_${widget.communityId}');
-                });
-              },
-            ),
+            body: _isLoadingPosts 
+              ? Center(child: CircularProgressIndicator())
+              : _posts.isEmpty
+                ? Center(child: Padding(padding: EdgeInsets.only(top: 40), child: Text("No broadcasts yet.", style: TextStyle(color: Colors.grey))))
+                : ListView.builder(
+                    padding: EdgeInsets.only(bottom: 80),
+                    physics: NeverScrollableScrollPhysics(), // Scroll handled by NestedScrollView
+                    shrinkWrap: true, // Needed for NestedScrollView
+                    itemCount: _posts.length + (_hasMorePosts ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == _posts.length) {
+                        return Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+                      }
+                      final post = _posts[index];
+                      final pData = post.data() as Map<String, dynamic>;
+                      
+                      // OPTIMASI: Pass isCommunityAdmin dan blockedUserIds
+                      return BlogPostCard(
+                        postId: post.id, 
+                        postData: pData, 
+                        isOwner: hasFullControl || pData['userId'] == user?.uid, 
+                        heroContextId: 'community_${widget.communityId}',
+                        isCommunityAdmin: isAdmin || isOwner,
+                        blockedUserIds: _blockedUserIds,
+                      );
+                    }
+                  ),
           ),
         );
       }

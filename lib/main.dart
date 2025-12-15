@@ -3,15 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'; // IMPORT PENTING
+import 'package:flutter_localizations/flutter_localizations.dart'; 
 import 'firebase_options.dart'; 
 import 'screens/splash_screen.dart'; 
-import 'services/app_localizations.dart'; // IMPORT SERVICE LOCALIZATION
+import 'services/app_localizations.dart'; 
 
 // Notifiers Global
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 final ValueNotifier<bool> hapticNotifier = ValueNotifier(true);
-final ValueNotifier<Locale> languageNotifier = ValueNotifier(const Locale('en')); // NOTIFIER BAHASA BARU
+final ValueNotifier<Locale> languageNotifier = ValueNotifier(const Locale('en'));
 
 class TwitterTheme {
   static const Color blue = Color(0xFF1DA1F2);
@@ -206,22 +206,7 @@ class AvatarHelper {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  try {
-    await dotenv.load(fileName: ".env");
-  } catch (e) {
-    print("WARNING: Failed to load .env file: $e");
-  }
-
-  final prefs = await SharedPreferences.getInstance();
-  
-  final bool isDark = prefs.getBool('is_dark_mode') ?? false;
-  themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
-
-  final String? savedLang = prefs.getString('language_code');
-  if (savedLang != null) {
-    languageNotifier.value = Locale(savedLang);
-  }
-
+  // [OPTIMASI 4] Hanya inisialisasi core Firebase, sisanya di background/MyApp
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -229,11 +214,61 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  // Flag untuk status inisialisasi aset/config non-kritis
+  bool _isConfigLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppConfig();
+  }
+
+  // Load config di background agar UI tidak nge-freeze di splash native
+  Future<void> _loadAppConfig() async {
+    try {
+      await dotenv.load(fileName: ".env");
+    } catch (e) {
+      debugPrint("WARNING: Failed to load .env file: $e");
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    
+    final bool isDark = prefs.getBool('is_dark_mode') ?? false;
+    themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+
+    final String? savedLang = prefs.getString('language_code');
+    if (savedLang != null) {
+      languageNotifier.value = Locale(savedLang);
+    }
+    
+    if (mounted) {
+      setState(() {
+        _isConfigLoaded = true;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Tampilkan Splash Screen sementara config di-load
+    // Ini lebih baik daripada blank screen native
+    if (!_isConfigLoaded) {
+      return MaterialApp(
+        home: const Scaffold(
+          body: Center(child: CircularProgressIndicator()), // Atau Custom Splash Screen
+        ),
+        debugShowCheckedModeBanner: false,
+      );
+    }
+
     return ValueListenableBuilder<Locale>(
       valueListenable: languageNotifier,
       builder: (context, currentLocale, _) {
