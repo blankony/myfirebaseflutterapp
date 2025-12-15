@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; 
 import 'login_page.dart';
 import 'register_page.dart';
 import '../main.dart'; 
@@ -26,6 +27,19 @@ class WelcomeScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  // Method to toggle language
+  void _toggleLanguage() async {
+    final currentCode = languageNotifier.value.languageCode;
+    final newCode = currentCode == 'en' ? 'id' : 'en';
+    
+    // Update notifier
+    languageNotifier.value = Locale(newCode);
+
+    // Save preference
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('language_code', newCode);
   }
 
   @override
@@ -69,8 +83,53 @@ class WelcomeScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, 
                 children: [
-                  Center(
-                    child: Image.asset('images/app_icon.png', height: 40),
+                  // --- HEADER ROW (LOGO + LANGUAGE TOGGLE) ---
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Image.asset('images/app_icon.png', height: 40),
+                      
+                      // LANGUAGE SWITCHER ICON
+                      ValueListenableBuilder<Locale>(
+                        valueListenable: languageNotifier,
+                        builder: (context, locale, child) {
+                          return Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _toggleLanguage,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: TwitterTheme.blue.withOpacity(0.3)),
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: theme.cardColor.withOpacity(0.5),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.translate, // CHANGED TO TRANSLATE ICON
+                                      color: TwitterTheme.blue,
+                                      size: 24,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      locale.languageCode.toUpperCase(),
+                                      style: TextStyle(
+                                        color: TwitterTheme.blue,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      ),
+                    ],
                   ),
 
                   Spacer(flex: 2), 
@@ -132,7 +191,7 @@ class WelcomeScreen extends StatelessWidget {
                       onPressed: () {
                         Navigator.of(context).push(_createSlideUpRoute(RegisterPage()));
                       },
-                      child: Text(t.translate('welcome_create_account')), // 5. MENGGUNAKAN KEY BARU
+                      child: Text(t.translate('welcome_create_account')), 
                       style: ElevatedButton.styleFrom(
                         backgroundColor: TwitterTheme.blue,
                         foregroundColor: Colors.white,
@@ -154,16 +213,15 @@ class WelcomeScreen extends StatelessWidget {
                       text: TextSpan(
                         style: theme.textTheme.bodyMedium?.copyWith(fontSize: 15),
                         children: [
-                          TextSpan(text: "${t.translate('auth_have_account')} "), // 6. TRANSLATE
+                          TextSpan(text: "${t.translate('auth_have_account')} "), 
                           TextSpan(
-                            text: t.translate('auth_login'), // 7. TRANSLATE
+                            text: t.translate('auth_login'), 
                             style: TextStyle(
                               color: TwitterTheme.blue,
                               fontWeight: FontWeight.bold,
                             ),
                             recognizer: TapGestureRecognizer()
                               ..onTap = () {
-                                // Use custom slide-up route
                                 Navigator.of(context).push(_createSlideUpRoute(LoginPage()));
                               },
                           ),

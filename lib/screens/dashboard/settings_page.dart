@@ -10,7 +10,7 @@ import 'account_center_page.dart';
 import '../blocked_users_page.dart'; 
 import '../../services/notification_prefs_service.dart'; 
 import '../../services/overlay_service.dart';
-import '../../services/app_localizations.dart'; // PASTIKAN IMPORT INI ADA
+import '../../services/app_localizations.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -153,7 +153,7 @@ class SettingsPage extends StatelessWidget {
           // --- LANGUAGE TILE ---
           _buildSettingsTile(
             context: context,
-            icon: Icons.language,
+            icon: Icons.translate, // CHANGED TO TRANSLATE ICON
             title: t.translate('settings_language'), // "Change Language"
             subtitle: languageNotifier.value.languageCode == 'en' ? 'English' : 'Bahasa Indonesia',
             onTap: () => _showLanguageDialog(context),

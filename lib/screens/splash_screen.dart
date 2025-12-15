@@ -1,8 +1,10 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart'; // IMPORT SHARED PREFERENCES
 import '../auth_gate.dart'; 
 import '../main.dart'; // For TwitterTheme
+import 'language_selection_screen.dart'; // IMPORT LANGUAGE SELECTION SCREEN
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -51,18 +53,35 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     // Start Animation
     _controller.forward();
 
-    // 2. Navigate to AuthGate after delay
-    Timer(const Duration(seconds: 3), () {
+    // 2. CHECK FIRST RUN AND NAVIGATE
+    Timer(const Duration(seconds: 3), () async {
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const AuthGate(),
-            transitionsBuilder: (_, animation, __, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 800),
-          ),
-        );
+        final prefs = await SharedPreferences.getInstance();
+        // Check if first run (default is true if null)
+        final bool isFirstRun = prefs.getBool('is_first_run_v1') ?? true;
+
+        if (isFirstRun) {
+          // Navigate to Language Selection
+          Navigator.of(context).pushReplacement(
+            PageRouteBuilder(
+              pageBuilder: (_, __, ___) => const LanguageSelectionScreen(),
+              transitionsBuilder: (_, animation, __, child) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+            ),
+          );
+        } else {
+          // Navigate to AuthGate (Welcome/Home)
+          Navigator.of(context).pushReplacement(
+            PageRouteBuilder(
+              pageBuilder: (_, __, ___) => const AuthGate(),
+              transitionsBuilder: (_, animation, __, child) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              transitionDuration: const Duration(milliseconds: 800),
+            ),
+          );
+        }
       }
     });
   }
