@@ -5,7 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../main.dart';
 import '../../data/pnj_data.dart';
 import 'setup_verification_screen.dart';
-import '../../services/overlay_service.dart'; // REQUIRED
+import '../../services/overlay_service.dart'; 
+import '../../services/app_localizations.dart'; // REQUIRED IMPORT
 
 class SetupDepartmentScreen extends StatefulWidget {
   const SetupDepartmentScreen({super.key});
@@ -42,10 +43,12 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
   }
 
   Future<void> _saveAndNext() async {
+    var t = AppLocalizations.of(context)!; // Localization instance
+
     if (_selectedDepartment == null || _selectedProdi == null) {
       OverlayService().showTopNotification(
         context, 
-        "Please select your department and study program.", 
+        t.translate('setup_dept_select_error'), // Localized error
         Icons.warning_amber_rounded, 
         (){},
         color: Colors.orange
@@ -78,7 +81,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
       if (mounted) {
         OverlayService().showTopNotification(
           context, 
-          "Error: $e", 
+          "${t.translate('general_error')}: $e", 
           Icons.error, 
           (){},
           color: Colors.red
@@ -92,6 +95,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!; // Localization instance
     
     return Scaffold(
       body: FadeTransition(
@@ -105,7 +109,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                 Image.asset('images/app_icon.png', height: 40),
                 SizedBox(height: 32),
                 Text(
-                  "Where do you study?",
+                  t.translate('setup_dept_title'), // "Where do you study?"
                   style: theme.textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w900,
                     color: TwitterTheme.blue,
@@ -113,7 +117,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                 ),
                 SizedBox(height: 8),
                 Text(
-                  "Select your department and study program to connect with peers.",
+                  t.translate('setup_dept_subtitle'), // Description
                   style: theme.textTheme.bodyLarge,
                 ),
                 SizedBox(height: 32),
@@ -121,7 +125,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                 // Department Dropdown
                 DropdownButtonFormField<String>(
                   decoration: InputDecoration(
-                    labelText: "Department (Jurusan)",
+                    labelText: t.translate('setup_dept_label'), // "Department (Jurusan)"
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     filled: true,
                     fillColor: theme.cardColor,
@@ -142,7 +146,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                 // Study Program Dropdown (Dependent)
                 DropdownButtonFormField<Map<String, String>>(
                   decoration: InputDecoration(
-                    labelText: "Study Program (Prodi)",
+                    labelText: t.translate('setup_prodi_label'), // "Study Program (Prodi)"
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     filled: true,
                     fillColor: theme.cardColor,
@@ -178,7 +182,7 @@ class _SetupDepartmentScreenState extends State<SetupDepartmentScreen> with Sing
                     ),
                     child: _isLoading 
                       ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : Text("Next"),
+                      : Text(t.translate('general_next')), // "Next"
                   ),
                 ),
               ],

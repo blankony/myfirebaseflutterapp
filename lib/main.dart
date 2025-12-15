@@ -276,7 +276,9 @@ class _MyAppState extends State<MyApp> {
           valueListenable: themeNotifier,
           builder: (context, currentMode, child) {
             return MaterialApp(
-              title: 'Sapa PNJ', 
+              // Menggunakan onGenerateTitle agar judul ikut berubah bahasa
+              onGenerateTitle: (context) => AppLocalizations.of(context)?.translate('app_name') ?? 'Sapa PNJ',
+              
               theme: TwitterTheme.lightTheme, 
               darkTheme: TwitterTheme.darkTheme, 
               themeMode: currentMode, 

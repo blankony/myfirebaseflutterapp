@@ -84,13 +84,15 @@ class _SidePanelState extends State<SidePanel> {
   }
 
   void _showLanguageDialog() {
+    var t = AppLocalizations.of(context)!;
+    
     showDialog(
       context: context,
       builder: (context) {
         final theme = Theme.of(context);
         return AlertDialog(
           backgroundColor: theme.cardColor,
-          title: Text("Select Language", style: theme.textTheme.titleLarge),
+          title: Text(t.translate('settings_select_language'), style: theme.textTheme.titleLarge),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -175,7 +177,7 @@ class _SidePanelState extends State<SidePanel> {
             ? FirebaseFirestore.instance.collection('users').doc(_currentUserId).snapshots()
             : null,
         builder: (context, snapshot) {
-          String name = "User";
+          String name = t.translate('general_user');
           String handle = "@user";
           int iconId = 0;
           String? colorHex;
@@ -184,7 +186,7 @@ class _SidePanelState extends State<SidePanel> {
 
           if (snapshot.hasData && snapshot.data!.exists) {
             final data = snapshot.data!.data() as Map<String, dynamic>;
-            name = data['name'] ?? "User";
+            name = data['name'] ?? t.translate('general_user');
             final email = data['email'] ?? "";
             handle = email.isNotEmpty ? "@${email.split('@')[0]}" : "@user";
             iconId = data['avatarIconId'] ?? 0;
@@ -362,19 +364,19 @@ class _SidePanelState extends State<SidePanel> {
                           children: [
                             ListTile(
                               leading: Icon(Icons.fingerprint, color: Colors.teal, size: 20),
-                              title: Text('SPIRIT ACADEMIA', style: TextStyle(fontSize: 14)),
+                              title: Text(t.translate('service_spirit'), style: TextStyle(fontSize: 14)),
                               onTap: () => _openWebService("SPIRIT ACADEMIA", "https://academia.pnj.ac.id/"),
                               dense: true,
                             ),
                             ListTile(
                               leading: Icon(Icons.laptop_chromebook, color: Colors.orange, size: 20),
-                              title: Text('E-Learning', style: TextStyle(fontSize: 14)),
+                              title: Text(t.translate('service_elearning'), style: TextStyle(fontSize: 14)),
                               onTap: () => _openWebService("E-Learning PNJ", "https://elearning.pnj.ac.id/"),
                               dense: true,
                             ),
                              ListTile(
                               leading: Icon(Icons.bar_chart, color: Colors.purple, size: 20),
-                              title: Text('Akademik PNJ', style: TextStyle(fontSize: 14)),
+                              title: Text(t.translate('service_academic'), style: TextStyle(fontSize: 14)),
                               onTap: () => _openWebService("Akademik PNJ", "https://akademik.pnj.ac.id/"),
                               dense: true,
                             ),

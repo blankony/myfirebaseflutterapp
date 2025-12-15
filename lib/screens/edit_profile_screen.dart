@@ -11,7 +11,7 @@ import '../services/cloudinary_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/pnj_data.dart'; 
 import '../services/overlay_service.dart'; 
-import '../services/app_localizations.dart'; // 1. IMPORT LOCALIZATION
+import '../services/app_localizations.dart'; 
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -90,6 +90,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void _tryAutoDetectDepartment() {
     final email = _user?.email;
     if (email == null) return;
+    var t = AppLocalizations.of(context); // Bisa null saat init, handle di bawah atau biarkan english default di backend logic
     
     final RegExp regex = RegExp(r'\.([a-z]+)\d+@');
     final match = regex.firstMatch(email);
@@ -103,10 +104,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _selectedDepartment = detectedDept;
             _selectedProdi = null; 
           });
-          if (mounted) {
+          if (mounted && t != null) {
             OverlayService().showTopNotification(
               context, 
-              "Auto-detected department: $detectedDept", 
+              "${t.translate('edit_auto_detect')}$detectedDept", 
               Icons.auto_awesome, 
               (){}
             );
@@ -132,8 +133,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
   
   Future<File?> _cropImage({required XFile imageFile, required bool isAvatar}) async {
-    // Localization di dalam async method bisa tricky, kita pakai hardcoded untuk UI crop
-    // atau pass title dari fungsi pemanggil. Di sini hardcoded English umum library.
+    var t = AppLocalizations.of(context)!;
     try {
       final dynamic cropped = await ImageCropper().cropImage(
         sourcePath: imageFile.path,
@@ -145,7 +145,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             : CropAspectRatio(ratioX: 3, ratioY: 1),
         uiSettings: [
           AndroidUiSettings(
-            toolbarTitle: isAvatar ? 'Crop Avatar' : 'Crop Banner',
+            toolbarTitle: isAvatar ? t.translate('profile_crop_avatar') : t.translate('profile_crop_banner'),
             toolbarColor: TwitterTheme.blue,
             toolbarWidgetColor: Colors.white,
             initAspectRatio: isAvatar ? CropAspectRatioPreset.square : CropAspectRatioPreset.ratio3x2,
@@ -153,7 +153,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             hideBottomControls: false,
           ),
           IOSUiSettings(
-            title: isAvatar ? 'Crop Avatar' : 'Crop Banner',
+            title: isAvatar ? t.translate('profile_crop_avatar') : t.translate('profile_crop_banner'),
             aspectRatioLockEnabled: true,
           ),
         ],
@@ -185,7 +185,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               SizedBox(height: 16),
               ListTile(
                 leading: Icon(Icons.camera_alt, color: TwitterTheme.blue),
-                title: Text(t.translate('profile_camera')), // "Take from Camera"
+                title: Text(t.translate('profile_camera')),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(isAvatar: isAvatar, source: ImageSource.camera);
@@ -193,7 +193,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ),
               ListTile(
                 leading: Icon(Icons.photo_library, color: TwitterTheme.blue),
-                title: Text(t.translate('profile_gallery')), // "Choose from Gallery"
+                title: Text(t.translate('profile_gallery')),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(isAvatar: isAvatar, source: ImageSource.gallery);
@@ -209,6 +209,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _pickImage({required bool isAvatar, required ImageSource source}) async {
     FocusScope.of(context).unfocus();
+    var t = AppLocalizations.of(context)!;
     final picker = ImagePicker();
     
     final pickedFile = await picker.pickImage(
@@ -226,11 +227,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             _selectedImageFile = processedFile;
             _selectedIconId = -1; 
             _profileImageUrl = null; 
-            OverlayService().showTopNotification(context, "Profile picture selected", Icons.image, (){});
+            OverlayService().showTopNotification(context, t.translate('edit_pic_selected'), Icons.image, (){});
           } else {
             _selectedBannerFile = processedFile;
             _bannerImageUrl = null;
-            OverlayService().showTopNotification(context, "Banner selected", Icons.image, (){});
+            OverlayService().showTopNotification(context, t.translate('edit_banner_selected'), Icons.image, (){});
           }
         });
       }
@@ -316,7 +317,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     } catch (e) {
       if (context.mounted) {
-        OverlayService().showTopNotification(context, "Update failed: $e", Icons.error, (){}, color: Colors.red);
+        OverlayService().showTopNotification(context, "${t.translate('edit_update_fail')}$e", Icons.error, (){}, color: Colors.red);
       }
     } finally {
       if (mounted) {
@@ -393,7 +394,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // 2. GET LOCALIZATION
     var t = AppLocalizations.of(context)!;
     
     final bool isCustomImageSet = _selectedImageFile != null || (_profileImageUrl != null && _profileImageUrl!.isNotEmpty);
@@ -403,7 +403,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
       child: Scaffold(
         appBar: AppBar(
-          title: Text(t.translate('edit_profile_title'), style: TextStyle(fontWeight: FontWeight.bold)), // "Edit Profile"
+          title: Text(t.translate('edit_profile_title'), style: TextStyle(fontWeight: FontWeight.bold)), 
           centerTitle: true,
           elevation: 0,
           backgroundColor: theme.scaffoldBackgroundColor,
@@ -419,7 +419,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 child: _isLoading 
                     ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text(t.translate('edit_save'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), // "Save"
+                    : Text(t.translate('edit_save'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), 
               ),
             ),
           ],
@@ -515,108 +515,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
               ),
 
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (isCustomImageSet)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8.0, bottom: 16.0),
-                        child: GestureDetector(
-                          onTap: () => setState(() { _selectedImageFile = null; _profileImageUrl = null; _selectedIconId = 0; }),
-                          child: Text(t.translate('edit_remove_photo'), style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 13)), // "Remove photo"
-                        ),
-                      ),
-
-                    SizedBox(height: 10),
-
-                    TextField(
-                      controller: _nameController,
-                      autofocus: false,
-                      decoration: InputDecoration(
-                        labelText: t.translate('edit_display_name'), // "Display Name"
-                        hintText: t.translate('edit_name_hint'), // "Enter your name"
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    TextField(
-                      controller: _bioController,
-                      autofocus: false,
-                      maxLength: 200,
-                      decoration: InputDecoration(
-                        labelText: t.translate('edit_bio_label'), // "Bio"
-                        hintText: t.translate('edit_bio_hint'), // "Tell the world..."
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                        alignLabelWithHint: true,
-                      ),
-                      maxLines: 4,
-                      minLines: 1,
-                    ),
-                    
-                    SizedBox(height: 30),
-
-                    Text(t.translate('edit_academic_info'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), // "Academic Info"
-                    SizedBox(height: 16),
-                    
-                    DropdownButtonFormField<String>(
-                      decoration: InputDecoration(
-                        labelText: t.translate('edit_dept_label'), // "Department"
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                        filled: true,
-                        fillColor: theme.cardColor,
-                      ),
-                      value: _selectedDepartment,
-                      isExpanded: true,
-                      items: PnjData.departments.keys.map((String dept) {
-                        return DropdownMenuItem(value: dept, child: Text(dept, overflow: TextOverflow.ellipsis));
-                      }).toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedDepartment = val;
-                          _selectedProdi = null; 
-                        });
-                      },
-                    ),
-                    SizedBox(height: 16),
-                    
-                    DropdownButtonFormField<Map<String, String>>(
-                      decoration: InputDecoration(
-                        labelText: t.translate('edit_prodi_label'), // "Study Program"
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                        filled: true,
-                        fillColor: theme.cardColor,
-                      ),
-                      value: _selectedProdi,
-                      isExpanded: true,
-                      items: _selectedDepartment == null 
-                        ? [] 
-                        : PnjData.departments[_selectedDepartment]!.map((Map<String, String> prodi) {
-                            return DropdownMenuItem<Map<String, String>>(
-                              value: prodi,
-                              child: Text(prodi['name']!, overflow: TextOverflow.ellipsis),
-                            );
-                          }).toList(),
-                      onChanged: _selectedDepartment == null ? null : (val) {
-                        setState(() {
-                          _selectedProdi = val;
-                        });
-                      },
-                    ),
-
-                    SizedBox(height: 30),
-                    
-                    if (!isCustomImageSet) ...[
-                      Divider(),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12.0),
-                        child: Text(t.translate('edit_avatar_preset'), style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)), // "Or choose avatar preset"
-                      ),
+              // LAYOUT CHANGE: Preset avatar moved here
+              if (!isCustomImageSet) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(t.translate('edit_avatar_preset'), style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)), 
+                      SizedBox(height: 12),
                       SizedBox(
                         height: 60,
                         child: ListView.separated(
@@ -678,6 +585,102 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                       ),
                     ],
+                  ),
+                ),
+                Divider(),
+              ],
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (isCustomImageSet)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8.0, bottom: 16.0),
+                        child: GestureDetector(
+                          onTap: () => setState(() { _selectedImageFile = null; _profileImageUrl = null; _selectedIconId = 0; }),
+                          child: Text(t.translate('edit_remove_photo'), style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 13)), 
+                        ),
+                      ),
+
+                    TextField(
+                      controller: _nameController,
+                      autofocus: false,
+                      decoration: InputDecoration(
+                        labelText: t.translate('edit_display_name'), 
+                        hintText: t.translate('edit_name_hint'), 
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    TextField(
+                      controller: _bioController,
+                      autofocus: false,
+                      maxLength: 200,
+                      decoration: InputDecoration(
+                        labelText: t.translate('edit_bio_label'), 
+                        hintText: t.translate('edit_bio_hint'), 
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        alignLabelWithHint: true,
+                      ),
+                      maxLines: 4,
+                      minLines: 1,
+                    ),
+                    
+                    SizedBox(height: 30),
+
+                    Text(t.translate('edit_academic_info'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), 
+                    SizedBox(height: 16),
+                    
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: t.translate('edit_dept_label'), 
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        filled: true,
+                        fillColor: theme.cardColor,
+                      ),
+                      value: _selectedDepartment,
+                      isExpanded: true,
+                      items: PnjData.departments.keys.map((String dept) {
+                        return DropdownMenuItem(value: dept, child: Text(dept, overflow: TextOverflow.ellipsis));
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedDepartment = val;
+                          _selectedProdi = null; 
+                        });
+                      },
+                    ),
+                    SizedBox(height: 16),
+                    
+                    DropdownButtonFormField<Map<String, String>>(
+                      decoration: InputDecoration(
+                        labelText: t.translate('edit_prodi_label'), 
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        filled: true,
+                        fillColor: theme.cardColor,
+                      ),
+                      value: _selectedProdi,
+                      isExpanded: true,
+                      items: _selectedDepartment == null 
+                        ? [] 
+                        : PnjData.departments[_selectedDepartment]!.map((Map<String, String> prodi) {
+                            return DropdownMenuItem<Map<String, String>>(
+                              value: prodi,
+                              child: Text(prodi['name']!, overflow: TextOverflow.ellipsis),
+                            );
+                          }).toList(),
+                      onChanged: _selectedDepartment == null ? null : (val) {
+                        setState(() {
+                          _selectedProdi = val;
+                        });
+                      },
+                    ),
 
                     SizedBox(height: 30),
                     Divider(),
@@ -689,7 +692,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(8)),
                         child: Icon(Icons.lock_outline, color: theme.primaryColor),
                       ),
-                      title: Text(t.translate('edit_change_password')), // "Change Password"
+                      title: Text(t.translate('edit_change_password')), 
                       trailing: Icon(Icons.arrow_forward_ios, size: 14, color: theme.hintColor),
                       onTap: () {
                         Navigator.of(context).push(

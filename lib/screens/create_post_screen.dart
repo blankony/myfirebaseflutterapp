@@ -55,7 +55,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _isLoadingBadWords = true;
 
   bool _canPost = false;
-  bool _isProcessing = false;
+  bool _isProcessing = false; // State untuk mengontrol loading screen
   bool _isSavingDraft = false; 
 
   String _visibility = 'public'; 
@@ -118,7 +118,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           _customBadWords = words;
           _isLoadingBadWords = false;
         });
-        debugPrint("Loaded ${_customBadWords.length} bad words from remote sources.");
       }
     } catch (e) {
       debugPrint("Failed to load bad words: $e");
@@ -205,14 +204,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
         final data = userDoc.data()!;
-        setState(() {
-          _myUserName = data['name'] ?? 'User';
-          _myUserEmail = user.email ?? '';
-          _myAvatarIconId = data['avatarIconId'] ?? 0;
-          _myAvatarHex = data['avatarHex'] ?? '';
-          _myAvatarUrl = data['profileImageUrl'];
-          _isAccountPrivate = data['isPrivate'] ?? false;
-        });
+        if (mounted) {
+          setState(() {
+            _myUserName = data['name'] ?? 'User';
+            _myUserEmail = user.email ?? '';
+            _myAvatarIconId = data['avatarIconId'] ?? 0;
+            _myAvatarHex = data['avatarHex'] ?? '';
+            _myAvatarUrl = data['profileImageUrl'];
+            _isAccountPrivate = data['isPrivate'] ?? false;
+          });
+        }
       }
     } catch (_) {}
 
@@ -230,17 +231,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           final List editors = data['editors'] ?? [];
           final bool isStaff = ownerId == user.uid || admins.contains(user.uid) || editors.contains(user.uid);
           
-          setState(() {
-            _hasOfficialAuthority = isStaff;
-            _postAsCommunity = isStaff; 
-            _communityName = data['name'];
-            _communityIcon = data['imageUrl'];
-          });
+          if (mounted) {
+            setState(() {
+              _hasOfficialAuthority = isStaff;
+              _postAsCommunity = isStaff; 
+              _communityName = data['name'];
+              _communityIcon = data['imageUrl'];
+            });
+          }
 
           if (!allowMembers && !isStaff) {
-            setState(() => _isRestricted = true);
             if(mounted) {
-              OverlayService().showTopNotification(context, "Posting restricted to Admins", Icons.lock, (){}, color: Colors.red);
+              setState(() => _isRestricted = true);
+              var t = AppLocalizations.of(context)!;
+              OverlayService().showTopNotification(context, t.translate('post_restricted_admin'), Icons.lock, (){}, color: Colors.red);
               Navigator.pop(context);
             }
           }
@@ -267,13 +271,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (_) {}
   }
 
-  // --- CEK IMAGE SAFETY (FIXED ENUMS & LOGIC) ---
+  // --- CEK IMAGE SAFETY ---
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
+    
+    // AKTIFKAN LOADING SCREEN
     setState(() => _isProcessing = true);
     
     var t = AppLocalizations.of(context)!;
-    OverlayService().showTopNotification(context, t.translate('post_scan_images'), Icons.remove_red_eye, (){}, color: Colors.orange);
+    // NOTE: Notification dihapus karena diganti full loading screen
+    // OverlayService().showTopNotification(context, t.translate('post_scan_images'), Icons.remove_red_eye, (){}, color: Colors.orange);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
@@ -285,7 +292,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final model = GenerativeModel(
         model: 'gemini-2.5-flash', 
         apiKey: apiKey,
-        // Gunakan HarmBlockThreshold.medium agar tidak error
         safetySettings: [
           SafetySetting(HarmCategory.harassment, HarmBlockThreshold.medium),
           SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.medium),
@@ -320,16 +326,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           final response = await model.generateContent(content);
           
           if (response.text != null && response.text!.isNotEmpty) {
-             debugPrint("Gemini Safe Response: ${response.text}");
              continue; 
           } else {
-             debugPrint("Gemini Refused to Answer (Empty Text)");
              if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
              return false;
           }
 
         } catch (e) {
-          debugPrint("Gemini Blocked Content / Error: $e");
           if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
           return false;
         }
@@ -339,6 +342,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       debugPrint("System Error in Image Check: $e");
       return true; 
     } finally {
+      // MATIKAN LOADING SCREEN
       if (mounted) setState(() => _isProcessing = false);
     }
   }
@@ -418,18 +422,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<File?> _cropImage(File imageFile) async {
+    var t = AppLocalizations.of(context)!;
     try {
       CroppedFile? croppedFile = await ImageCropper().cropImage(
         sourcePath: imageFile.path,
         uiSettings: [
           AndroidUiSettings(
-            toolbarTitle: 'Crop Image',
+            toolbarTitle: t.translate('post_crop_image'),
             toolbarColor: TwitterTheme.blue,
             toolbarWidgetColor: Colors.white,
             initAspectRatio: CropAspectRatioPreset.original,
             lockAspectRatio: false,
           ),
-          IOSUiSettings(title: 'Crop Image'),
+          IOSUiSettings(title: t.translate('post_crop_image')),
         ],
       );
       if (croppedFile != null) return File(croppedFile.path);
@@ -736,6 +741,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       'failed': t.translate('post_failed'),
     };
 
+    final String communityNameSafe = _communityName ?? t.translate('general_community'); 
+    final String myUserNameSafe = _myUserName == 'Anonymous' ? t.translate('general_anonymous') : _myUserName;
+
     if (overlayState != null) {
       _BackgroundUploader.startUploadSequence(
         overlayState: overlayState,
@@ -747,7 +755,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         isEditing: _isEditing,
         postId: widget.postId,
         uid: user.uid, 
-        userName: _postAsCommunity ? (_communityName ?? 'Community') : _myUserName,
+        userName: _postAsCommunity ? communityNameSafe : myUserNameSafe,
         userEmail: _myUserEmail,
         avatarIconId: _postAsCommunity ? 0 : _myAvatarIconId,
         avatarHex: _postAsCommunity ? '' : _myAvatarHex,
@@ -779,7 +787,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     var t = AppLocalizations.of(context)!;
 
     final String? currentAvatarUrl = _postAsCommunity ? _communityIcon : _myAvatarUrl;
-    final String currentDisplayName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
+    final String currentDisplayName = _postAsCommunity 
+        ? (_communityName ?? t.translate('general_community')) 
+        : (_myUserName == 'Anonymous' ? t.translate('general_anonymous') : _myUserName);
 
     return WillPopScope(
       onWillPop: _onWillPop,
@@ -799,7 +809,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   children: [
                     const Icon(Icons.groups, color: TwitterTheme.blue, size: 20),
                     const SizedBox(width: 8),
-                    Flexible(child: Text(_communityName ?? "Community", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                    Flexible(child: Text(_communityName ?? t.translate('general_community'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                   ],
                 ) 
               : Text(_isEditing ? t.translate('post_edit_title') : t.translate('post_create_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -965,7 +975,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ],
                 ),
               ),
-            )
+            ),
+
+            // --- LOADING BLOCKING SCREEN ---
+            if (_isProcessing)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54, // Semi-transparent black
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Colors.white),
+                        SizedBox(height: 16),
+                        Text(
+                          t.translate('post_scan_images'), 
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -986,6 +1017,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
+// ... _BackgroundUploader and _PostUploadOverlay classes remain same ...
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
@@ -1133,7 +1165,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isMiniVisible = false;
   bool _isSuccess = false;
   bool _isError = false;
-  bool _dismissedBySwipe = false; // Flag untuk mencegah Red Screen
+  bool _dismissedBySwipe = false; 
   late String _message; 
   Timer? _autoDismissTimer;
 
@@ -1157,7 +1189,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
       if (mounted) {
         setState(() { 
             _isCardVisible = true; 
-            _dismissedBySwipe = false; // Reset flag saat kembali ke card
+            _dismissedBySwipe = false;
         });
         _autoDismissTimer?.cancel();
         _autoDismissTimer = Timer(const Duration(seconds: 2), dismissToIcon);
@@ -1202,12 +1234,12 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 300), opacity: _isCardVisible ? 1.0 : 0.0,
             child: _dismissedBySwipe 
-                ? const SizedBox.shrink() // Hilangkan Dismissible dari tree jika sudah diswipe
+                ? const SizedBox.shrink() 
                 : Dismissible(
                     key: const ValueKey('upload_card_dismiss'),
                     direction: DismissDirection.horizontal,
                     onDismissed: (_) {
-                        setState(() => _dismissedBySwipe = true); // Tandai sebagai dismissed
+                        setState(() => _dismissedBySwipe = true); 
                         widget.onDismissRequest();
                     },
                     child: Material(

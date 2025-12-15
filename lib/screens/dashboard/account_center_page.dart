@@ -8,7 +8,8 @@ import '../edit_profile_screen.dart';
 import '../change_password_screen.dart';
 import '../../auth_gate.dart'; 
 import '../../services/overlay_service.dart';
-import '../ktm_verification_screen.dart'; // REQUIRED
+import '../ktm_verification_screen.dart'; 
+import '../../services/app_localizations.dart'; // REQUIRED IMPORT
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -62,6 +63,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     final TextEditingController passwordController = TextEditingController();
     String? errorMessage;
     bool isVerifying = false;
+    var t = AppLocalizations.of(context)!;
 
     await showDialog(
       context: context,
@@ -70,18 +72,18 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
         return StatefulBuilder(
           builder: (builderContext, setDialogState) {
             return AlertDialog(
-              title: Text('Verify Password'),
+              title: Text(t.translate('account_verify_pass_title')),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Please enter your password to continue.'),
+                  Text(t.translate('account_verify_pass_desc')),
                   SizedBox(height: 16),
                   TextField(
                     controller: passwordController,
                     obscureText: true,
                     decoration: InputDecoration(
-                      labelText: 'Password',
+                      labelText: t.translate('auth_password'),
                       errorText: errorMessage,
                       border: OutlineInputBorder(),
                     ),
@@ -91,7 +93,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
               actions: [
                 TextButton(
                   onPressed: isVerifying ? null : () => Navigator.of(builderContext).pop(),
-                  child: Text('Cancel'),
+                  child: Text(t.translate('general_cancel')),
                 ),
                 ElevatedButton(
                   onPressed: isVerifying ? null : () async {
@@ -123,7 +125,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                         setDialogState(() {
                           isVerifying = false;
                           if (e.code == 'invalid-credential' || e.code == 'wrong-password') {
-                             errorMessage = 'Incorrect password.';
+                             errorMessage = t.translate('error_invalid_credential');
                           } else {
                              errorMessage = 'Error: ${e.message}';
                           }
@@ -133,7 +135,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                        if (builderContext.mounted) {
                          setDialogState(() {
                           isVerifying = false;
-                          errorMessage = 'An error occurred.';
+                          errorMessage = t.translate('general_error');
                         });
                        }
                     }
@@ -144,7 +146,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                   ),
                   child: isVerifying 
                     ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                    : Text('Verify'),
+                    : Text(t.translate('account_verify_btn')),
                 ),
               ],
             );
@@ -155,23 +157,21 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
   }
 
   Future<void> _showFinalDeleteConfirmation() async {
+    var t = AppLocalizations.of(context)!;
     final didConfirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete Account'),
-        content: Text(
-          'Are you sure you want to delete your account?\n\n'
-          'This action is PERMANENT and cannot be undone. All your posts, profile data, and settings will be lost forever.',
-        ),
+        title: Text(t.translate('account_delete_title')),
+        content: Text(t.translate('account_delete_confirm_body')),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(t.translate('general_cancel'))),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: Text('Delete Account'),
+            child: Text(t.translate('account_delete_title')),
           ),
         ],
       ),
@@ -186,6 +186,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     setState(() {
       _isDeleting = true;
     });
+    var t = AppLocalizations.of(context)!;
 
     try {
       final user = _auth.currentUser;
@@ -216,7 +217,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
         if (mounted) {
           OverlayService().showTopNotification(
             context, 
-            "Account deleted successfully.", 
+            t.translate('account_deleted'), 
             Icons.delete_forever, 
             (){},
             color: Colors.grey
@@ -236,7 +237,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
         
         OverlayService().showTopNotification(
           context, 
-          "Failed to delete account: $e", 
+          "${t.translate('account_delete_fail')}: $e", 
           Icons.error, 
           (){},
           color: Colors.red
@@ -250,19 +251,20 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
     final theme = Theme.of(context);
     final user = _auth.currentUser; // Use fresh instance
     final bool isEmailVerified = user?.emailVerified ?? false;
+    var t = AppLocalizations.of(context)!;
     
     return Stack(
       children: [
         Scaffold(
           appBar: AppBar(
-            title: Text('Account Center'),
+            title: Text(t.translate('settings_account')), // "Account Center"
           ),
           body: ListView(
             children: [
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Text(
-                  "Verification Status",
+                  t.translate('account_verif_status'),
                   style: theme.textTheme.titleMedium?.copyWith(color: TwitterTheme.blue, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -281,18 +283,18 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                     size: 20,
                   ),
                 ),
-                title: Text('Email Verification'),
-                subtitle: Text(isEmailVerified ? 'Verified' : 'Action Required'),
+                title: Text(t.translate('profile_verify_email')),
+                subtitle: Text(isEmailVerified ? t.translate('account_verified') : t.translate('account_action_req')),
                 trailing: isEmailVerified 
                   ? Icon(Icons.check_circle, color: Colors.green)
                   : TextButton(
-                      child: Text("Verify"),
+                      child: Text(t.translate('general_verify')),
                       onPressed: () async {
                         try {
                           await user?.sendEmailVerification();
-                          OverlayService().showTopNotification(context, "Verification email sent", Icons.email, (){});
+                          OverlayService().showTopNotification(context, t.translate('profile_verify_sent'), Icons.email, (){});
                         } catch (e) {
-                          OverlayService().showTopNotification(context, "Please wait before retrying.", Icons.timer, (){}, color: Colors.orange);
+                          OverlayService().showTopNotification(context, t.translate('profile_verify_wait'), Icons.timer, (){}, color: Colors.orange);
                         }
                       },
                     ),
@@ -309,24 +311,24 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                       status = data['verificationStatus'] ?? 'none';
                     }
 
-                    String title = "Student ID (KTM)";
-                    String subtitle = "Verify to get blue checkmark";
+                    String title = t.translate('account_ktm');
+                    String subtitle = t.translate('account_ktm_desc');
                     IconData icon = Icons.badge_outlined;
                     Color color = Colors.grey;
                     Widget? trailing;
 
                     if (status == 'verified') {
-                      subtitle = "Verified Student";
+                      subtitle = t.translate('account_ktm_verified');
                       color = Colors.green;
                       icon = Icons.verified_user;
                       trailing = Icon(Icons.check_circle, color: Colors.green);
                     } else if (status == 'pending') {
-                      subtitle = "Under Review";
+                      subtitle = t.translate('account_ktm_review');
                       color = Colors.orange;
                       icon = Icons.hourglass_top;
-                      trailing = Text("Pending", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold));
+                      trailing = Text(t.translate('profile_verify_pending'), style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold));
                     } else if (status == 'rejected') {
-                      subtitle = "Verification Rejected. Try again.";
+                      subtitle = t.translate('account_ktm_rejected');
                       color = Colors.red;
                       icon = Icons.error_outline;
                       trailing = Icon(Icons.arrow_forward_ios, size: 16);
@@ -359,15 +361,15 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Text(
-                  "Profile & Settings",
+                  t.translate('account_profile_header'),
                   style: theme.textTheme.titleMedium?.copyWith(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
                 ),
               ),
               
               ListTile(
                 leading: Icon(Icons.edit_outlined),
-                title: Text('Edit Profile'),
-                subtitle: Text('Change Name, Bio, and Avatar'),
+                title: Text(t.translate('profile_edit')),
+                subtitle: Text(t.translate('account_edit_desc')),
                 trailing: Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () {
                   Navigator.of(context).push(_createSlideRightRoute(EditProfileScreen()));
@@ -378,7 +380,7 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
               
               ListTile(
                 leading: Icon(Icons.lock_outline),
-                title: Text('Change Password'),
+                title: Text(t.translate('edit_change_password')),
                 trailing: Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () {
                   Navigator.of(context).push(_createSlideRightRoute(ChangePasswordScreen()));
@@ -390,22 +392,22 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Text(
-                  "Danger Zone",
+                  t.translate('account_danger'),
                   style: theme.textTheme.titleMedium?.copyWith(color: Colors.red, fontWeight: FontWeight.bold),
                 ),
               ),
               ListTile(
                 leading: Icon(Icons.logout, color: theme.iconTheme.color),
-                title: Text('Log Out'),
+                title: Text(t.translate('settings_logout')),
                 onTap: () async {
                   final confirm = await showDialog<bool>(
                     context: context,
                     builder: (context) => AlertDialog(
-                      title: Text('Log Out'),
-                      content: Text('Are you sure you want to log out?'),
+                      title: Text(t.translate('settings_logout')),
+                      content: Text(t.translate('settings_logout_confirm')),
                       actions: [
-                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text("Cancel")),
-                        TextButton(onPressed: () => Navigator.pop(context, true), child: Text("Log Out", style: TextStyle(color: Colors.red))),
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(t.translate('general_cancel'))),
+                        TextButton(onPressed: () => Navigator.pop(context, true), child: Text(t.translate('settings_logout'), style: TextStyle(color: Colors.red))),
                       ],
                     ),
                   ) ?? false;
@@ -420,8 +422,8 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
               ),
               ListTile(
                 leading: Icon(Icons.delete_forever_outlined, color: Colors.red),
-                title: Text('Delete Account', style: TextStyle(color: Colors.red)),
-                subtitle: Text('Permanently delete your account and data'),
+                title: Text(t.translate('account_delete_title'), style: TextStyle(color: Colors.red)),
+                subtitle: Text(t.translate('account_delete_subtitle')),
                 onTap: () => _promptPasswordForDeletion(),
               ),
             ],
@@ -463,12 +465,12 @@ class _AccountCenterPageState extends State<AccountCenterPage> {
                         ),
                         SizedBox(height: 24),
                         Text(
-                          "Deleting Account",
+                          t.translate('account_deleting'),
                           style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         SizedBox(height: 8),
                         Text(
-                          "Cleaning up your posts and profile data...",
+                          t.translate('account_cleaning'),
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
                         ),
@@ -493,40 +495,42 @@ class _PrivacySwitchTileState extends State<_PrivacySwitchTile> {
   bool _isUpdating = false;
 
   Future<void> _togglePrivacy(BuildContext context, bool isCurrentlyPrivate) async {
+    var t = AppLocalizations.of(context)!;
+    
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isCurrentlyPrivate ? "Switch to Public?" : "Switch to Private?"),
+        title: Text(isCurrentlyPrivate ? t.translate('account_switch_public') : t.translate('account_switch_private')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(isCurrentlyPrivate 
-              ? "Making your account Public means:" 
-              : "Making your account Private means:"),
+              ? t.translate('account_public_mean') 
+              : t.translate('account_private_mean')),
             SizedBox(height: 8),
             _buildBulletPoint(isCurrentlyPrivate 
-              ? "Anyone can follow you immediately." 
-              : "New followers must request approval."),
+              ? t.translate('account_public_bullet1') 
+              : t.translate('account_private_bullet1')),
             _buildBulletPoint(isCurrentlyPrivate 
-              ? "All your existing posts will become Public." 
-              : "All your existing posts will become visible to Followers only."),
+              ? t.translate('account_public_bullet2') 
+              : t.translate('account_private_bullet2')),
             SizedBox(height: 8),
             Text(
-              "Note: Posts you explicitly set to 'Only Me' will remain hidden.",
+              t.translate('account_privacy_note'),
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("Cancel")),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(t.translate('general_cancel'))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: TwitterTheme.blue,
               foregroundColor: Colors.white,
             ),
-            child: Text("Confirm"),
+            child: Text(t.translate('general_confirm')),
           ),
         ],
       ),
@@ -575,7 +579,7 @@ class _PrivacySwitchTileState extends State<_PrivacySwitchTile> {
           if (context.mounted) {
             OverlayService().showTopNotification(
               context, 
-              !isCurrentlyPrivate ? "Account is now Private" : "Account is now Public", 
+              !isCurrentlyPrivate ? t.translate('account_privacy_now_private') : t.translate('account_privacy_now_public'), 
               !isCurrentlyPrivate ? Icons.lock : Icons.public, 
               (){}
             );
@@ -583,7 +587,7 @@ class _PrivacySwitchTileState extends State<_PrivacySwitchTile> {
         } catch (e) {
           if (context.mounted) {
             OverlayService().showTopNotification(
-              context, "Failed to update privacy settings", Icons.error, (){}, color: Colors.red
+              context, t.translate('account_privacy_update_fail'), Icons.error, (){}, color: Colors.red
             );
           }
         } finally {
@@ -610,6 +614,7 @@ class _PrivacySwitchTileState extends State<_PrivacySwitchTile> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return SizedBox.shrink();
+    var t = AppLocalizations.of(context)!;
 
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
@@ -626,8 +631,8 @@ class _PrivacySwitchTileState extends State<_PrivacySwitchTile> {
                 isPrivate ? Icons.lock : Icons.lock_open, 
                 color: Theme.of(context).primaryColor
               ),
-          title: Text('Private Account'),
-          subtitle: Text('Only followers can see your posts and profile details.'),
+          title: Text(t.translate('account_private_title')),
+          subtitle: Text(t.translate('account_private_subtitle')),
           value: isPrivate,
           onChanged: _isUpdating ? null : (_) => _togglePrivacy(context, isPrivate),
         );

@@ -6,11 +6,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart'; 
-import 'package:open_filex/open_filex.dart'; // IMPORT DIPERBAIKI (GANTI KE OPEN_FILEX)
+import 'package:open_filex/open_filex.dart'; 
 import '../main.dart';
 import 'login_page.dart'; 
 import 'setup/setup_profile_screen.dart'; 
-import '../services/app_localizations.dart';
+import '../services/app_localizations.dart'; // REQUIRED IMPORT
 
 final FirebaseAuth _auth = FirebaseAuth.instance;
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -58,6 +58,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   // FUNGSI UNTUK MEMBUKA PDF DARI ASSETS
   Future<void> _openTermsAndConditions() async {
+    var t = AppLocalizations.of(context)!;
     try {
       // 1. Load file dari assets
       final ByteData data = await rootBundle.load('documents/syarat_dan_ketentuan.pdf');
@@ -71,30 +72,30 @@ class _RegisterPageState extends State<RegisterPage> {
       await file.writeAsBytes(bytes, flush: true);
 
       // 4. Buka file menggunakan OpenFilex
-      // PERBAIKAN: Menggunakan 'OpenFilex'
       final result = await OpenFilex.open(file.path);
 
       if (result.type != ResultType.done) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Tidak dapat membuka dokumen: ${result.message}')),
+          SnackBar(content: Text('${t.translate('error_open_pdf')}${result.message}')),
         );
       }
     } catch (e) {
       debugPrint('Error opening PDF: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memuat dokumen Syarat dan Ketentuan.')),
+        SnackBar(content: Text(t.translate('error_load_pdf'))),
       );
     }
   }
 
   Future<void> _signUp() async {
      setState(() { _errorMessage = ''; _isLoading = true; });
+     var t = AppLocalizations.of(context)!;
 
     // VALIDASI PERSETUJUAN
     if (!_isAgreed) {
       setState(() { 
         _isLoading = false; 
-        _errorMessage = 'Anda wajib menyetujui Syarat dan Ketentuan PNJ untuk mendaftar.'; 
+        _errorMessage = t.translate('auth_agree_error'); 
       });
       return;
     }
@@ -123,7 +124,7 @@ class _RegisterPageState extends State<RegisterPage> {
           await userCredential.user!.delete();
           throw FirebaseAuthException(
             code: 'nim-already-in-use', 
-            message: 'The NIM/NIP $idNumber is already registered.'
+            message: t.translate('error_nim_registered')
           );
         }
 
@@ -148,9 +149,18 @@ class _RegisterPageState extends State<RegisterPage> {
         }
       }
     } on FirebaseAuthException catch (e) {
-      setState(() { _errorMessage = e.message ?? 'An error occurred'; });
+      setState(() { 
+        // Handle specific firebase auth errors if needed, otherwise general
+        if (e.code == 'email-already-in-use') {
+           _errorMessage = 'Email already in use.'; // You can add this to json too
+        } else if (e.code == 'nim-already-in-use') {
+           _errorMessage = e.message!;
+        } else {
+           _errorMessage = e.message ?? t.translate('general_error');
+        }
+      });
     } catch (e) {
-       setState(() { _errorMessage = 'Unknown error occurred: $e'; });
+       setState(() { _errorMessage = '${t.translate('general_error')}: $e'; });
     } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
@@ -431,11 +441,11 @@ class _RegisterPageState extends State<RegisterPage> {
                                 ),
                                 children: [
                                   TextSpan(
-                                    text: 'Saya menyetujui ',
+                                    text: t.translate('auth_agree_start'), // "I agree to "
                                     style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                                   ),
                                   TextSpan(
-                                    text: 'Syarat dan Ketentuan PNJ',
+                                    text: t.translate('auth_agree_terms'), // "Terms and Conditions"
                                     style: TextStyle(
                                       color: TwitterTheme.blue,
                                       fontWeight: FontWeight.bold,
@@ -445,7 +455,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                       ..onTap = _openTermsAndConditions,
                                   ),
                                   TextSpan(
-                                    text: ' dan kebijakan privasi yang berlaku.',
+                                    text: t.translate('auth_agree_end'), // " and privacy policy"
                                     style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                                   ),
                                 ],
