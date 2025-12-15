@@ -47,16 +47,17 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   String? _searchSuggestion;
   Timer? _debounce;
   
-  // State untuk Toggle Show More
+  // State for Show More Toggles
   bool _showAllTrending = false;
-  bool _showAllDiscover = false; // Add this
+  bool _showAllDiscover = false;
+  bool _showAllPeople = false; 
 
-  // Optimasi: Cache User Data
+  // Optimization: Cache User Data
   List<String> _blockedUserIds = [];
   List<String> _followingIds = [];
   bool _userDataLoaded = false;
   
-  // Optimasi: Cache Future
+  // Optimization: Cache Futures
   Future<List<Map<String, dynamic>>>? _trendingFuture;
   Future<List<DocumentSnapshot>>? _discoverFuture;
   Future<List<DocumentSnapshot>>? _communityRecFuture;
@@ -135,10 +136,13 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   
   Future<List<DocumentSnapshot>> _fetchDiscoverContent() async {
      try {
-       // Fetch sedikit lebih banyak untuk cadangan rekomendasi
+       // INCREASED LIMIT: Fetches 100 instead of 40.
+       // The 'Discover' algorithm filters out posts from people you follow.
+       // If we only fetch 40 and you follow the authors of 39 of them, you only see 1 post.
+       // Increasing this limit ensures enough "new" content survives the filter.
        final snapshot = await _firestore.collection('posts')
            .orderBy('timestamp', descending: true)
-           .limit(40) 
+           .limit(100) 
            .get();
            
         final publicPosts = snapshot.docs.where((doc) {
@@ -163,6 +167,58 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       );
     } catch(e) {
       return [];
+    }
+  }
+
+  Future<List<DocumentSnapshot>> _getSuggestedUsers(String? currentUserId) async {
+    if (currentUserId == null) return [];
+    try {
+      // 1. Identification of potential "Friends of Friends"
+      Set<String> priorityUserIds = {};
+      final List<String> following = _followingIds;
+
+      if (following.isNotEmpty) {
+        // Check connections from the first few people we follow
+        for (String followedId in following.take(5)) {
+           final followedDoc = await _firestore.collection('users').doc(followedId).get();
+           if (followedDoc.exists) {
+              final data = followedDoc.data() as Map<String, dynamic>;
+              final List<dynamic> theirFollowing = data['following'] ?? [];
+              for (var potential in theirFollowing) {
+                 if (potential != currentUserId && !following.contains(potential)) {
+                   priorityUserIds.add(potential.toString());
+                 }
+              }
+           }
+        }
+      }
+      
+      List<DocumentSnapshot> allSuggestions = [];
+
+      // 2. Fetch Priority Users (Friends of Friends)
+      if (priorityUserIds.isNotEmpty) {
+        for (String userId in priorityUserIds.take(20)) {
+          final userDoc = await _firestore.collection('users').doc(userId).get();
+          if (userDoc.exists) allSuggestions.add(userDoc);
+        }
+      }
+      
+      // 3. Always fetch Random Users to fill the list
+      // This ensures we always have enough users to show the "Show More" button if needed
+      final allUsersSnapshot = await _firestore.collection('users').limit(50).get();
+      final randomUsers = allUsersSnapshot.docs.where((doc) {
+        return doc.id != currentUserId && 
+               !following.contains(doc.id) &&
+               !priorityUserIds.contains(doc.id); // Don't duplicate priority users
+      }).toList();
+      
+      randomUsers.shuffle();
+      allSuggestions.addAll(randomUsers);
+
+      // Return ALL found users. The UI will handle showing 5 and hiding the rest.
+      return allSuggestions;
+    } catch (e) { 
+      return []; 
     }
   }
 
@@ -295,42 +351,6 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       if (!widget.isSearching) widget.onSearchPressed();
     });
     FocusScope.of(context).unfocus();
-  }
-
-  Future<List<DocumentSnapshot>> _getSuggestedUsers(String? currentUserId) async {
-    if (currentUserId == null) return [];
-    try {
-      Set<String> suggestedUserIds = {};
-      final List<String> following = _followingIds;
-
-      if (following.isNotEmpty) {
-        final firstFollowId = following.first;
-         final followedUserDoc = await _firestore.collection('users').doc(firstFollowId).get();
-          if (followedUserDoc.exists) {
-            final followedUserData = followedUserDoc.data() as Map<String, dynamic>;
-            final List<dynamic> theirFollowing = followedUserData['following'] ?? [];
-            for (var potential in theirFollowing) {
-               if (potential != currentUserId && !following.contains(potential)) {
-                 suggestedUserIds.add(potential.toString());
-               }
-            }
-          }
-      }
-      
-      if (suggestedUserIds.isNotEmpty) {
-        List<DocumentSnapshot> suggestions = [];
-        for (String userId in suggestedUserIds.take(5)) {
-          final userDoc = await _firestore.collection('users').doc(userId).get();
-          if (userDoc.exists) suggestions.add(userDoc);
-        }
-        return suggestions;
-      }
-      
-      final allUsersSnapshot = await _firestore.collection('users').limit(10).get();
-      final randomUsers = allUsersSnapshot.docs.where((doc) => doc.id != currentUserId && !following.contains(doc.id)).toList();
-      randomUsers.shuffle();
-      return randomUsers.take(5).toList();
-    } catch (e) { return []; }
   }
 
   @override
@@ -691,7 +711,7 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   );
                 }
 
-                // --- LOGIKA TAMPILKAN 5 POST + SHOW MORE ---
+                // --- SHOW MORE LOGIC FOR DISCOVER ---
                 final int initialCount = 5;
                 final bool showAll = _showAllDiscover;
                 final int totalCount = allPosts.length;
@@ -753,12 +773,43 @@ class SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
                 if (snapshot.hasError) return Padding(padding: EdgeInsets.all(16), child: Text(t.translate('search_people_error')));
-                if (!snapshot.hasData || snapshot.data!.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text(t.translate('search_people_empty')));
+                
+                final allUsers = snapshot.data ?? [];
+                
+                if (allUsers.isEmpty) return Padding(padding: const EdgeInsets.all(16.0), child: Text(t.translate('search_people_empty')));
+
+                // --- SHOW MORE LOGIC FOR PEOPLE ---
+                final int initialCount = 5;
+                final bool showAll = _showAllPeople;
+                final int totalCount = allUsers.length;
+                
+                final int visibleCount = showAll ? totalCount : (totalCount > initialCount ? initialCount : totalCount);
+                final displayedUsers = allUsers.take(visibleCount).toList();
+                final bool canExpand = totalCount > initialCount;
+
                 return Column(
-                  children: snapshot.data!.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _UserSearchTile(userId: doc.id, userData: data, currentUserId: _auth.currentUser?.uid);
-                  }).toList(),
+                  children: [
+                    ...displayedUsers.map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      return _UserSearchTile(userId: doc.id, userData: data, currentUserId: _auth.currentUser?.uid);
+                    }).toList(),
+                    
+                    if (canExpand)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Center(
+                          child: TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _showAllPeople = !_showAllPeople;
+                              });
+                            },
+                            icon: Icon(_showAllPeople ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                            label: Text(_showAllPeople ? t.translate('general_show_less') : t.translate('general_show_more')),
+                          ),
+                        ),
+                      ),
+                  ],
                 );
               }
             ),
