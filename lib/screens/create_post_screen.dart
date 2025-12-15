@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,12 +11,14 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:badword_guard/badword_guard.dart'; 
-import 'package:visual_detector_ai/visual_detector_ai.dart'; 
+import 'package:google_generative_ai/google_generative_ai.dart'; 
+import 'package:image_cropper/image_cropper.dart'; 
 import '../main.dart';
 import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/overlay_service.dart';
 import '../services/draft_service.dart'; 
+import '../services/bad_word_service.dart'; // IMPORT SERVICE BARU
 import 'video_trimmer_screen.dart';
 import '../services/app_localizations.dart';
 
@@ -24,9 +27,9 @@ final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 final CloudinaryService _cloudinaryService = CloudinaryService();
 
 class CreatePostScreen extends StatefulWidget {
-  final String? postId; // For editing published posts
-  final Map<String, dynamic>? initialData; // For community context/prefill
-  final DraftPost? draftData; // For loading a draft
+  final String? postId;
+  final Map<String, dynamic>? initialData;
+  final DraftPost? draftData;
 
   const CreatePostScreen({
     super.key,
@@ -44,7 +47,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final PredictionService _predictionService = PredictionService();
   final DraftService _draftService = DraftService(); 
   final FocusNode _postFocusNode = FocusNode();
+  
   final LanguageChecker _badwordGuard = LanguageChecker();
+  final BadWordService _badWordService = BadWordService(); // Instance service
+
+  // List dinamis yang akan diisi dari internet
+  List<String> _customBadWords = []; 
+  bool _isLoadingBadWords = true;
 
   bool _canPost = false;
   bool _isProcessing = false;
@@ -78,8 +87,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String? _mediaType; 
   
   String? _currentDraftId;
-
-  // State untuk melacak perubahan (Modified Check)
   String _initialText = '';
   List<String> _initialMediaUrls = [];
 
@@ -91,17 +98,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _checkEmailVerification(); 
     _loadIdentity(); 
     _trainAiModel();
+    _loadBadWords(); // Load kata kasar dari server
 
-    // Init Logic Priority: Edit Published > Load Draft > New Post
     if (widget.initialData != null && _isEditing) {
       _initFromPublishedPost();
     } else if (widget.draftData != null) {
       _initFromDraft(widget.draftData!);
     } else if (widget.initialData != null) {
-      // Setup community context from navigation
       _communityId = widget.initialData!['communityId'];
       _communityName = widget.initialData!['communityName'];
       _communityIcon = widget.initialData!['communityIcon'];
+    }
+  }
+
+  // Fetch badwords dari GitHub
+  Future<void> _loadBadWords() async {
+    try {
+      final words = await _badWordService.fetchBadWords();
+      if (mounted) {
+        setState(() {
+          _customBadWords = words;
+          _isLoadingBadWords = false;
+        });
+        debugPrint("Loaded ${_customBadWords.length} bad words from remote sources.");
+      }
+    } catch (e) {
+      debugPrint("Failed to load bad words: $e");
+      if (mounted) setState(() => _isLoadingBadWords = false);
     }
   }
 
@@ -125,8 +148,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _visibility = draft.visibility;
     _existingMediaUrls = List<String>.from(draft.mediaUrls);
     _existingPublicIds = List<String>.from(draft.publicIds);
-    
-    // Simpan state awal untuk perbandingan
     _initialText = draft.text;
     _initialMediaUrls = List<String>.from(draft.mediaUrls);
     
@@ -139,7 +160,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _checkCanPost();
   }
 
-  // Cek apakah ada perubahan dari kondisi awal
   bool _hasChanges() {
     bool textChanged = _postController.text.trim() != _initialText.trim();
     bool mediaChanged = _selectedMediaFiles.isNotEmpty || 
@@ -153,7 +173,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       try { await user.reload(); } catch (_) {}
       if (!user.emailVerified) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          // LOCALIZATION
           var t = AppLocalizations.of(context)!;
           showDialog(
             context: context,
@@ -202,7 +221,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_communityId != null) {
       _isCommunityContext = true;
       _visibility = 'public'; 
-
       try {
         final comDoc = await _firestore.collection('communities').doc(_communityId).get();
         if (comDoc.exists) {
@@ -251,47 +269,138 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (_) {}
   }
 
+  // --- CEK IMAGE SAFETY ---
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
     setState(() => _isProcessing = true);
     
-    // LOCALIZATION
     var t = AppLocalizations.of(context)!;
     OverlayService().showTopNotification(context, t.translate('post_scan_images'), Icons.remove_red_eye, (){}, color: Colors.orange);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
-      if (apiKey == null || apiKey.isEmpty) return true;
+      if (apiKey == null || apiKey.isEmpty) {
+        debugPrint("API Key missing, skipping visual check.");
+        return true;
+      }
+
+      final model = GenerativeModel(
+        model: 'gemini-2.5-flash', 
+        apiKey: apiKey,
+        safetySettings: [
+          SafetySetting(HarmCategory.harassment, HarmBlockThreshold.none),
+          SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.none),
+        ]
+      );
 
       int limit = _selectedMediaFiles.length > 3 ? 3 : _selectedMediaFiles.length;
+      
       for (int i = 0; i < limit; i++) {
-        final result = await VisualDetectorAi.analyzeImage(image: _selectedMediaFiles[i], geminiApiKey: apiKey);
-        final String description = result.toString().toLowerCase(); 
+        final File imageFile = _selectedMediaFiles[i];
+        final Uint8List imageBytes = await imageFile.readAsBytes();
         
+        String mimeType = 'image/jpeg';
+        if (imageFile.path.toLowerCase().endsWith('.png')) {
+          mimeType = 'image/png';
+        } else if (imageFile.path.toLowerCase().endsWith('.webp')) {
+          mimeType = 'image/webp';
+        }
+
+        final promptText = "Deskripsikan objek utama gambar ini dengan sangat singkat (max 1 kalimat), to the point, bahasa Indonesia formal. Tanpa emoji.";
+        
+        final content = [
+          Content.multi([
+            TextPart(promptText),
+            DataPart(mimeType, imageBytes),
+          ])
+        ];
+
+        final response = await model.generateContent(content);
+        final String description = response.text?.toLowerCase() ?? '';
+        
+        debugPrint("Gemini 2.5 Description: $description");
+
+        // --- KEYWORDS SAFETY ---
+        // Menggabungkan list dinamis dari internet dengan kata kunci visual spesifik
         final List<String> dangerKeywords = [
-          'nude', 'naked', 'sex', 'genitals', 'porn', 'erotic', 
-          'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill',
-          'telanjang', 'bugil', 'darah', 'membunuh' 
+          ..._customBadWords, // Dari GitHub
+          
+          // Visual Specific (Tetap hardcode karena konteks visual)
+          'bikini', 'lingerie', 'underwear', 'bra', 'panties', 'thong', 
+          'swimsuit', 'swimwear', 'cleavage', 'breast', 'nipple', 'boobs',
+          'butt', 'ass', 'buttocks', 'groin', 'crotch', 'intimate',
+          'pakaian dalam', 'baju renang', 'kutang', 'beha', 'bh', 
+          'sempak', 'celana dalam', 'payudara', 'toket', 'pantat', 'bokong',
+          'belahan dada', 'paha', 'seksi', 'mesum',
+          'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill', 'corpse',
+          'darah', 'membunuh', 'senjata', 'pisau', 'mayat', 'luka',
+          'nude', 'naked', 'telanjang', 'bugil'
         ];
 
         for (var word in dangerKeywords) {
-          if (description.contains(word)) {
-            if (mounted) _showRejectDialog(t.translate('post_sensitive_content')); // "Image contains sensitive content"
+          // Sanitasi
+          final cleanWord = word.trim();
+          if (cleanWord.isEmpty) continue;
+
+          if (description.contains(cleanWord)) {
+            if (mounted) _showRejectDialog("${t.translate('post_sensitive_content')} (AI Detected: $cleanWord)"); 
             return false;
           }
         }
 
-        if (_badwordGuard.containsBadLanguage(description)) {
-          if (mounted) _showRejectDialog(t.translate('post_image_inappropriate')); // "Image flagged..."
-          return false;
+        // Cek Text Filter juga sebagai backup
+        if (_checkTextForBadWords(description, silent: true)) {
+           if (mounted) _showRejectDialog(t.translate('post_image_inappropriate')); 
+           return false;
         }
       }
       return true; 
     } catch (e) {
+      debugPrint("Gemini Check Error: $e");
+      if (e.toString().toLowerCase().contains("safety") || e.toString().toLowerCase().contains("block")) {
+        if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
+        return false;
+      }
       return true; 
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
+  }
+
+  // --- CEK TEKS ---
+  bool _checkTextForBadWords(String text, {bool silent = false}) {
+    // 1. Cek Plugin Lokal (Offline)
+    if (_badwordGuard.containsBadLanguage(text)) {
+      if (!silent) {
+         var t = AppLocalizations.of(context)!;
+        _showRejectDialog(t.translate('post_bad_words'));
+      }
+      return true;
+    }
+
+    // 2. Cek List Dinamis (Online)
+    final lowerText = text.toLowerCase();
+    for (var badWord in _customBadWords) {
+      final cleanWord = badWord.trim();
+      if (cleanWord.isEmpty) continue;
+
+      // Cek apakah kata tersebut ada dalam kalimat (exact match or with spaces)
+      if (lowerText == cleanWord || 
+          lowerText.contains(" $cleanWord ") || 
+          lowerText.startsWith("$cleanWord ") || 
+          lowerText.endsWith(" $cleanWord")) {
+        
+        if (!silent) {
+           var t = AppLocalizations.of(context)!;
+          _showRejectDialog("${t.translate('post_bad_words')} ($cleanWord)");
+        }
+        return true;
+      }
+      
+      // Khusus untuk kata pendek/unik yang mungkin lolos filter spasi (opsional)
+      // Anda bisa menambahkan logika panjang string di sini jika perlu
+    }
+    return false;
   }
 
   void _showRejectDialog(String reason) {
@@ -300,7 +409,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(children: [Icon(Icons.gpp_bad, color: Colors.red), SizedBox(width: 8), Text(t.translate('general_rejected'))]),
-        content: Text("${t.translate('post_rejected_desc')}$reason"),
+        content: Text("${t.translate('post_rejected_desc')}\n\nReason: $reason"),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t.translate('general_edit'), style: TextStyle(color: TwitterTheme.blue)))],
       ),
     );
@@ -338,6 +447,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
+  Future<File?> _cropImage(File imageFile) async {
+    try {
+      CroppedFile? croppedFile = await ImageCropper().cropImage(
+        sourcePath: imageFile.path,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop Image',
+            toolbarColor: TwitterTheme.blue,
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.original,
+            lockAspectRatio: false,
+          ),
+          IOSUiSettings(title: 'Crop Image'),
+        ],
+      );
+      if (croppedFile != null) return File(croppedFile.path);
+    } catch (e) {
+      debugPrint("Crop error: $e");
+    }
+    return null;
+  }
+
   Future<void> _pickMedia(ImageSource source, {bool isVideo = false}) async {
     final picker = ImagePicker();
     try {
@@ -359,22 +490,32 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         if (source == ImageSource.gallery) {
           final List<XFile> pickedFiles = await picker.pickMultiImage(imageQuality: 80);
           if (pickedFiles.isNotEmpty) {
-            setState(() { 
-              if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; _existingPublicIds = []; } 
-              _mediaType = 'image'; 
-              _selectedMediaFiles.addAll(pickedFiles.map((x) => File(x.path))); 
-              _checkCanPost(); 
-            });
+            List<File> croppedFiles = [];
+            for (var xfile in pickedFiles) {
+              File? cropped = await _cropImage(File(xfile.path)); 
+              if (cropped != null) croppedFiles.add(cropped);
+            }
+            if (croppedFiles.isNotEmpty) {
+              setState(() { 
+                if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; _existingPublicIds = []; } 
+                _mediaType = 'image'; 
+                _selectedMediaFiles.addAll(croppedFiles); 
+                _checkCanPost(); 
+              });
+            }
           }
         } else {
           final XFile? pickedFile = await picker.pickImage(source: source, imageQuality: 80);
           if (pickedFile != null) {
-             setState(() { 
-               if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; _existingPublicIds = []; } 
-               _mediaType = 'image'; 
-               _selectedMediaFiles.add(File(pickedFile.path)); 
-               _checkCanPost(); 
-             });
+             File? cropped = await _cropImage(File(pickedFile.path)); 
+             if (cropped != null) {
+                setState(() { 
+                  if (_mediaType == 'video') { _selectedMediaFiles = []; _existingMediaUrls = []; _existingPublicIds = []; } 
+                  _mediaType = 'image'; 
+                  _selectedMediaFiles.add(cropped); 
+                  _checkCanPost(); 
+                });
+             }
           }
         }
       }
@@ -409,13 +550,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
               Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Text(t.translate('post_visibility_title'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), // "Who can see this?"
+                child: Text(t.translate('post_visibility_title'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), 
               ),
               if (_isAccountPrivate) ...[
                  ListTile(
                   leading: const Icon(Icons.people, color: TwitterTheme.blue),
-                  title: Text(t.translate('profile_followers')), // "Followers"
-                  subtitle: Text(t.translate('post_vis_followers_desc')), // "Only your followers..."
+                  title: Text(t.translate('profile_followers')),
+                  subtitle: Text(t.translate('post_vis_followers_desc')),
                   trailing: _visibility == 'followers' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                   onTap: () {
                     setState(() => _visibility = 'followers');
@@ -424,15 +565,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.public, color: Colors.grey),
-                  title: Text(t.translate('post_vis_public')), // "Public"
-                  subtitle: Text(t.translate('post_vis_private_warn')), // "Account is private..."
+                  title: Text(t.translate('post_vis_public')),
+                  subtitle: Text(t.translate('post_vis_private_warn')),
                   enabled: false, 
                 ),
               ] else ...[
                 ListTile(
                   leading: const Icon(Icons.public, color: TwitterTheme.blue),
-                  title: Text(t.translate('post_vis_public')), // "Public"
-                  subtitle: Text(t.translate('post_vis_public_desc')), // "Anyone on Sapa PNJ"
+                  title: Text(t.translate('post_vis_public')), 
+                  subtitle: Text(t.translate('post_vis_public_desc')), 
                   trailing: _visibility == 'public' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                   onTap: () {
                     setState(() => _visibility = 'public');
@@ -442,7 +583,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ],
               ListTile(
                 leading: const Icon(Icons.lock, color: Colors.red),
-                title: Text(t.translate('post_vis_me')), // "Only Me"
+                title: Text(t.translate('post_vis_me')), 
                 trailing: _visibility == 'private' ? const Icon(Icons.check, color: TwitterTheme.blue) : null,
                 onTap: () {
                   setState(() => _visibility = 'private');
@@ -465,14 +606,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     if (_visibility == 'private') {
       icon = Icons.lock;
-      label = t.translate('post_vis_me'); // "Only Me"
+      label = t.translate('post_vis_me'); 
       color = Colors.red;
     } else if (_visibility == 'followers') {
       icon = Icons.people;
-      label = t.translate('profile_followers'); // "Followers"
+      label = t.translate('profile_followers'); 
     } else {
       icon = Icons.public;
-      label = t.translate('post_vis_public'); // "Public"
+      label = t.translate('post_vis_public'); 
     }
 
     return Row(
@@ -487,33 +628,25 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  // --- INTERCEPT BACK NAVIGATION ---
   Future<bool> _onWillPop() async {
     var t = AppLocalizations.of(context)!;
-
-    // 1. Jika kosong total dan bukan draft, langsung keluar
     if (!_canPost && _currentDraftId == null) return true;
+    if (_currentDraftId != null && !_hasChanges()) return true;
 
-    // 2. Jika Draft sudah ada DAN TIDAK ADA PERUBAHAN, langsung keluar
-    if (_currentDraftId != null && !_hasChanges()) {
-      return true;
-    }
-
-    // 3. Jika sedang edit post yang sudah publish (bukan draft), konfirmasi discard changes
     if (_isEditing) {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text(t.translate('post_discard_title')), // "Discard changes?"
-          content: Text(t.translate('post_discard_desc')), // "You have unsaved changes..."
+          title: Text(t.translate('post_discard_title')), 
+          content: Text(t.translate('post_discard_desc')), 
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: Text(t.translate('post_keep_editing')), // "Keep Editing"
+              child: Text(t.translate('post_keep_editing')), 
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: Text(t.translate('post_discard'), style: TextStyle(color: Colors.red)), // "Discard"
+              child: Text(t.translate('post_discard'), style: TextStyle(color: Colors.red)), 
             ),
           ],
         ),
@@ -521,7 +654,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return confirm ?? false;
     }
 
-    // 4. Untuk Post Baru atau Draft yang diubah -> Tawarkan Save
     final String title = _currentDraftId != null ? t.translate('post_draft_update_title') : t.translate('post_draft_save_title');
     final String content = _currentDraftId != null ? t.translate('post_draft_update_desc') : t.translate('post_draft_save_desc');
 
@@ -554,22 +686,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } else if (result == 'discard') {
       return true;
     }
-    
-    return false; // Stay
+    return false; 
   }
 
-  // --- SAVE DRAFT LOGIC ---
   Future<void> _saveToDrafts() async {
     setState(() => _isSavingDraft = true);
     var t = AppLocalizations.of(context)!;
-    
     try {
       List<String> finalUrls = [..._existingMediaUrls];
       List<String> finalPublicIds = [..._existingPublicIds];
 
       if (_selectedMediaFiles.isNotEmpty) {
         OverlayService().showTopNotification(context, t.translate('post_draft_uploading'), Icons.cloud_upload, (){});
-        
         for (var file in _selectedMediaFiles) {
           File fileToUp = file;
           if (_mediaType == 'video') {
@@ -578,9 +706,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                if (info != null && info.file != null) fileToUp = info.file!;
              } catch(e) {}
           }
-          
           final response = await _cloudinaryService.uploadFileWithDetails(fileToUp, _mediaType == 'video' ? 'video' : 'auto');
-          
           if (response.secureUrl != null) {
             finalUrls.add(response.secureUrl!);
             if (response.publicId != null) finalPublicIds.add(response.publicId!);
@@ -588,7 +714,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         }
       }
 
-      // Create Draft Object
       final draft = DraftPost(
         id: _currentDraftId ?? DateTime.now().millisecondsSinceEpoch.toString(),
         text: _postController.text,
@@ -603,10 +728,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       );
 
       await _draftService.saveDraft(draft);
-
-      if (mounted) {
-        OverlayService().showTopNotification(context, t.translate('post_draft_saved'), Icons.save, (){}, color: Colors.green);
-      }
+      if (mounted) OverlayService().showTopNotification(context, t.translate('post_draft_saved'), Icons.save, (){}, color: Colors.green);
     } catch (e) {
       if(mounted) OverlayService().showTopNotification(context, t.translate('post_draft_failed'), Icons.error, (){}, color: Colors.red);
     } finally {
@@ -622,11 +744,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (user == null) return;
 
     final text = _postController.text;
-    if (_badwordGuard.containsBadLanguage(text)) {
-      _showRejectDialog(t.translate('post_bad_words'));
-      return;
+    
+    // --- 1. FILTER TEKS (Caption) ---
+    if (_checkTextForBadWords(text)) {
+      return; 
     }
 
+    // --- 2. FILTER GAMBAR (Visual Detector AI) ---
     final isImageSafe = await _checkImageSafety();
     if (!isImageSafe) return; 
 
@@ -635,9 +759,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     final OverlayState? overlayState = Overlay.maybeOf(context);
     
-    // Prepare translated status strings
     final Map<String, String> localizedStrings = {
-      'uploading': t.translate('post_uploading_count'), // "Uploading..."
+      'uploading': t.translate('post_uploading_count'), 
       'no_content': t.translate('post_no_content'),
       'posted': t.translate('post_success'),
       'failed': t.translate('post_failed'),
@@ -653,22 +776,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         visibility: _visibility,
         isEditing: _isEditing,
         postId: widget.postId,
-        
         uid: user.uid, 
         userName: _postAsCommunity ? (_communityName ?? 'Community') : _myUserName,
         userEmail: _myUserEmail,
         avatarIconId: _postAsCommunity ? 0 : _myAvatarIconId,
         avatarHex: _postAsCommunity ? '' : _myAvatarHex,
         profileImageUrl: _postAsCommunity ? _communityIcon : _myAvatarUrl,
-        
         communityId: _communityId,
         communityName: _communityName,
         communityIcon: _communityIcon,
         communityVerified: _communityVerified,
         isCommunityIdentity: _postAsCommunity,
-        
         draftIdToDelete: _currentDraftId,
-        localizedStrings: localizedStrings, // PASS LOCALIZED STRINGS
+        localizedStrings: localizedStrings, 
       );
     }
   }
@@ -691,7 +811,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final String? currentAvatarUrl = _postAsCommunity ? _communityIcon : _myAvatarUrl;
     final String currentDisplayName = _postAsCommunity ? (_communityName ?? 'Community') : _myUserName;
 
-    // Wrap with WillPopScope to handle "Back" logic
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
@@ -699,7 +818,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         appBar: AppBar(
           leading: IconButton(
             icon: Icon(Icons.close, color: theme.primaryColor),
-            // Manually trigger pop check
             onPressed: () async {
               if (await _onWillPop()) {
                 if (mounted) Navigator.of(context).pop();
@@ -726,7 +844,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   foregroundColor: Colors.white,
                   shape: const StadiumBorder()
                 ),
-                child: Text(t.translate('post_button')), // "Post"
+                child: Text(t.translate('post_button')), 
               ),
             )
           ],
@@ -753,14 +871,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             Text(t.translate('post_identity_label'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             const Spacer(),
                             ChoiceChip(
-                              label: Text(t.translate('post_identity_me')), // "Me"
+                              label: Text(t.translate('post_identity_me')), 
                               selected: !_postAsCommunity,
                               onSelected: (val) => setState(() => _postAsCommunity = false),
                               visualDensity: VisualDensity.compact,
                             ),
                             const SizedBox(width: 8),
                             ChoiceChip(
-                              label: Text(t.translate('nav_community')), // "Community"
+                              label: Text(t.translate('nav_community')), 
                               selected: _postAsCommunity,
                               onSelected: (val) => setState(() => _postAsCommunity = true),
                               selectedColor: TwitterTheme.blue.withOpacity(0.2),
@@ -898,7 +1016,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
-// Background Uploader Class (Modified to accept localized strings)
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
@@ -921,7 +1038,7 @@ class _BackgroundUploader {
     bool? communityVerified,
     bool isCommunityIdentity = false,
     String? draftIdToDelete,
-    required Map<String, String> localizedStrings, // NEW PARAMETER
+    required Map<String, String> localizedStrings, 
   }) {
     final GlobalKey<_PostUploadOverlayState> overlayKey = GlobalKey();
     late OverlayEntry overlayEntry;
@@ -932,7 +1049,7 @@ class _BackgroundUploader {
         onDismissRequest: () {
           overlayKey.currentState?.dismissToIcon();
         },
-        initialMessage: localizedStrings['uploading'] ?? "Uploading...", // Use localized
+        initialMessage: localizedStrings['uploading'] ?? "Uploading...", 
       ),
     );
 
@@ -967,9 +1084,6 @@ class _BackgroundUploader {
       if (files.isNotEmpty) {
         int count = 1;
         for (var file in files) {
-          // Replace placeholders manually if needed or just use "Uploading..."
-          // Ideally: "Uploading 1/3..."
-          // We can use a simple replace if we want better localization support, but for now:
           String msg = locStrings['uploading'] ?? "Uploading...";
           onProgress("$msg ($count/${files.length})");
           
@@ -1039,7 +1153,7 @@ class _BackgroundUploader {
 
 class _PostUploadOverlay extends StatefulWidget {
   final VoidCallback onDismissRequest;
-  final String initialMessage; // Added
+  final String initialMessage; 
   const _PostUploadOverlay({super.key, required this.onDismissRequest, required this.initialMessage});
   @override State<_PostUploadOverlay> createState() => _PostUploadOverlayState();
 }
