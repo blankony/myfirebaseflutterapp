@@ -18,7 +18,7 @@ import '../services/prediction_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/overlay_service.dart';
 import '../services/draft_service.dart'; 
-import '../services/bad_word_service.dart'; // IMPORT SERVICE BARU
+import '../services/bad_word_service.dart'; 
 import 'video_trimmer_screen.dart';
 import '../services/app_localizations.dart';
 
@@ -49,9 +49,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final FocusNode _postFocusNode = FocusNode();
   
   final LanguageChecker _badwordGuard = LanguageChecker();
-  final BadWordService _badWordService = BadWordService(); // Instance service
+  final BadWordService _badWordService = BadWordService(); 
 
-  // List dinamis yang akan diisi dari internet
   List<String> _customBadWords = []; 
   bool _isLoadingBadWords = true;
 
@@ -98,7 +97,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _checkEmailVerification(); 
     _loadIdentity(); 
     _trainAiModel();
-    _loadBadWords(); // Load kata kasar dari server
+    _loadBadWords(); 
 
     if (widget.initialData != null && _isEditing) {
       _initFromPublishedPost();
@@ -111,7 +110,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-  // Fetch badwords dari GitHub
   Future<void> _loadBadWords() async {
     try {
       final words = await _badWordService.fetchBadWords();
@@ -269,7 +267,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (_) {}
   }
 
-  // --- CEK IMAGE SAFETY ---
+  // --- CEK IMAGE SAFETY (FIXED ENUMS & LOGIC) ---
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
     setState(() => _isProcessing = true);
@@ -287,9 +285,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final model = GenerativeModel(
         model: 'gemini-2.5-flash', 
         apiKey: apiKey,
+        // Gunakan HarmBlockThreshold.medium agar tidak error
         safetySettings: [
-          SafetySetting(HarmCategory.harassment, HarmBlockThreshold.none),
-          SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.none),
+          SafetySetting(HarmCategory.harassment, HarmBlockThreshold.medium),
+          SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.medium),
+          SafetySetting(HarmCategory.sexuallyExplicit, HarmBlockThreshold.medium),
+          SafetySetting(HarmCategory.dangerousContent, HarmBlockThreshold.medium),
         ]
       );
 
@@ -306,7 +307,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           mimeType = 'image/webp';
         }
 
-        final promptText = "Deskripsikan objek utama gambar ini dengan sangat singkat (max 1 kalimat), to the point, bahasa Indonesia formal. Tanpa emoji.";
+        final promptText = "Deskripsikan objek utama gambar ini dengan sangat singkat (max 1 kalimat).";
         
         final content = [
           Content.multi([
@@ -315,52 +316,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ])
         ];
 
-        final response = await model.generateContent(content);
-        final String description = response.text?.toLowerCase() ?? '';
-        
-        debugPrint("Gemini 2.5 Description: $description");
-
-        // --- KEYWORDS SAFETY ---
-        // Menggabungkan list dinamis dari internet dengan kata kunci visual spesifik
-        final List<String> dangerKeywords = [
-          ..._customBadWords, // Dari GitHub
+        try {
+          final response = await model.generateContent(content);
           
-          // Visual Specific (Tetap hardcode karena konteks visual)
-          'bikini', 'lingerie', 'underwear', 'bra', 'panties', 'thong', 
-          'swimsuit', 'swimwear', 'cleavage', 'breast', 'nipple', 'boobs',
-          'butt', 'ass', 'buttocks', 'groin', 'crotch', 'intimate',
-          'pakaian dalam', 'baju renang', 'kutang', 'beha', 'bh', 
-          'sempak', 'celana dalam', 'payudara', 'toket', 'pantat', 'bokong',
-          'belahan dada', 'paha', 'seksi', 'mesum',
-          'blood', 'gore', 'violence', 'weapon', 'gun', 'knife', 'kill', 'corpse',
-          'darah', 'membunuh', 'senjata', 'pisau', 'mayat', 'luka',
-          'nude', 'naked', 'telanjang', 'bugil'
-        ];
-
-        for (var word in dangerKeywords) {
-          // Sanitasi
-          final cleanWord = word.trim();
-          if (cleanWord.isEmpty) continue;
-
-          if (description.contains(cleanWord)) {
-            if (mounted) _showRejectDialog("${t.translate('post_sensitive_content')} (AI Detected: $cleanWord)"); 
-            return false;
+          if (response.text != null && response.text!.isNotEmpty) {
+             debugPrint("Gemini Safe Response: ${response.text}");
+             continue; 
+          } else {
+             debugPrint("Gemini Refused to Answer (Empty Text)");
+             if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
+             return false;
           }
-        }
 
-        // Cek Text Filter juga sebagai backup
-        if (_checkTextForBadWords(description, silent: true)) {
-           if (mounted) _showRejectDialog(t.translate('post_image_inappropriate')); 
-           return false;
+        } catch (e) {
+          debugPrint("Gemini Blocked Content / Error: $e");
+          if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
+          return false;
         }
       }
       return true; 
     } catch (e) {
-      debugPrint("Gemini Check Error: $e");
-      if (e.toString().toLowerCase().contains("safety") || e.toString().toLowerCase().contains("block")) {
-        if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
-        return false;
-      }
+      debugPrint("System Error in Image Check: $e");
       return true; 
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -369,7 +345,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   // --- CEK TEKS ---
   bool _checkTextForBadWords(String text, {bool silent = false}) {
-    // 1. Cek Plugin Lokal (Offline)
     if (_badwordGuard.containsBadLanguage(text)) {
       if (!silent) {
          var t = AppLocalizations.of(context)!;
@@ -378,13 +353,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return true;
     }
 
-    // 2. Cek List Dinamis (Online)
     final lowerText = text.toLowerCase();
     for (var badWord in _customBadWords) {
       final cleanWord = badWord.trim();
       if (cleanWord.isEmpty) continue;
 
-      // Cek apakah kata tersebut ada dalam kalimat (exact match or with spaces)
       if (lowerText == cleanWord || 
           lowerText.contains(" $cleanWord ") || 
           lowerText.startsWith("$cleanWord ") || 
@@ -396,9 +369,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         }
         return true;
       }
-      
-      // Khusus untuk kata pendek/unik yang mungkin lolos filter spasi (opsional)
-      // Anda bisa menambahkan logika panjang string di sini jika perlu
     }
     return false;
   }
@@ -1163,6 +1133,7 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
   bool _isMiniVisible = false;
   bool _isSuccess = false;
   bool _isError = false;
+  bool _dismissedBySwipe = false; // Flag untuk mencegah Red Screen
   late String _message; 
   Timer? _autoDismissTimer;
 
@@ -1184,7 +1155,10 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
     setState(() { _isMiniVisible = false; });
     Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) {
-        setState(() { _isCardVisible = true; });
+        setState(() { 
+            _isCardVisible = true; 
+            _dismissedBySwipe = false; // Reset flag saat kembali ke card
+        });
         _autoDismissTimer?.cancel();
         _autoDismissTimer = Timer(const Duration(seconds: 2), dismissToIcon);
       }
@@ -1227,20 +1201,23 @@ class _PostUploadOverlayState extends State<_PostUploadOverlay> {
           top: _isCardVisible ? _targetTop : -100, left: 16, right: _targetRight, 
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 300), opacity: _isCardVisible ? 1.0 : 0.0,
-            child: Dismissible(
-              key: const ValueKey('upload_card_dismiss'),
-              direction: DismissDirection.horizontal,
-              onDismissed: (_) {
-                widget.onDismissRequest();
-              },
-              child: Material(
-                elevation: 8, borderRadius: BorderRadius.circular(12), color: theme.cardColor,
-                child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
-                  if (_isSuccess) const Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) const Icon(Icons.error, color: Colors.red) else const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                  const SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
-                ])),
-              ),
-            ),
+            child: _dismissedBySwipe 
+                ? const SizedBox.shrink() // Hilangkan Dismissible dari tree jika sudah diswipe
+                : Dismissible(
+                    key: const ValueKey('upload_card_dismiss'),
+                    direction: DismissDirection.horizontal,
+                    onDismissed: (_) {
+                        setState(() => _dismissedBySwipe = true); // Tandai sebagai dismissed
+                        widget.onDismissRequest();
+                    },
+                    child: Material(
+                        elevation: 8, borderRadius: BorderRadius.circular(12), color: theme.cardColor,
+                        child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
+                        if (_isSuccess) const Icon(Icons.check_circle, color: TwitterTheme.blue) else if (_isError) const Icon(Icons.error, color: Colors.red) else const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                        const SizedBox(width: 12), Expanded(child: Text(_message, style: TextStyle(fontWeight: FontWeight.bold, color: theme.textTheme.bodyLarge?.color))),
+                        ])),
+                    ),
+                ),
           ),
         )
       ],
