@@ -55,7 +55,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _isLoadingBadWords = true;
 
   bool _canPost = false;
-  bool _isProcessing = false; // State untuk mengontrol loading screen
+  bool _isProcessing = false; 
+  String _scanStatus = 'none'; // State untuk status scan: 'loading', 'success', 'none'
   bool _isSavingDraft = false; 
 
   String _visibility = 'public'; 
@@ -271,21 +272,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     } catch (_) {}
   }
 
-  // --- CEK IMAGE SAFETY ---
+  // --- CEK IMAGE SAFETY (UPDATED) ---
   Future<bool> _checkImageSafety() async {
     if (_mediaType != 'image' || _selectedMediaFiles.isEmpty) return true;
     
-    // AKTIFKAN LOADING SCREEN
-    setState(() => _isProcessing = true);
+    // START LOADING
+    setState(() {
+      _isProcessing = true;
+      _scanStatus = 'loading';
+    });
     
     var t = AppLocalizations.of(context)!;
-    // NOTE: Notification dihapus karena diganti full loading screen
-    // OverlayService().showTopNotification(context, t.translate('post_scan_images'), Icons.remove_red_eye, (){}, color: Colors.orange);
 
     try {
       final apiKey = dotenv.env['GEMINI_API_KEY'];
       if (apiKey == null || apiKey.isEmpty) {
         debugPrint("API Key missing, skipping visual check.");
+        setState(() => _isProcessing = false);
         return true;
       }
 
@@ -326,24 +329,44 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           final response = await model.generateContent(content);
           
           if (response.text != null && response.text!.isNotEmpty) {
-             continue; 
+             continue; // Safe
           } else {
-             if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
+             // UNSAFE: Matikan loading segera dan tampilkan popup
+             if (mounted) {
+               setState(() => _isProcessing = false);
+               _showRejectDialog(t.translate('post_sensitive_content'));
+             }
              return false;
           }
 
         } catch (e) {
-          if (mounted) _showRejectDialog(t.translate('post_sensitive_content'));
+          // ERROR/BLOCKED: Matikan loading segera dan tampilkan popup
+          if (mounted) {
+            setState(() => _isProcessing = false);
+            _showRejectDialog(t.translate('post_sensitive_content'));
+          }
           return false;
         }
       }
+
+      // --- ALL SAFE: Show Checkmark Animation ---
+      if (mounted) {
+        setState(() => _scanStatus = 'success');
+      }
+      
+      // Delay agar user melihat checkmark
+      await Future.delayed(const Duration(milliseconds: 1200));
+      
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
       return true; 
+
     } catch (e) {
       debugPrint("System Error in Image Check: $e");
-      return true; 
-    } finally {
-      // MATIKAN LOADING SCREEN
+      // System error (network etc) -> Fail open (allow) or closed? Usually fail open for user exp.
       if (mounted) setState(() => _isProcessing = false);
+      return true; 
     }
   }
 
@@ -977,22 +1000,39 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
             ),
 
-            // --- LOADING BLOCKING SCREEN ---
+            // --- LOADING BLOCKING SCREEN (WITH ANIMATION) ---
             if (_isProcessing)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black54, // Semi-transparent black
+                  color: Colors.black54, // Latar belakang semi-transparan
                   child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: Colors.white),
-                        SizedBox(height: 16),
-                        Text(
-                          t.translate('post_scan_images'), 
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                        ),
-                      ],
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: _scanStatus == 'success'
+                          ? Column(
+                              key: const ValueKey('success'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.check_circle, color: Colors.green, size: 60),
+                                const SizedBox(height: 16),
+                                Text(
+                                  t.translate('general_success'), 
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)
+                                ),
+                              ],
+                            )
+                          : Column(
+                              key: const ValueKey('loading'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(color: Colors.white),
+                                const SizedBox(height: 16),
+                                Text(
+                                  t.translate('post_scan_images'), 
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)
+                                ),
+                              ],
+                            ),
                     ),
                   ),
                 ),
@@ -1017,7 +1057,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
-// ... _BackgroundUploader and _PostUploadOverlay classes remain same ...
+// ... (Bagian _BackgroundUploader dan _PostUploadOverlay tidak berubah dari sebelumnya)
 class _BackgroundUploader {
   static void startUploadSequence({
     required OverlayState overlayState,
