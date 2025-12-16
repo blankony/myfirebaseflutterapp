@@ -43,7 +43,7 @@ Here is a sneak peek of the application. For the complete list of all 47 screens
 |---|---|---|---|
 | <img src="screenshots/home.jpg" width="200"/> | <img src="screenshots/community_view.jpg" width="200"/> | <img src="screenshots/spirit_ai.jpg" width="200"/> | <img src="screenshots/profile_posts.jpg" width="200"/> |
 
-👉 **[Click here to view the full Screenshot Gallery (GALLERY.md)](GALLERY.md)**
+👉 **[Click here to view the full Screenshot Gallery (GALLERY.md)](gallery.md)**
 
 ---
 
