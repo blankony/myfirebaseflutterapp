@@ -6,34 +6,44 @@
 
 ## Project Overview
 
-This project is a comprehensive social platform that goes beyond basic posting and liking. It incorporates a sophisticated, multi-step user onboarding process, AI-powered assistance using **Google Gemini**, rich media handling with **Cloudinary**, and a real-time notification system. The user interface is designed to be intuitive and clean, with support for both light and dark themes, ensuring a great user experience.
-
-The architecture emphasizes denormalized data for a fast-reading feed, a secure authentication flow restricted to PNJ emails, and a personalized experience through department/study program identification.
+This project is a comprehensive social platform that integrates advanced **Narrow AI** technologies to enhance user experience. It incorporates a sophisticated multi-step user onboarding process, AI-powered assistance using **Google Gemini**, content safety algorithms, and a real-time notification system. The architecture emphasizes denormalized data for a fast-reading feed, a secure authentication flow restricted to PNJ emails, and a personalized experience through department identification.
 
 ## Core Features
 
-### 1. Authentication & Onboarding
-- **Exclusive Registration:** User registration is restricted to official PNJ student emails (`@stu.pnj.ac.id`), ensuring the community remains exclusive.
-- **Complete Auth Suite:** Full support for login, registration, and password reset.
-- **Guided Setup Flow:** A multi-step onboarding process for new users including profile setup and academic info verification.
+### 1. Artificial Intelligence Suite
+The application leverages various Narrow AI technologies to perform specific intelligent tasks:
+- **Generative AI Chatbot (Spirit AI):** An intelligent virtual assistant powered by `Google Gemini 2.5 Flash` capable of answering campus queries, translation, and drafting text with context retention.
+- **Visual Detector AI (Content Safety):** An automated image scanning system using AI to detect and block sensitive content (violence, adult content) before upload.
+- **Smart Voice Command & TTS:**
+  - **Voice Search:** Speech-to-Text integration for hands-free navigation and searching.
+  - **Text-to-Speech (TTS):** The assistant can read responses aloud with automatic language detection (ID/EN).
+- **Predictive Text Engine:** A custom **Markov Chain** algorithm that learns the user's writing style to suggest the next word while typing.
+- **Algorithmic Feed & Trending:** Statistical AI and heuristic algorithms (`N-gram analysis`) to detect trending topics and personalize content discovery based on engagement.
 
-### 2. Social & Real-time Interaction
-- **Real-time Feed:** A live home feed showing the latest posts from the community.
-- **Community Groups:** Join and interact within specific communities.
-- **Social Actions:** Users can **Like**, **Repost**, and **Comment** on posts.
+### 2. Trust & Safety System
+- **KTM Verification (Blue Badge Checkmark):** Users can upload their Student ID Card (KTM) to get a "Verified Student" badge, ensuring a trusted ecosystem.
+- **Bad Word Guard:** Real-time text filtering system that prevents the posting of offensive language or hate speech.
+- **Moderation Tools:** Comprehensive reporting system and user blocking capabilities to maintain a healthy community.
 
-### 3. AI-Powered Features (Google Gemini)
-- **AI Assistant:** A dedicated, conversational AI assistant powered by `gemini-1.5-flash` to answer questions and provide help.
-- **Predictive Text:** AI-powered text completion suggests relevant words while creating posts.
+### 3. Community Hub & Management
+- **Community Groups:** Dedicated spaces for Student Activity Units (UKM) or Departments.
+- **Role-Based Access:** Support for **Admins** and **Editors** to manage community pages.
+- **Official Broadcasts:** "Post as Community" feature allowing admins to publish official announcements under the organization's identity.
 
-### 4. Media Handling
-- **Image & Video Uploads:** Users can attach images and videos to posts.
-- **Cloudinary Integration:** Optimized media storage and delivery.
-- **Built-in Editor:** Integrated tools to crop images and trim videos.
+### 4. Social & Real-time Interaction
+- **Rich Media Posting:** Support for image cropping and video trimming/compression.
+- **Draft System:** Save posts locally to finish editing later.
+- **Privacy Controls:** Set post visibility to Public, Followers Only, or Private.
+- **Social Graph:** Connect with friends via Follow/Unfollow system and "Friends of Friends" recommendations.
 
-### 5. Profiles & Account Management
-- **Detailed Profiles:** Showcases user info, posts, replies, and reposts.
-- **Account Control:** Full settings to manage password, blocked users, and privacy.
+### 5. Authentication & Onboarding
+- **Exclusive Registration:** Restricted to official PNJ student emails (`@stu.pnj.ac.id`).
+- **Secure Auth:** Full support for login, registration, and password reset via Firebase Auth.
+- **Guided Setup:** Multi-step onboarding for profile and academic data setup.
+
+### 6. Media & Optimization
+- **Cloudinary Integration:** Offloads media storage to Cloudinary for optimized delivery and reduced server load.
+- **Offline Capabilities:** Local caching using Shared Preferences for settings and basic data.
 
 ## Screenshots
 
