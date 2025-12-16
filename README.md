@@ -37,7 +37,7 @@ The architecture emphasizes denormalized data for a fast-reading feed, a secure 
 
 ## Screenshots
 
-Here is a sneak peek of the application. For the complete list of all 47 screenshots covering every feature, please visit the **[Screenshot Gallery](GALLERY.md)**.
+Here is a sneak peek of the application. For the complete list of all 47 screenshots covering every feature, please visit the **[Screenshot Gallery](gallery.md)**.
 
 | Home Feed | Community | AI Assistant | User Profile |
 |---|---|---|---|
