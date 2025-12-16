@@ -106,17 +106,19 @@ class _PostMediaPreviewState extends State<PostMediaPreview> with AutomaticKeepA
   }
 
   void _navigateToViewer(BuildContext context, String url) {
-    // Pause video kecil di feed sebelum membuka fullscreen
+    // Pause video di feed agar tidak bersuara ganda
     widget.videoController?.pause();
     
     final String heroTag = '${widget.heroContextId}_${widget.postId}_$url';
     
     Navigator.of(context).push(
       PageRouteBuilder(
-        opaque: false, // Wajib false agar background transparan saat animasi
-        barrierColor: Colors.black,
-        transitionDuration: const Duration(milliseconds: 300),
-        // TransitionsBuilder membantu memperhalus awal/akhir animasi Hero
+        opaque: false, // Penting agar background feed tetap terlihat samar di awal
+        barrierColor: Colors.black, // Warna latar belakang saat transisi selesai
+        transitionDuration: const Duration(milliseconds: 350), // Durasi sedikit diperlambat untuk kehalusan
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        // FadeTransition di sini hanya mempengaruhi opacity background (scrim),
+        // TIDAK mempengaruhi konten Hero yang terbang di atasnya.
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
@@ -125,11 +127,8 @@ class _PostMediaPreviewState extends State<PostMediaPreview> with AutomaticKeepA
           mediaType: widget.mediaType,
           postData: widget.postData,
           postId: widget.postId,
-          heroTag: heroTag, // Tag harus sama persis
+          heroTag: heroTag,
           videoController: widget.videoController,
-          // PENTING: Kirim path thumbnail lokal agar layar tujuan bisa 
-          // langsung menampilkan gambar resolusi tinggi saat animasi dimulai.
-          // Pastikan ImageViewerScreen Anda menerima parameter ini.
           thumbnailPath: _cachedThumbnailPath, 
         ),
       ),
@@ -141,21 +140,32 @@ class _PostMediaPreviewState extends State<PostMediaPreview> with AutomaticKeepA
     super.build(context);
     final theme = Theme.of(context);
 
-    // --- BAGIAN VIDEO (Diperbaiki untuk Single Play Button & Hero) ---
+    // --- BAGIAN VIDEO ---
     if (widget.mediaType == 'video' && widget.mediaUrls.isNotEmpty) {
       final String videoUrl = widget.mediaUrls.first;
       final String heroTag = '${widget.heroContextId}_${widget.postId}_$videoUrl';
 
-      // Struktur bersih: ClipRRect -> GestureDetector -> Hero -> AspectRatio -> VideoPlayerWidget
-      // Tidak ada Stack atau Icon tambahan di sini yang menyebabkan duplikasi.
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: GestureDetector(
           onTap: () => _navigateToViewer(context, videoUrl),
-          // Hero widget membungkus konten visual untuk animasi
+          // Hero membungkus konten visual utama
           child: Hero(
             tag: heroTag,
-            // Material dibutuhkan agar saat animasi terbang, teks/icon tidak bergaris bawah kuning
+            // flightShuttleBuilder opsional: menjaga tampilan tetap solid selama terbang
+            flightShuttleBuilder: (flightContext, animation, direction, fromContext, toContext) {
+              return Material(
+                color: Colors.transparent,
+                child: AspectRatio(
+                  aspectRatio: 4 / 3, // Pertahankan rasio saat terbang
+                  child: VideoPlayerWidget(
+                    controller: widget.videoController,
+                    thumbnailPath: _cachedThumbnailPath,
+                    isPlaying: _isPlaying,
+                  ),
+                ),
+              );
+            },
             child: Material(
               color: Colors.transparent,
               child: AspectRatio(
@@ -172,7 +182,7 @@ class _PostMediaPreviewState extends State<PostMediaPreview> with AutomaticKeepA
       );
     }
 
-    // --- BAGIAN GAMBAR (Logika lama dipertahankan) ---
+    // --- BAGIAN GAMBAR ---
     if (widget.mediaUrls.isNotEmpty) {
       final bool isMulti = widget.mediaUrls.length > 1;
       return ClipRRect(
@@ -187,10 +197,11 @@ class _PostMediaPreviewState extends State<PostMediaPreview> with AutomaticKeepA
                       onPageChanged: (index) => setState(() => _currentIndex = index),
                       itemBuilder: (context, index) {
                         final url = widget.mediaUrls[index];
+                        final tag = '${widget.heroContextId}_${widget.postId}_$url';
                         return GestureDetector(
                           onTap: () => _navigateToViewer(context, url),
                           child: Hero(
-                            tag: '${widget.heroContextId}_${widget.postId}_$url',
+                            tag: tag,
                             child: CachedNetworkImage(
                               imageUrl: url,
                               fit: BoxFit.cover,
@@ -238,7 +249,7 @@ class _PostMediaPreviewState extends State<PostMediaPreview> with AutomaticKeepA
       );
     }
 
-    // --- BAGIAN LINK EXTERNAL ---
+    // --- BAGIAN LINK EXTERNAL (Tetap sama) ---
     final externalLink = _extractLinkInText();
     final youtubeId = externalLink != null ? _getVideoId(externalLink) : null;
 

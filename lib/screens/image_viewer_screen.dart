@@ -21,7 +21,7 @@ class ImageViewerScreen extends StatefulWidget {
   final String? postId; 
   final String heroTag;
   final VideoPlayerController? videoController; 
-  // [FIX] Tambahkan parameter ini untuk transisi mulus
+  // Parameter ini penting untuk transisi mulus dari feed
   final String? thumbnailPath; 
 
   const ImageViewerScreen({
@@ -40,7 +40,8 @@ class ImageViewerScreen extends StatefulWidget {
 }
 
 class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProviderStateMixin {
-  bool _showOverlays = true;
+  // Set false agar kontrol tidak muncul saat animasi Hero sedang berlangsung
+  bool _showOverlays = false; 
   Timer? _hideTimer; 
 
   late AnimationController _menuController;
@@ -95,7 +96,26 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
       _initVideo();
     }
     
-    _resetHideTimer();
+    // Deteksi kapan animasi halaman (transisi Hero) selesai baru munculkan overlay
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final route = ModalRoute.of(context);
+      if (route != null && route is PageRoute) {
+        route.animation?.addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+             if (mounted) {
+               setState(() => _showOverlays = true);
+               _resetHideTimer();
+             }
+          }
+        });
+      } else {
+        // Fallback jika tidak ada animasi rute
+        if (mounted) {
+          setState(() => _showOverlays = true);
+          _resetHideTimer();
+        }
+      }
+    });
   }
 
   void _initVideo() {
@@ -327,12 +347,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
         dismissThresholds: const {
           DismissDirection.vertical: 0.2,
         },
-        confirmDismiss: (direction) async {
-          Navigator.of(context).pop();
-          return false; 
-        },
+        onDismissed: (_) => Navigator.of(context).pop(),
         child: Container(
-          color: Colors.black,
+          // Container menangkap tap di area kosong
+          color: Colors.transparent,
           width: MediaQuery.of(context).size.width,
           height: MediaQuery.of(context).size.height,
           child: Stack(
@@ -344,10 +362,9 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                 GestureDetector(
                   onTap: _togglePlayPause,
                   behavior: HitTestBehavior.opaque,
-                  // [FIX] Hero di sini adalah parent, bukan di dalam 'if initialized'
                   child: Hero(
                     tag: widget.heroTag,
-                    // Tambahkan Material wrapper agar tidak ada glitch visual saat transisi
+                    // Menggunakan Material transparan untuk menghindari glitch garis bawah kuning pada teks/icon
                     child: Material(
                       color: Colors.transparent, 
                       child: Stack(
@@ -355,7 +372,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                         alignment: Alignment.center,
                         children: [
                           // A. Layer Dasar: Thumbnail Statis (Selalu Tampil Awal)
-                          // Ini adalah kunci agar animasi zoom bekerja (bukan fade)
+                          // Ini adalah kunci agar animasi zoom bekerja mulus
                           if (widget.thumbnailPath != null)
                              Image.file(File(widget.thumbnailPath!), fit: BoxFit.contain),
 
@@ -379,16 +396,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                 )
               else
                 // IMAGE VIEW
-                // [FIX] Menggunakan Stack manual untuk placeholder thumbnail
-                // PhotoViewHeroAttributes terkadang delay loading network image
                 Stack(
                   fit: StackFit.expand,
                   children: [
-                     // 1. Placeholder Thumbnail
+                     // 1. Placeholder Thumbnail (Low Res/Lokal)
                      if (widget.thumbnailPath != null)
                        Center(child: Image.file(File(widget.thumbnailPath!), fit: BoxFit.contain)),
                      
-                     // 2. PhotoView Utama
+                     // 2. PhotoView Utama (High Res/Network)
                      PhotoView(
                         imageProvider: CachedNetworkImageProvider(widget.imageUrl),
                         scaleStateController: _scaleStateController,
@@ -396,7 +411,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                         initialScale: PhotoViewComputedScale.contained,
                         minScale: PhotoViewComputedScale.contained,
                         maxScale: PhotoViewComputedScale.covered * 2.5,
-                        heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
+                        heroAttributes: PhotoViewHeroAttributes(
+                          tag: widget.heroTag,
+                          transitionOnUserGestures: true,
+                        ),
                         enableRotation: false,
                         scaleStateChangedCallback: (PhotoViewScaleState state) {
                           final isZooming = state != PhotoViewScaleState.initial && state != PhotoViewScaleState.zoomedOut;
@@ -409,8 +427,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                         onTapUp: (context, details, value) => _toggleOverlays(),
                         // Saat loading selesai, PhotoView akan menutupi thumbnail di bawahnya
                         loadingBuilder: (context, event) {
-                           // Kembalikan widget kosong/transparan karena thumbnail sudah ada di Stack bawah
-                           // atau loading indicator di atas thumbnail jika mau
+                           // Widget transparan karena thumbnail sudah ada di Stack bawah
                            if (event == null) return const SizedBox.shrink();
                            return Center(
                              child: CircularProgressIndicator(
@@ -439,6 +456,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                 ),
 
               // --- 3. CENTER PLAY BUTTON ---
+              // Hanya muncul jika video dipause DAN overlay tidak sedang tampil (opsional) 
+              // atau saat inisialisasi selesai tapi belum play.
               if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
                  Center(
                   child: IgnorePointer( 
@@ -521,6 +540,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                 AnimatedPositioned(
                   duration: Duration(milliseconds: 300),
                   curve: Curves.easeInOut,
+                  // Geser ke bawah layar jika overlay disembunyikan
                   bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -150, 
                   left: 16,
                   right: 16,
@@ -620,7 +640,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                 ),
 
               // --- 7. BOTTOM ACTION BAR ---
-              if (_showOverlays && _isPostContent)
+              if (_isPostContent)
                 Positioned(
                   bottom: 0, left: 0, right: 0,
                   child: AnimatedOpacity(
@@ -673,7 +693,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
   }
 }
 
-// ... Bagian _DownloadManager dan _DownloadStatusOverlay tetap sama ...
+// ==========================================
+// UTILITY CLASSES FOR DOWNLOAD MANAGER
+// ==========================================
+
 class _DownloadManager {
   static void startDownloadSequence({
     required OverlayState overlayState,
@@ -725,7 +748,7 @@ class _DownloadManager {
       final String fileName = "SapaPNJ_$dateStr$ext";
 
       String basePath;
-      // Android directory logic
+      // Android directory logic - sesuaikan path ini jika Anda ingin support iOS atau path spesifik lainnya
       if (isImage) {
         basePath = '/storage/emulated/0/Pictures/SapaPNJ';
       } else {
