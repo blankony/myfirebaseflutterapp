@@ -93,22 +93,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.initState();
     _localIsPinned = widget.isPinned;
     
-    // [REPOST FEATURE] Check if this is a repost wrapper
-    if (widget.postData['type'] == 'repost' && widget.postData['originalPostId'] != null) {
-      _isRepostWrapper = true;
-      _fetchOriginalPost(widget.postData['originalPostId']);
-    } else {
-      _resolvedPostData = widget.postData;
-      _syncState();
-    }
-    
-    // [OPTIMASI 3] Init video hanya jika preloaded dan bukan repost wrapper
-    if (widget.preloadedController != null && !_isRepostWrapper) {
-      _videoController = widget.preloadedController;
-      _isVideoInitialized = true;
-      _isVideoOwner = false;
-    } 
-
+    // Setup Controllers
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
 
@@ -117,9 +102,66 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
     _repostController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
+
+    // [FIX] Panggil setup logic utama
+    _initializePostData();
   }
 
-  // [REPOST FEATURE] Helper Getter
+  // [FIX] Logic inisialisasi dipisah agar bisa dipanggil ulang saat recycle widget
+  void _initializePostData() {
+    // Reset video state
+    if (_isVideoOwner) {
+      _videoController?.dispose();
+      _videoController = null;
+    }
+    _isVideoInitialized = false;
+    _isVideoOwner = false;
+    _isVideoLoading = false;
+
+    // Cek apakah ini Repost Wrapper
+    if (widget.postData['type'] == 'repost' && widget.postData['originalPostId'] != null) {
+      _isRepostWrapper = true;
+      _resolvedPostData = null; // Reset resolved data
+      _originalError = '';
+      _fetchOriginalPost(widget.postData['originalPostId']);
+    } else {
+      _isRepostWrapper = false;
+      _resolvedPostData = widget.postData;
+      _isLoadingOriginal = false;
+      _syncState();
+
+      // Init preloaded video hanya jika BUKAN repost (video handle terpisah di repost)
+      if (widget.preloadedController != null) {
+        _videoController = widget.preloadedController;
+        _isVideoInitialized = true;
+        _isVideoOwner = false;
+      }
+    }
+  }
+
+  // [FIX] Handle Widget Recycling (PENTING untuk ListView)
+  @override
+  void didUpdateWidget(covariant BlogPostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // Jika ID berubah, berarti kartu ini sekarang menampilkan postingan berbeda
+    if (oldWidget.postId != widget.postId) {
+      _initializePostData();
+    } else {
+      // Jika ID sama tapi data berubah (misal like count update dari parent), sync saja
+      if (!_isRepostWrapper && widget.postData != oldWidget.postData) {
+         _resolvedPostData = widget.postData;
+         _syncState();
+      }
+    }
+
+    if (oldWidget.isPinned != widget.isPinned) {
+      setState(() {
+        _localIsPinned = widget.isPinned;
+      });
+    }
+  }
+
   String get effectivePostId => _isRepostWrapper ? (widget.postData['originalPostId'] ?? widget.postId) : widget.postId;
   Map<String, dynamic> get effectivePostData => _resolvedPostData ?? {};
 
@@ -190,16 +232,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         if (mounted) setState(() => _isVideoLoading = false);
         debugPrint("Error initializing video: $e");
       }
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant BlogPostCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isPinned != widget.isPinned) {
-      setState(() {
-        _localIsPinned = widget.isPinned;
-      });
     }
   }
 
@@ -286,7 +318,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final targetAuthorId = effectivePostData['userId'];
     final docRef = _firestore.collection('posts').doc(targetId);
 
-    // Optimistic UI update
     setState(() {
       _isReposted = !_isReposted;
       if (_isReposted) {
@@ -301,7 +332,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       final notificationRef = _firestore.collection('users').doc(targetAuthorId).collection('notifications').doc(notificationId);
 
       if (_isReposted) {
-        // [MODIFIKASI] Fetch user name agar tidak "User"
         String reposterName = currentUser.displayName ?? 'User';
         try {
            final userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
@@ -311,7 +341,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
            }
         } catch (_) {}
 
-        // Create Repost Wrapper
         await _firestore.collection('posts').add({
           'type': 'repost',
           'originalPostId': targetId,
@@ -337,7 +366,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           });
         }
       } else {
-        // Delete Repost Wrapper
         final query = await _firestore.collection('posts')
             .where('originalPostId', isEqualTo: targetId)
             .where('userId', isEqualTo: currentUser.uid)
@@ -718,7 +746,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
-  // [MODIFIKASI UTAMA DI SINI]
   Widget _buildRepostHeader(BuildContext context) {
     if (!_isRepostWrapper) return const SizedBox.shrink();
 
@@ -727,17 +754,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final timestamp = widget.postData['timestamp'] as Timestamp?;
     final timeStr = timestamp != null ? timeago.format(timestamp.toDate(), locale: 'en_short') : 'just now';
 
-    // Nama awal dari dokumen repost (fallback jika loading)
     final initialName = widget.postData['userName'] ?? 'User';
 
-    // Menggunakan StreamBuilder untuk memastikan nama selalu terupdate real-time dari koleksi users
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(reposterId).snapshots(),
       builder: (context, snapshot) {
         String displayName = initialName;
         if (snapshot.hasData && snapshot.data!.exists) {
           final data = snapshot.data!.data() as Map<String, dynamic>;
-          // Prioritaskan 'userName', lalu 'name', lalu kembali ke initialName
           displayName = data['userName'] ?? data['name'] ?? displayName;
         }
 
@@ -758,7 +782,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                     text: TextSpan(
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor, fontSize: 13, fontWeight: FontWeight.w600),
                       children: [
-                        TextSpan(text: "$displayName "), // Menampilkan nama dinamis
+                        TextSpan(text: "$displayName "),
                         TextSpan(text: "reposted · $timeStr", style: const TextStyle(fontWeight: FontWeight.normal)),
                       ],
                     ),
@@ -781,7 +805,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.build(context);
     final theme = Theme.of(context);
 
-    // [REPOST FEATURE] Loading/Error states for wrapper
     if (_isRepostWrapper) {
       if (_isLoadingOriginal) {
         return Container(
