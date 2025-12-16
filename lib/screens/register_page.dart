@@ -371,15 +371,20 @@ class _RegisterPageState extends State<RegisterPage> {
                         obscureText: _isPasswordObscured,
                         decoration: InputDecoration(
                           labelText: t.translate('auth_pass_hint'), // "Enter password"
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
+                          suffixIcon: Tooltip(
+                            message: _isPasswordObscured 
+                                ? t.translate('auth_show_password') 
+                                : t.translate('auth_hide_password'),
+                            child: IconButton(
+                              icon: Icon(
+                                _isPasswordObscured ? Icons.visibility_off : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isPasswordObscured = !_isPasswordObscured;
+                                });
+                              },
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _isPasswordObscured = !_isPasswordObscured;
-                              });
-                            },
                           ),
                         ),
                         textInputAction: TextInputAction.next,
@@ -396,15 +401,20 @@ class _RegisterPageState extends State<RegisterPage> {
                         obscureText: _isConfirmPasswordObscured,
                         decoration: InputDecoration(
                           labelText: t.translate('auth_confirm_pass_hint'), // "Confirm password"
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _isConfirmPasswordObscured ? Icons.visibility_off : Icons.visibility,
+                          suffixIcon: Tooltip(
+                            message: _isConfirmPasswordObscured 
+                                ? t.translate('auth_show_password') 
+                                : t.translate('auth_hide_password'),
+                            child: IconButton(
+                              icon: Icon(
+                                _isConfirmPasswordObscured ? Icons.visibility_off : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isConfirmPasswordObscured = !_isConfirmPasswordObscured;
+                                });
+                              },
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _isConfirmPasswordObscured = !_isConfirmPasswordObscured;
-                              });
-                            },
                           ),
                         ),
                         textInputAction: TextInputAction.done,

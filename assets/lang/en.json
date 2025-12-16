@@ -456,6 +456,9 @@
   "auth_agree_terms": "Terms and Conditions",
   "auth_agree_end": " and the privacy policy.",
   "auth_agree_error": "You must agree to the Terms and Conditions to register.",
+  "auth_show_password": "Show password",
+  "auth_hide_password": "Hide password",
+
   "error_open_pdf": "Cannot open document: ",
   "error_load_pdf": "Failed to load Terms and Conditions.",
   "error_nim_registered": "The NIM/NIP is already registered.",

@@ -398,6 +398,8 @@
   "auth_agree_terms": "Syarat dan Ketentuan",
   "auth_agree_end": " dan kebijakan privasi.",
   "auth_agree_error": "Anda harus menyetujui Syarat dan Ketentuan untuk mendaftar.",
+  "auth_show_password": "Lihat sandi",
+  "auth_hide_password": "Sembunyikan sandi",
 
   "about_page_title": "Tentang SAPA PNJ",
   "about_app_section": "Tentang Aplikasi",
