@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_const_constructors
+// ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -6,7 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../main.dart'; 
 import 'dashboard/profile_page.dart'; 
 import '../widgets/common_error_widget.dart'; 
-import '../../services/overlay_service.dart'; 
+import '../services/overlay_service.dart'; 
+import '../services/app_localizations.dart';
 
 final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -69,14 +70,22 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
 
   // --- REMOVE FOLLOWER LOGIC ---
   Future<void> _removeFollower(String followerId) async {
+    var t = AppLocalizations.of(context)!;
+    
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text("Remove Follower?"),
-        content: Text("We won't tell them they were removed."),
+        title: Text(t.translate('follow_remove_title')), 
+        content: Text(t.translate('follow_remove_content')), 
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("Cancel")),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text("Remove", style: TextStyle(color: Colors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false), 
+            child: Text(t.translate('general_cancel'))
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: Text(t.translate('follow_remove_btn'), style: TextStyle(color: Colors.red))
+          ),
         ],
       )
     ) ?? false;
@@ -84,7 +93,6 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
     if (!confirm) return;
 
     try {
-      // Optimistic Update
       setState(() {
         _followersIds.remove(followerId);
       });
@@ -101,16 +109,16 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
 
       await batch.commit();
       
-      if(mounted) OverlayService().showTopNotification(context, "Follower removed", Icons.person_remove, (){});
+      if(mounted) OverlayService().showTopNotification(context, t.translate('follow_removed_msg'), Icons.person_remove, (){});
 
     } catch (e) {
       // Revert if failed
       _fetchLists(); 
-      if(mounted) OverlayService().showTopNotification(context, "Failed to remove follower", Icons.error, (){}, color: Colors.red);
+      if(mounted) OverlayService().showTopNotification(context, t.translate('follow_remove_fail'), Icons.error, (){}, color: Colors.red);
     }
   }
 
-  // Cleanup ghosts
+  // Cleanup ghosts (User yang sudah dihapus tapi ID-nya masih nyangkut)
   void _cleanupDeadUser(String deadUserId, String listType) {
     if (!_isMe) return;
 
@@ -138,11 +146,12 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _isMe ? "My Connections" : "Connections",
+          _isMe ? t.translate('follow_title_me') : t.translate('follow_title'),
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         bottom: TabBar(
@@ -150,10 +159,10 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
           labelColor: theme.primaryColor,
           unselectedLabelColor: theme.hintColor,
           indicatorColor: theme.primaryColor,
-          tabs: const [
-            Tab(text: "Mutuals"),
-            Tab(text: "Following"),
-            Tab(text: "Followers"),
+          tabs: [
+            Tab(text: t.translate('follow_tab_mutuals')),
+            Tab(text: t.translate('follow_tab_following')),
+            Tab(text: t.translate('follow_tab_followers')),
           ],
         ),
       ),
@@ -161,7 +170,7 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
           ? Center(child: CircularProgressIndicator())
           : _hasError 
             ? CommonErrorWidget(
-                message: "Couldn't load connections.", 
+                message: t.translate('follow_error'), 
                 isConnectionError: true, 
                 onRetry: _fetchLists
               )
@@ -170,22 +179,21 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
               children: [
                 _UserList(
                   userIds: _mutualsIds, 
-                  emptyMessage: "No mutual followers yet.",
+                  emptyMessage: t.translate('follow_no_mutuals'),
                   listType: 'mutuals',
                   onDeadUserFound: (id) {}, 
                 ),
                 _UserList(
                   userIds: _followingIds, 
-                  emptyMessage: "Not following anyone yet.",
+                  emptyMessage: t.translate('follow_no_following'),
                   listType: 'following',
                   onDeadUserFound: (id) => _cleanupDeadUser(id, 'following'),
                 ),
                 _UserList(
                   userIds: _followersIds, 
-                  emptyMessage: "No followers yet.",
+                  emptyMessage: t.translate('follow_no_followers'),
                   listType: 'followers',
                   onDeadUserFound: (id) => _cleanupDeadUser(id, 'followers'),
-                  // Only pass callback if it's MY profile
                   onRemoveAction: _isMe ? _removeFollower : null,
                 ),
               ],
@@ -199,7 +207,7 @@ class _UserList extends StatelessWidget {
   final String emptyMessage;
   final String listType;
   final Function(String) onDeadUserFound;
-  final Function(String)? onRemoveAction; // Optional remove callback
+  final Function(String)? onRemoveAction;
 
   const _UserList({
     required this.userIds, 
@@ -251,6 +259,7 @@ class _UserTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    var t = AppLocalizations.of(context)!;
 
     return FutureBuilder<DocumentSnapshot>(
       future: _firestore.collection('users').doc(userId).get(),
@@ -314,7 +323,7 @@ class _UserTile extends StatelessWidget {
                       side: BorderSide(color: theme.dividerColor),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
-                    child: Text("Remove", style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 12)),
+                    child: Text(t.translate('follow_remove_btn'), style: TextStyle(color: theme.textTheme.bodyMedium?.color, fontSize: 12)),
                   ),
               ],
             ),

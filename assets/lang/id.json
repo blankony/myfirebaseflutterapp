@@ -459,6 +459,17 @@
   "setup_dept_select_error": "Harap pilih jurusan dan program studi anda.",
   "setup_dept_label": "Jurusan",
   "setup_prodi_label": "Program Studi",
+
+  "follow_title_me": "Koneksi Saya",
+  "follow_tab_mutuals": "Saling Mengikuti",
+  "follow_no_mutuals": "Belum ada yang saling mengikuti.",
+  "follow_remove_title": "Hapus Pengikut?",
+  "follow_remove_content": "Mereka tidak akan diberitahu bahwa mereka telah dihapus.",
+  "follow_remove_btn": "Hapus",
+  "follow_removed_msg": "Pengikut dihapus",
+  "follow_remove_fail": "Gagal menghapus pengikut",
+  "follow_tab_following": "Mengikuti",
+  "follow_tab_followers": "Pengikut",
   
   "edit_auto_detect": "Jurusan terdeteksi otomatis: ",
   "edit_pic_selected": "Foto profil dipilih",

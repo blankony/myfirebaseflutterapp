@@ -459,6 +459,18 @@
   "auth_show_password": "Show password",
   "auth_hide_password": "Hide password",
 
+  "follow_title_me": "My Connections",
+  "follow_tab_mutuals": "Mutuals",
+  "follow_no_mutuals": "No mutual followers yet.",
+  "follow_remove_title": "Remove Follower?",
+  "follow_remove_content": "We won't tell them they were removed.",
+  "follow_remove_btn": "Remove",
+  "follow_removed_msg": "Follower removed",
+  "follow_remove_fail": "Failed to remove follower",
+
+  "follow_tab_following": "Following",
+  "follow_tab_followers": "Followers",
+
   "error_open_pdf": "Cannot open document: ",
   "error_load_pdf": "Failed to load Terms and Conditions.",
   "error_nim_registered": "The NIM/NIP is already registered.",
