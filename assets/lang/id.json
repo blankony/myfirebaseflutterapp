@@ -471,6 +471,15 @@
   "follow_tab_following": "Mengikuti",
   "follow_tab_followers": "Pengikut",
   
+  "personalize_your_account": "Personalisasi Akun Anda",
+  "choose_profile_picture": "Pilih foto profil dan sampul agar orang lain mudah mengenali Anda.",
+  "skip": "Lewati",
+  "next": "Lanjut",
+  "add_banner": "Tambah Sampul",
+  "private_account": "Akun Privat",
+  "private_account_desc": "Hanya pengikut yang bisa melihat konten Anda",
+  "public_account_desc": "Semua orang bisa melihat konten Anda",
+
   "edit_auto_detect": "Jurusan terdeteksi otomatis: ",
   "edit_pic_selected": "Foto profil dipilih",
   "edit_banner_selected": "Banner dipilih",

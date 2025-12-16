@@ -1,4 +1,4 @@
-gitpackage com.example.myfirebaseflutterapp
+package com.example.myfirebaseflutterapp
 
 import io.flutter.embedding.android.FlutterActivity
 

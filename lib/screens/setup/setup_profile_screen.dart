@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import '../../main.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/app_localizations.dart'; // IMPORT INI DITAMBAHKAN
 import 'setup_department_screen.dart';
 import '../../services/overlay_service.dart';
 
@@ -175,6 +176,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Shortcut untuk localization biar kodenya lebih pendek
+    final l10n = AppLocalizations.of(context)!;
     
     return Scaffold(
       body: FadeTransition(
@@ -182,7 +185,7 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
-            child: SingleChildScrollView( // Added scroll for smaller screens
+            child: SingleChildScrollView( 
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -192,13 +195,15 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                       Image.asset('images/app_icon.png', height: 40),
                       TextButton(
                         onPressed: _skip,
-                        child: Text("Skip", style: TextStyle(color: theme.hintColor)),
+                        // Localization: Skip
+                        child: Text(l10n.translate('skip'), style: TextStyle(color: theme.hintColor)),
                       ),
                     ],
                   ),
                   SizedBox(height: 32),
                   Text(
-                    "Personalize your account",
+                    // Localization: Personalize your account
+                    l10n.translate('personalize_your_account'),
                     style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w900,
                       color: TwitterTheme.blue,
@@ -206,7 +211,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                   ),
                   SizedBox(height: 8),
                   Text(
-                    "Add a profile picture and banner to let people recognize you.",
+                    // Localization: Choose profile picture description
+                    l10n.translate('choose_profile_picture'),
                     style: theme.textTheme.bodyLarge,
                   ),
                   SizedBox(height: 30),
@@ -234,7 +240,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Icon(Icons.add_a_photo, color: TwitterTheme.blue),
-                                    Text("Add Banner", style: TextStyle(color: TwitterTheme.blue))
+                                    // Localization: Add Banner
+                                    Text(l10n.translate('add_banner'), style: TextStyle(color: TwitterTheme.blue))
                                   ],
                                 ))
                               : null,
@@ -284,9 +291,13 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text("Private Account", style: TextStyle(fontWeight: FontWeight.bold)),
+                              // Localization: Private Account
+                              Text(l10n.translate('private_account'), style: TextStyle(fontWeight: FontWeight.bold)),
                               Text(
-                                _isPrivateAccount ? "Only followers can see your content" : "Anyone can see your content",
+                                // Localization: Description based on toggle
+                                _isPrivateAccount 
+                                    ? l10n.translate('private_account_desc') 
+                                    : l10n.translate('public_account_desc'),
                                 style: TextStyle(fontSize: 12, color: theme.hintColor),
                               ),
                             ],
@@ -314,7 +325,8 @@ class _SetupProfileScreenState extends State<SetupProfileScreen> with SingleTick
                       ),
                       child: _isLoading 
                         ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text("Next"),
+                        // Localization: Next
+                        : Text(l10n.translate('next')),
                     ),
                   ),
                 ],

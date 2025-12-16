@@ -475,6 +475,15 @@
   "error_load_pdf": "Failed to load Terms and Conditions.",
   "error_nim_registered": "The NIM/NIP is already registered.",
 
+  "personalize_your_account": "Personalize Your Account",
+  "choose_profile_picture": "Add a profile picture and banner to let people recognize you.",
+  "skip": "Skip",
+  "next": "Next",
+  "add_banner": "Add Banner",
+  "private_account": "Private Account",
+  "private_account_desc": "Only followers can see your content",
+  "public_account_desc": "Anyone can see your content",
+
   "edit_auto_detect": "Auto-detected department: ",
   "edit_pic_selected": "Profile picture selected",
   "edit_banner_selected": "Banner selected",
