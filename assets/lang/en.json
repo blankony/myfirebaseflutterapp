@@ -379,6 +379,18 @@
   "comm_create_error_doc": "Verification document required",
   "comm_create_error_generic": "Error creating community",
 
+  "comm_tab_posts": "Posts",
+  "comm_tab_about": "About",
+  "comm_join": "Join",
+  "comm_joined": "Joined",
+  "comm_member_list_title": "Follower Members",
+  "comm_admins": "Admins",
+  "comm_members": "Members",
+  "comm_search_members": "Search members...",
+  "comm_edit_profile": "Edit Community",
+  "comm_leave": "Leave Community",
+  "comm_delete": "Delete Community",
+
   "comm_explore_title": "Explore Channels",
   "comm_followers_count": "Followers",
   

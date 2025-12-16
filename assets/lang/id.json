@@ -379,6 +379,18 @@
   "comm_create_error_doc": "Dokumen verifikasi wajib diisi",
   "comm_create_error_generic": "Gagal membuat komunitas",
 
+  "comm_tab_posts": "Postingan",
+  "comm_tab_about": "Tentang",
+  "comm_join": "Gabung",
+  "comm_joined": "Tergabung",
+  "comm_member_list_title": "Daftar Anggota",
+  "comm_admins": "Admin",
+  "comm_members": "Anggota",
+  "comm_search_members": "Cari anggota...",
+  "comm_edit_profile": "Edit Komunitas",
+  "comm_leave": "Keluar Komunitas",
+  "comm_delete": "Hapus Komunitas",
+
   "comm_explore_title": "Jelajahi Channel",
   "comm_followers_count": "Pengikut",
 

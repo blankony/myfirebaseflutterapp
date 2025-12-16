@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_const_constructors
+// ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -6,6 +6,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../../main.dart';
 import '../dashboard/profile_page.dart';
 import '../../services/overlay_service.dart';
+import '../../services/app_localizations.dart'; // IMPORT LOCALIZATION
 import 'dart:math';
 
 class CommunityMembersScreen extends StatefulWidget {
@@ -43,17 +44,23 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> with Si
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Members"),
+        title: Text(t.translate('community_members')), // "Anggota" / "Members"
         centerTitle: true,
         bottom: TabBar(
           controller: _tabController,
           labelColor: TwitterTheme.blue,
           unselectedLabelColor: theme.hintColor,
           indicatorSize: TabBarIndicatorSize.label,
-          tabs: const [Tab(text: "Followers"), Tab(text: "Admins & Staff")],
+          tabs: [
+            Tab(text: t.translate('profile_followers')), // "Pengikut" / "Followers"
+            Tab(text: "Admins & Staff"), // Belum ada key khusus, biarkan dulu atau gunakan 'comm_admins' jika sudah ditambahkan
+          ],
         ),
       ),
       body: Stack(
@@ -89,7 +96,10 @@ class _FollowersList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (followersList.isEmpty) return Center(child: Text("No followers yet.", style: TextStyle(color: Colors.grey)));
+    var t = AppLocalizations.of(context)!;
+    
+    // "Tidak ada hasil untuk" + " " + "Pengikut" = "Tidak ada hasil untuk Pengikut" / "No followers yet"
+    if (followersList.isEmpty) return Center(child: Text("${t.translate('search_no_results')} ${t.translate('profile_followers')}", style: TextStyle(color: Colors.grey)));
 
     return ListView.builder(
       itemCount: followersList.length,
@@ -121,11 +131,12 @@ class _AdminsListState extends State<_AdminsList> {
   void _showEditRoleDialog(BuildContext context, String userId, String currentTitle, Color currentColor) {
     final TextEditingController titleController = TextEditingController(text: currentTitle);
     Color selectedColor = currentColor;
+    var t = AppLocalizations.of(context)!;
 
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
-      barrierLabel: "Dismiss",
+      barrierLabel: t.translate('general_close'),
       transitionDuration: Duration(milliseconds: 300),
       pageBuilder: (context, anim1, anim2) {
         return StatefulBuilder(
@@ -172,13 +183,13 @@ class _AdminsListState extends State<_AdminsList> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel")),
+                            TextButton(onPressed: () => Navigator.pop(context), child: Text(t.translate('general_cancel'))),
                             ElevatedButton(
                               onPressed: () async {
                                 Navigator.pop(context);
                                 await _updateRole(userId, titleController.text, selectedColor);
                               },
-                              child: Text("Save"),
+                              child: Text(t.translate('general_save')),
                             )
                           ],
                         )
@@ -196,14 +207,19 @@ class _AdminsListState extends State<_AdminsList> {
   }
 
   Future<void> _updateRole(String userId, String title, Color color) async {
+    // Localization
+    // Note: since this is async, check mounted or context
+    if (!mounted) return;
+    var t = AppLocalizations.of(context)!;
+    
     try {
       final hex = '0x${color.value.toRadixString(16).toUpperCase()}';
       await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).set({
         'adminRoles': {userId: {'title': title, 'color': hex}}
       }, SetOptions(merge: true));
-      if(mounted) OverlayService().showTopNotification(context, "Role Updated", Icons.check, (){});
+      if(mounted) OverlayService().showTopNotification(context, t.translate('general_success'), Icons.check, (){});
     } catch(e) {
-      if(mounted) OverlayService().showTopNotification(context, "Failed", Icons.error, (){}, color: Colors.red);
+      if(mounted) OverlayService().showTopNotification(context, t.translate('post_failed'), Icons.error, (){}, color: Colors.red);
     }
   }
 

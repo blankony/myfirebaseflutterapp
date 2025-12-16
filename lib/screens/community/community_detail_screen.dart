@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_const_constructors
+// ignore_for_file: prefer_const_constructors, use_build_context_synchronously
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -14,7 +14,8 @@ import '../create_post_screen.dart';
 import '../../services/overlay_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../image_viewer_screen.dart'; 
-import '../../services/moderation_service.dart'; // Pastikan import service ini ada
+import '../../services/moderation_service.dart'; 
+import '../../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 class CommunityDetailScreen extends StatefulWidget {
   final String communityId;
@@ -77,9 +78,6 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       setState(() {
         _blockedUserIds = List<String>.from(doc.data()?['ids'] ?? []);
       });
-    } else {
-       // Fallback jika menggunakan implementation lain (misal fetch dari subcollection documents)
-       // Untuk performa, disarankan simpan list ID di satu dokumen array.
     }
   }
 
@@ -150,7 +148,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     );
   }
 
-  Future<void> _handleFollowAction(bool isFollowing) async {
+  Future<void> _handleFollowAction(bool isFollowing, AppLocalizations t) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
@@ -158,15 +156,15 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
           'followers': FieldValue.arrayRemove([user.uid]),
         });
-        if(mounted) OverlayService().showTopNotification(context, "Unfollowed", Icons.remove_circle_outline, (){});
+        if(mounted) OverlayService().showTopNotification(context, t.translate('profile_unfollow'), Icons.remove_circle_outline, (){});
       } else {
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update({
           'followers': FieldValue.arrayUnion([user.uid])
         });
-        if(mounted) OverlayService().showTopNotification(context, "Following", Icons.check_circle, (){}, color: Colors.green);
+        if(mounted) OverlayService().showTopNotification(context, t.translate('community_following'), Icons.check_circle, (){}, color: Colors.green);
       }
     } catch (e) {
-      if(mounted) OverlayService().showTopNotification(context, "Action failed", Icons.error, (){}, color: Colors.red);
+      if(mounted) OverlayService().showTopNotification(context, t.translate('profile_action_fail'), Icons.error, (){}, color: Colors.red);
     }
   }
 
@@ -176,15 +174,29 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
 
   void _showImageOptions(BuildContext context, String? url, bool isBanner, bool hasControl) {
     if (url == null && !hasControl) return;
+    
+    // LOCALIZATION inside modal
+    var t = AppLocalizations.of(context)!;
+    
     showModalBottomSheet(context: context, shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))), builder: (ctx) {
       return SafeArea(child: Wrap(children: [
-        if (url != null) ListTile(leading: Icon(Icons.visibility_outlined, color: TwitterTheme.blue), title: Text(isBanner ? "View Banner" : "View Icon"), onTap: () { Navigator.pop(ctx); _openFullImage(context, url, isBanner ? 'community_banner' : 'community_icon'); }),
-        if (hasControl) ListTile(leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue), title: Text(isBanner ? "Change Banner" : "Change Icon"), onTap: () { Navigator.pop(ctx); _pickAndUploadImage(isBanner: isBanner); }),
+        if (url != null) ListTile(
+          leading: Icon(Icons.visibility_outlined, color: TwitterTheme.blue), 
+          title: Text(isBanner ? t.translate('profile_view_banner') : t.translate('profile_view_photo')), 
+          onTap: () { Navigator.pop(ctx); _openFullImage(context, url, isBanner ? 'community_banner' : 'community_icon'); }
+        ),
+        if (hasControl) ListTile(
+          leading: Icon(Icons.photo_library_outlined, color: TwitterTheme.blue), 
+          title: Text(isBanner ? t.translate('profile_change_banner') : t.translate('profile_change_photo')), 
+          onTap: () { Navigator.pop(ctx); _pickAndUploadImage(isBanner: isBanner); }
+        ),
       ]));
     });
   }
 
   Future<void> _pickAndUploadImage({required bool isBanner}) async {
+    var t = AppLocalizations.of(context)!;
+    
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
     if (pickedFile == null) return;
@@ -196,10 +208,10 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       if (url != null) {
         Map<String, dynamic> update = isBanner ? {'bannerImageUrl': url} : {'imageUrl': url};
         await FirebaseFirestore.instance.collection('communities').doc(widget.communityId).update(update);
-        if(mounted) OverlayService().showTopNotification(context, "Updated!", Icons.check_circle, (){}, color: Colors.green);
+        if(mounted) OverlayService().showTopNotification(context, t.translate('profile_update_success'), Icons.check_circle, (){}, color: Colors.green);
       }
     } catch (e) {
-      if(mounted) OverlayService().showTopNotification(context, "Upload failed", Icons.error, (){}, color: Colors.red);
+      if(mounted) OverlayService().showTopNotification(context, t.translate('edit_error_upload'), Icons.error, (){}, color: Colors.red);
     } finally {
       if(mounted) setState(() => _isUploadingImage = false);
     }
@@ -210,6 +222,9 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     final user = FirebaseAuth.instance.currentUser;
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
+    
+    // LOCALIZATION
+    var t = AppLocalizations.of(context)!;
     
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('communities').doc(widget.communityId).snapshots(),
@@ -254,7 +269,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                       children: [
                         GestureDetector(
                           onTap: () => _showImageOptions(context, bannerUrl, true, hasFullControl),
-                          child: Hero(tag: 'community_banner', child: bannerUrl != null ? CachedNetworkImage(imageUrl: bannerUrl, fit: BoxFit.cover, memCacheWidth: 800) : Container(color: isDarkMode ? Colors.grey[800] : Colors.grey[300], child: hasFullControl ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo, color: Colors.white), Text("Add Banner", style: TextStyle(color: Colors.white, fontSize: 12))])) : null)),
+                          child: Hero(tag: 'community_banner', child: bannerUrl != null ? CachedNetworkImage(imageUrl: bannerUrl, fit: BoxFit.cover, memCacheWidth: 800) : Container(color: isDarkMode ? Colors.grey[800] : Colors.grey[300], child: hasFullControl ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo, color: Colors.white), Text(t.translate('edit_banner_add'), style: TextStyle(color: Colors.white, fontSize: 12))])) : null)),
                         ),
                         Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withOpacity(0.8)]))),
                         Positioned(
@@ -270,7 +285,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                               Expanded(
                                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                                   Row(children: [Flexible(child: Text(name, style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)), if (isVerified) ...[SizedBox(width: 4), Icon(Icons.verified, size: 18, color: TwitterTheme.blue)]]),
-                                  Text(data['category'] == 'pnj_official' ? "Official Channel" : "Community", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                  Text(data['category'] == 'pnj_official' ? "Official Channel" : t.translate('general_community'), style: TextStyle(color: Colors.white70, fontSize: 12)),
                                 ]),
                               ),
                             ],
@@ -286,23 +301,28 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(data['description'] ?? "No description provided.", style: theme.textTheme.bodyMedium),
+                        Text(data['description'] ?? t.translate('profile_no_bio'), style: theme.textTheme.bodyMedium),
                         SizedBox(height: 12),
                         Row(
                           children: [
                             InkWell(
                               onTap: () => Navigator.push(context, _createSlideUpRoute(CommunityMembersScreen(communityId: widget.communityId, communityData: data, isStaff: hasFullControl))),
-                              child: Row(children: [Icon(Icons.group, size: 16, color: theme.hintColor), SizedBox(width: 4), Text("${followers.length} Followers", style: TextStyle(fontWeight: FontWeight.bold)), Icon(Icons.arrow_forward_ios, size: 12, color: theme.hintColor)]),
+                              child: Row(children: [Icon(Icons.group, size: 16, color: theme.hintColor), SizedBox(width: 4), Text("${followers.length} ${t.translate('comm_followers_count')}", style: TextStyle(fontWeight: FontWeight.bold)), Icon(Icons.arrow_forward_ios, size: 12, color: theme.hintColor)]),
                             ),
                             Spacer(),
                             if (!canPost)
-                              ElevatedButton(onPressed: () => _handleFollowAction(isFollower), style: ElevatedButton.styleFrom(backgroundColor: isFollower ? theme.cardColor : TwitterTheme.blue, foregroundColor: isFollower ? theme.textTheme.bodyLarge?.color : Colors.white, elevation: 0, side: isFollower ? BorderSide(color: theme.dividerColor) : null, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), child: Text(isFollower ? "Following" : "Follow"))
+                              ElevatedButton(onPressed: () => _handleFollowAction(isFollower, t), style: ElevatedButton.styleFrom(backgroundColor: isFollower ? theme.cardColor : TwitterTheme.blue, foregroundColor: isFollower ? theme.textTheme.bodyLarge?.color : Colors.white, elevation: 0, side: isFollower ? BorderSide(color: theme.dividerColor) : null, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))), child: Text(isFollower ? t.translate('community_following') : t.translate('community_follow')))
                             else
-                              ElevatedButton.icon(onPressed: () => Navigator.push(context, _createSlideUpRoute(CreatePostScreen(initialData: {'communityId': widget.communityId, 'communityName': name, 'communityIcon': avatarUrl}))), icon: Icon(Icons.campaign, size: 18), label: Text("Broadcast"), style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)))),
+                              ElevatedButton.icon(
+                                onPressed: () => Navigator.push(context, _createSlideUpRoute(CreatePostScreen(initialData: {'communityId': widget.communityId, 'communityName': name, 'communityIcon': avatarUrl}))), 
+                                icon: Icon(Icons.campaign, size: 18), 
+                                label: Text(t.translate('post_create_new')), // "Buat Postingan Baru"
+                                style: ElevatedButton.styleFrom(backgroundColor: TwitterTheme.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)))
+                              ),
                           ],
                         ),
                         Divider(height: 24),
-                        Text("Broadcasts", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                        Text(t.translate('community_broadcast'), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), // "Broadcast Feed" / "Feed Siaran"
                       ],
                     ),
                   ),
@@ -312,7 +332,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
             body: _isLoadingPosts 
               ? Center(child: CircularProgressIndicator())
               : _posts.isEmpty
-                ? Center(child: Padding(padding: EdgeInsets.only(top: 40), child: Text("No broadcasts yet.", style: TextStyle(color: Colors.grey))))
+                ? Center(child: Padding(padding: EdgeInsets.only(top: 40), child: Text(t.translate('community_no_broadcasts'), style: TextStyle(color: Colors.grey)))) // "No recent broadcasts."
                 : ListView.builder(
                     padding: EdgeInsets.only(bottom: 80),
                     physics: NeverScrollableScrollPhysics(), // Scroll handled by NestedScrollView
