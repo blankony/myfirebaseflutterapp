@@ -21,6 +21,8 @@ class ImageViewerScreen extends StatefulWidget {
   final String? postId; 
   final String heroTag;
   final VideoPlayerController? videoController; 
+  // [FIX] Tambahkan parameter ini untuk transisi mulus
+  final String? thumbnailPath; 
 
   const ImageViewerScreen({
     super.key,
@@ -30,6 +32,7 @@ class ImageViewerScreen extends StatefulWidget {
     this.postData,
     this.postId,
     this.videoController,
+    this.thumbnailPath,
   });
 
   @override
@@ -104,6 +107,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
       _totalDuration = _videoController!.value.duration;
       _videoController!.addListener(_videoListener);
       
+      // Auto play saat masuk fullscreen jika belum play
       if (!_isPlaying) {
         _videoController!.play();
         _isPlaying = true;
@@ -335,52 +339,93 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
             fit: StackFit.expand, 
             alignment: Alignment.center,
             children: [
-              // 1. CONTENT
+              // --- 1. CONTENT (VIDEO or IMAGE) ---
               if (_isVideo)
                 GestureDetector(
                   onTap: _togglePlayPause,
                   behavior: HitTestBehavior.opaque,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Container(color: Colors.transparent), 
-                      if (_isVideoInitialized)
-                        Hero(
-                          tag: widget.heroTag,
-                          child: Center(
-                            child: AspectRatio(
-                              aspectRatio: _videoController!.value.aspectRatio,
-                              child: VideoPlayer(_videoController!),
-                            ),
-                          ),
-                        )
-                      else
-                        Center(child: CircularProgressIndicator(color: Colors.white)),
-                    ],
+                  // [FIX] Hero di sini adalah parent, bukan di dalam 'if initialized'
+                  child: Hero(
+                    tag: widget.heroTag,
+                    // Tambahkan Material wrapper agar tidak ada glitch visual saat transisi
+                    child: Material(
+                      color: Colors.transparent, 
+                      child: Stack(
+                        fit: StackFit.expand,
+                        alignment: Alignment.center,
+                        children: [
+                          // A. Layer Dasar: Thumbnail Statis (Selalu Tampil Awal)
+                          // Ini adalah kunci agar animasi zoom bekerja (bukan fade)
+                          if (widget.thumbnailPath != null)
+                             Image.file(File(widget.thumbnailPath!), fit: BoxFit.contain),
+
+                          // B. Layer Video: Tampil di atasnya jika sudah siap
+                          if (_isVideoInitialized && _videoController != null)
+                            FittedBox(
+                              fit: BoxFit.contain, // Fit contain agar seluruh video terlihat
+                              child: SizedBox(
+                                width: _videoController!.value.size.width,
+                                height: _videoController!.value.size.height,
+                                child: VideoPlayer(_videoController!),
+                              ),
+                            )
+                          else if (widget.thumbnailPath == null)
+                            // Hanya tampilkan loading jika thumbnail pun tidak ada
+                            Center(child: CircularProgressIndicator(color: Colors.white)),
+                        ],
+                      ),
+                    ),
                   ),
                 )
               else
-                PhotoView(
-                  imageProvider: CachedNetworkImageProvider(widget.imageUrl),
-                  scaleStateController: _scaleStateController,
-                  backgroundDecoration: BoxDecoration(color: Colors.transparent),
-                  initialScale: PhotoViewComputedScale.contained,
-                  minScale: PhotoViewComputedScale.contained,
-                  maxScale: PhotoViewComputedScale.covered * 2.5,
-                  heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
-                  enableRotation: false,
-                  scaleStateChangedCallback: (PhotoViewScaleState state) {
-                    final isZooming = state != PhotoViewScaleState.initial && state != PhotoViewScaleState.zoomedOut;
-                    if (_isZoomed != isZooming) {
-                      setState(() {
-                        _isZoomed = isZooming;
-                      });
-                    }
-                  },
-                  onTapUp: (context, details, value) => _toggleOverlays(),
+                // IMAGE VIEW
+                // [FIX] Menggunakan Stack manual untuk placeholder thumbnail
+                // PhotoViewHeroAttributes terkadang delay loading network image
+                Stack(
+                  fit: StackFit.expand,
+                  children: [
+                     // 1. Placeholder Thumbnail
+                     if (widget.thumbnailPath != null)
+                       Center(child: Image.file(File(widget.thumbnailPath!), fit: BoxFit.contain)),
+                     
+                     // 2. PhotoView Utama
+                     PhotoView(
+                        imageProvider: CachedNetworkImageProvider(widget.imageUrl),
+                        scaleStateController: _scaleStateController,
+                        backgroundDecoration: BoxDecoration(color: Colors.transparent), // Transparan agar thumbnail bawah terlihat
+                        initialScale: PhotoViewComputedScale.contained,
+                        minScale: PhotoViewComputedScale.contained,
+                        maxScale: PhotoViewComputedScale.covered * 2.5,
+                        heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
+                        enableRotation: false,
+                        scaleStateChangedCallback: (PhotoViewScaleState state) {
+                          final isZooming = state != PhotoViewScaleState.initial && state != PhotoViewScaleState.zoomedOut;
+                          if (_isZoomed != isZooming) {
+                            setState(() {
+                              _isZoomed = isZooming;
+                            });
+                          }
+                        },
+                        onTapUp: (context, details, value) => _toggleOverlays(),
+                        // Saat loading selesai, PhotoView akan menutupi thumbnail di bawahnya
+                        loadingBuilder: (context, event) {
+                           // Kembalikan widget kosong/transparan karena thumbnail sudah ada di Stack bawah
+                           // atau loading indicator di atas thumbnail jika mau
+                           if (event == null) return const SizedBox.shrink();
+                           return Center(
+                             child: CircularProgressIndicator(
+                               value: event.expectedTotalBytes != null
+                                   ? event.cumulativeBytesLoaded / event.expectedTotalBytes!
+                                   : null,
+                               color: TwitterTheme.blue,
+                             ),
+                           );
+                        },
+                      ),
+                  ],
                 ),
 
-              // 2. BUFFERING
+              // --- 2. BUFFERING INDICATOR ---
               if (_isVideo && _isBuffering && _isPlaying)
                 Center(
                   child: Container(
@@ -393,7 +438,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                   ),
                 ),
 
-              // 3. CENTER PLAY BUTTON
+              // --- 3. CENTER PLAY BUTTON ---
               if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
                  Center(
                   child: IgnorePointer( 
@@ -409,7 +454,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                   ),
                 ),
 
-              // 4. TOP BAR - FIX HERE: Positioned wrapped the AnimatedOpacity, not vice-versa
+              // --- 4. TOP BAR ---
               Positioned(
                 top: 0, left: 0, right: 0,
                 child: AnimatedOpacity(
@@ -444,7 +489,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                 ),
               ),
 
-              // 5. MENU
+              // --- 5. MENU OVERLAY ---
               if (_isMenuOpen)
                 Positioned(
                   top: 50, right: 10,
@@ -471,7 +516,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                   ),
                 ),
 
-              // 6. VIDEO CONTROLS
+              // --- 6. VIDEO CONTROLS ---
               if (_isVideo && _isVideoInitialized)
                 AnimatedPositioned(
                   duration: Duration(milliseconds: 300),
@@ -574,7 +619,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
                   ),
                 ),
 
-              // 7. BOTTOM ACTION BAR
+              // --- 7. BOTTOM ACTION BAR ---
               if (_showOverlays && _isPostContent)
                 Positioned(
                   bottom: 0, left: 0, right: 0,
@@ -628,6 +673,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProvid
   }
 }
 
+// ... Bagian _DownloadManager dan _DownloadStatusOverlay tetap sama ...
 class _DownloadManager {
   static void startDownloadSequence({
     required OverlayState overlayState,
@@ -679,6 +725,7 @@ class _DownloadManager {
       final String fileName = "SapaPNJ_$dateStr$ext";
 
       String basePath;
+      // Android directory logic
       if (isImage) {
         basePath = '/storage/emulated/0/Pictures/SapaPNJ';
       } else {

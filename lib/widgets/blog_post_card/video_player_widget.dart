@@ -17,7 +17,6 @@ class VideoPlayerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Basic validation: Jika tidak ada controller DAN tidak ada thumbnail, tampilkan loader
     if (controller == null && thumbnailPath == null) {
       return Container(
         color: Colors.black,
@@ -31,28 +30,24 @@ class VideoPlayerWidget extends StatelessWidget {
       color: Colors.black,
       width: double.infinity,
       height: double.infinity,
-      // StackFit.expand PENTING agar semua child dipaksa memenuhi container
       child: Stack(
         fit: StackFit.expand, 
         children: [
-          
-          // LAYER 1 (PALING BAWAH): Thumbnail Statis
-          // Selalu dirender jika path tersedia. Ini mencegah black screen saat buffering video.
+          // Layer 1: Thumbnail (Selalu ada di bawah)
           if (thumbnailPath != null)
             Image.file(
               File(thumbnailPath!),
-              fit: BoxFit.cover, // CROP CENTER (Mengisi penuh area 4:3)
+              fit: BoxFit.cover, 
               errorBuilder: (context, error, stack) => Container(color: Colors.black),
             ),
 
-          // LAYER 2: Video Player
-          // Hanya ditampilkan jika controller sudah siap.
+          // Layer 2: Video Player (Hanya jika playing)
           if (controller != null && controller!.value.isInitialized)
             Visibility(
-              visible: isPlaying, // Hanya terlihat jika sedang PLAY
-              maintainState: true, // Biarkan state video tetap ada di memori
+              visible: isPlaying,
+              maintainState: true,
               child: FittedBox(
-                fit: BoxFit.cover, // CROP CENTER (Agar video match dengan thumbnail & tidak gepeng)
+                fit: BoxFit.cover,
                 child: SizedBox(
                   width: controller!.value.size.width,
                   height: controller!.value.size.height,
@@ -61,13 +56,10 @@ class VideoPlayerWidget extends StatelessWidget {
               ),
             ),
 
-          // LAYER 3 (PALING ATAS): Overlay & Play Button
-          // Ditampilkan jika video TIDAK sedang playing (Pause atau Initial state)
+          // Layer 3: Overlay & Play Button (Hanya jika NOT playing)
+          // Inilah SATU-SATUNYA tempat ikon play dirender.
           if (!isPlaying) ...[
-            // Overlay hitam transparan agar icon play kontras
             Container(color: Colors.black.withOpacity(0.2)),
-            
-            // Tombol Play
             Center(
               child: Container(
                 padding: const EdgeInsets.all(12),
