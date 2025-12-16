@@ -497,6 +497,6 @@
   "verify_already_verified": "Sudah verifikasi atau user tidak ditemukan.",
   "verify_email_sent_banner": "Email terkirim! Cek kotak masuk Anda.",
   "verify_send_btn": "Kirim Email Verifikasi",
-  "verify_get_started": "Mulai Sekarang"
-
+  "verify_get_started": "Mulai Sekarang",
+  "error_nim_registered": "NIM Sudah Terdaftar."
 }
