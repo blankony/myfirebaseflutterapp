@@ -36,7 +36,7 @@ class ImageViewerScreen extends StatefulWidget {
   State<ImageViewerScreen> createState() => _ImageViewerScreenState();
 }
 
-class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTickerProviderStateMixin {
+class _ImageViewerScreenState extends State<ImageViewerScreen> with TickerProviderStateMixin {
   bool _showOverlays = true;
   Timer? _hideTimer; 
 
@@ -49,6 +49,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   bool _isReposted = false;
   int _repostCount = 0;
   
+  // Photo View State
+  late PhotoViewScaleStateController _scaleStateController;
+  bool _isZoomed = false; 
+
   // Video Player State
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
@@ -69,6 +73,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
   void initState() {
     super.initState();
     _initStats();
+    
     _menuController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -81,6 +86,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       curve: Curves.easeOutQuart,
     ));
 
+    _scaleStateController = PhotoViewScaleStateController();
+
     if (_isVideo) {
       _initVideo();
     }
@@ -90,7 +97,6 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
 
   void _initVideo() {
     if (widget.videoController != null) {
-      // REUSE EXISTING CONTROLLER
       _videoController = widget.videoController;
       _isExternalController = true;
       _isVideoInitialized = true;
@@ -98,23 +104,23 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
       _totalDuration = _videoController!.value.duration;
       _videoController!.addListener(_videoListener);
       
-      // Auto play if not playing
       if (!_isPlaying) {
         _videoController!.play();
         _isPlaying = true;
       }
     } else {
-      // INIT NEW CONTROLLER (Fallback)
       _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.imageUrl))
         ..initialize().then((_) {
-          setState(() {
-            _isVideoInitialized = true;
-            _isPlaying = true;
-            _totalDuration = _videoController!.value.duration;
-          });
-          _videoController!.play();
-          _videoController!.setLooping(true);
-          _videoController!.addListener(_videoListener);
+          if (mounted) {
+            setState(() {
+              _isVideoInitialized = true;
+              _isPlaying = true;
+              _totalDuration = _videoController!.value.duration;
+            });
+            _videoController!.play();
+            _videoController!.setLooping(true);
+            _videoController!.addListener(_videoListener);
+          }
         });
     }
   }
@@ -171,9 +177,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
     _hideTimer?.cancel();
     _menuController.dispose();
     _videoController?.removeListener(_videoListener);
+    _scaleStateController.dispose();
     
-    // CRITICAL: Only dispose if we created it. 
-    // If passed from parent, parent handles disposal.
     if (!_isExternalController) {
       _videoController?.dispose();
     }
@@ -306,37 +311,41 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
+    final bool enableDismiss = !_isZoomed || _isVideo;
+
     return Scaffold(
-      // FIX: Transparent background allows seeing the previous screen when swiping
       backgroundColor: Colors.transparent,
       extendBodyBehindAppBar: true,
       
-      // FIX: Use Dismissible with confirmDismiss to prevent "still in tree" error
       body: Dismissible(
         key: const Key('media_viewer_dismiss'),
-        direction: DismissDirection.vertical,
+        direction: enableDismiss ? DismissDirection.vertical : DismissDirection.none,
         dismissThresholds: const {
           DismissDirection.vertical: 0.2,
         },
         confirmDismiss: (direction) async {
           Navigator.of(context).pop();
-          return false; // Prevent internal dismissal, let Navigator handle it
+          return false; 
         },
         child: Container(
-          // Background is attached to the content so it slides WITH the image
           color: Colors.black,
           width: MediaQuery.of(context).size.width,
           height: MediaQuery.of(context).size.height,
-          child: GestureDetector(
-            onTap: _isVideo ? _togglePlayPause : _toggleOverlays,
-            child: Stack(
-              fit: StackFit.expand, 
-              alignment: Alignment.center,
-              children: [
-                // 1. CONTENT
-                if (_isVideo)
-                  _isVideoInitialized 
-                      ? Hero(
+          child: Stack(
+            fit: StackFit.expand, 
+            alignment: Alignment.center,
+            children: [
+              // 1. CONTENT
+              if (_isVideo)
+                GestureDetector(
+                  onTap: _togglePlayPause,
+                  behavior: HitTestBehavior.opaque,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(color: Colors.transparent), 
+                      if (_isVideoInitialized)
+                        Hero(
                           tag: widget.heroTag,
                           child: Center(
                             child: AspectRatio(
@@ -345,33 +354,49 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                             ),
                           ),
                         )
-                      : Center(child: CircularProgressIndicator(color: Colors.white))
-                else
-                  PhotoView(
-                    imageProvider: CachedNetworkImageProvider(widget.imageUrl),
-                    backgroundDecoration: BoxDecoration(color: Colors.transparent), // Transparent so container black shows
-                    initialScale: PhotoViewComputedScale.contained,
-                    minScale: PhotoViewComputedScale.contained,
-                    maxScale: PhotoViewComputedScale.covered * 2.5,
-                    heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
+                      else
+                        Center(child: CircularProgressIndicator(color: Colors.white)),
+                    ],
                   ),
+                )
+              else
+                PhotoView(
+                  imageProvider: CachedNetworkImageProvider(widget.imageUrl),
+                  scaleStateController: _scaleStateController,
+                  backgroundDecoration: BoxDecoration(color: Colors.transparent),
+                  initialScale: PhotoViewComputedScale.contained,
+                  minScale: PhotoViewComputedScale.contained,
+                  maxScale: PhotoViewComputedScale.covered * 2.5,
+                  heroAttributes: PhotoViewHeroAttributes(tag: widget.heroTag),
+                  enableRotation: false,
+                  scaleStateChangedCallback: (PhotoViewScaleState state) {
+                    final isZooming = state != PhotoViewScaleState.initial && state != PhotoViewScaleState.zoomedOut;
+                    if (_isZoomed != isZooming) {
+                      setState(() {
+                        _isZoomed = isZooming;
+                      });
+                    }
+                  },
+                  onTapUp: (context, details, value) => _toggleOverlays(),
+                ),
 
-                // 2. BUFFERING
-                if (_isVideo && _isBuffering && _isPlaying)
-                  Center(
-                    child: Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        shape: BoxShape.circle
-                      ),
-                      child: CircularProgressIndicator(color: Colors.white),
+              // 2. BUFFERING
+              if (_isVideo && _isBuffering && _isPlaying)
+                Center(
+                  child: Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle
                     ),
+                    child: CircularProgressIndicator(color: Colors.white),
                   ),
+                ),
 
-                // 3. CENTER PLAY BUTTON
-                if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
-                   Center(
+              // 3. CENTER PLAY BUTTON
+              if (_isVideo && !_isPlaying && _isVideoInitialized && !_showOverlays)
+                 Center(
+                  child: IgnorePointer( 
                     child: Container(
                       decoration: BoxDecoration(
                         color: Colors.black45,
@@ -382,176 +407,180 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                       child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 50),
                     ),
                   ),
+                ),
 
-                // 4. TOP BAR
-                AnimatedOpacity(
+              // 4. TOP BAR - FIX HERE: Positioned wrapped the AnimatedOpacity, not vice-versa
+              Positioned(
+                top: 0, left: 0, right: 0,
+                child: AnimatedOpacity(
                   opacity: _showOverlays ? 1.0 : 0.0,
                   duration: Duration(milliseconds: 200),
-                  child: Positioned(
-                    top: 0, left: 0, right: 0,
-                    child: Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.black.withOpacity(0.8), Colors.transparent],
-                        ),
+                  child: Container(
+                    height: 100,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black.withOpacity(0.8), Colors.transparent],
                       ),
-                      child: SafeArea(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.arrow_back, color: Colors.white),
-                              onPressed: () => Navigator.of(context).pop(),
-                            ),
-                            IconButton(
-                              icon: Icon(Icons.more_vert, color: Colors.white),
-                              onPressed: _openMenu,
-                            ),
-                          ],
-                        ),
+                    ),
+                    child: SafeArea(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.arrow_back, color: Colors.white),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.more_vert, color: Colors.white),
+                            onPressed: _openMenu,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // 5. MENU
+              if (_isMenuOpen)
+                Positioned(
+                  top: 50, right: 10,
+                  child: SlideTransition(
+                    position: _menuAnimation,
+                    child: Container(
+                      width: 200,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF15202B),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: Icon(Icons.save_alt, color: Colors.white),
+                            title: Text('Save to Device', style: TextStyle(color: Colors.white)),
+                            onTap: _downloadMedia,
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
 
-                // 5. MENU
-                if (_isMenuOpen)
-                  Positioned(
-                    top: 50, right: 10,
-                    child: SlideTransition(
-                      position: _menuAnimation,
-                      child: Container(
-                        width: 200,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF15202B),
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ListTile(
-                              leading: Icon(Icons.save_alt, color: Colors.white),
-                              title: Text('Save to Device', style: TextStyle(color: Colors.white)),
-                              onTap: _downloadMedia,
-                            ),
-                          ],
-                        ),
+              // 6. VIDEO CONTROLS
+              if (_isVideo && _isVideoInitialized)
+                AnimatedPositioned(
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -150, 
+                  left: 16,
+                  right: 16,
+                  child: AnimatedOpacity(
+                    opacity: _showOverlays ? 1.0 : 0.0,
+                    duration: Duration(milliseconds: 200),
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Text(_formatDuration(_currentPosition), style: TextStyle(color: Colors.white, fontSize: 12)),
+                              Expanded(
+                                child: SliderTheme(
+                                  data: SliderTheme.of(context).copyWith(
+                                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                    overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
+                                    trackHeight: 2,
+                                    thumbColor: TwitterTheme.blue,
+                                    activeTrackColor: TwitterTheme.blue,
+                                    inactiveTrackColor: Colors.white24,
+                                  ),
+                                  child: Slider(
+                                    value: _currentPosition.inMilliseconds.toDouble().clamp(0.0, _totalDuration.inMilliseconds.toDouble()),
+                                    min: 0.0,
+                                    max: _totalDuration.inMilliseconds.toDouble(),
+                                    activeColor: TwitterTheme.blue,
+                                    inactiveColor: Colors.white24,
+                                    onChangeStart: _onSeekStart,
+                                    onChanged: _onSeekChanged,
+                                    onChangeEnd: _onSeekEnd,
+                                  ),
+                                ),
+                              ),
+                              Text(_formatDuration(_totalDuration), style: TextStyle(color: Colors.white, fontSize: 12)),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              IconButton(
+                                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                                onPressed: _togglePlayPause,
+                                padding: EdgeInsets.zero,
+                                constraints: BoxConstraints(),
+                              ),
+                              SizedBox(width: 8),
+                              Icon(_currentVolume == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 20),
+                              Expanded(
+                                child: SliderTheme(
+                                  data: SliderTheme.of(context).copyWith(
+                                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                                    trackHeight: 2,
+                                    overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+                                  ),
+                                  child: Slider(
+                                    value: _currentVolume,
+                                    min: 0.0,
+                                    max: 1.0,
+                                    activeColor: Colors.white,
+                                    inactiveColor: Colors.white24,
+                                    onChanged: (val) {
+                                      setState(() => _currentVolume = val);
+                                      _videoController?.setVolume(val);
+                                      _resetHideTimer();
+                                    },
+                                  ),
+                                ),
+                              ),
+                              PopupMenuButton<double>(
+                                initialValue: _videoController?.value.playbackSpeed ?? 1.0,
+                                onSelected: _changeSpeed,
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(value: 0.5, child: Text("0.5x")),
+                                  PopupMenuItem(value: 1.0, child: Text("1.0x")),
+                                  PopupMenuItem(value: 1.5, child: Text("1.5x")),
+                                  PopupMenuItem(value: 2.0, child: Text("2.0x")),
+                                ],
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(4)),
+                                  child: Text("${_videoController?.value.playbackSpeed}x", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ),
+                ),
 
-                // 6. VIDEO CONTROLS
-                if (_isVideo && _isVideoInitialized)
-                  AnimatedPositioned(
-                    duration: Duration(milliseconds: 300),
-                    curve: Curves.easeInOut,
-                    bottom: _showOverlays ? (_isPostContent ? 80 : 20) : -150, 
-                    left: 16,
-                    right: 16,
-                    child: AnimatedOpacity(
-                      opacity: _showOverlays ? 1.0 : 0.0,
-                      duration: Duration(milliseconds: 200),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              children: [
-                                Text(_formatDuration(_currentPosition), style: TextStyle(color: Colors.white, fontSize: 12)),
-                                Expanded(
-                                  child: SliderTheme(
-                                    data: SliderTheme.of(context).copyWith(
-                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                                      overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
-                                      trackHeight: 2,
-                                      thumbColor: TwitterTheme.blue,
-                                      activeTrackColor: TwitterTheme.blue,
-                                      inactiveTrackColor: Colors.white24,
-                                    ),
-                                    child: Slider(
-                                      value: _currentPosition.inMilliseconds.toDouble().clamp(0.0, _totalDuration.inMilliseconds.toDouble()),
-                                      min: 0.0,
-                                      max: _totalDuration.inMilliseconds.toDouble(),
-                                      activeColor: TwitterTheme.blue,
-                                      inactiveColor: Colors.white24,
-                                      onChangeStart: _onSeekStart,
-                                      onChanged: _onSeekChanged,
-                                      onChangeEnd: _onSeekEnd,
-                                    ),
-                                  ),
-                                ),
-                                Text(_formatDuration(_totalDuration), style: TextStyle(color: Colors.white, fontSize: 12)),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
-                                  onPressed: _togglePlayPause,
-                                  padding: EdgeInsets.zero,
-                                  constraints: BoxConstraints(),
-                                ),
-                                SizedBox(width: 8),
-                                Icon(_currentVolume == 0 ? Icons.volume_off : Icons.volume_up, color: Colors.white, size: 20),
-                                Expanded(
-                                  child: SliderTheme(
-                                    data: SliderTheme.of(context).copyWith(
-                                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-                                      trackHeight: 2,
-                                      overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
-                                    ),
-                                    child: Slider(
-                                      value: _currentVolume,
-                                      min: 0.0,
-                                      max: 1.0,
-                                      activeColor: Colors.white,
-                                      inactiveColor: Colors.white24,
-                                      onChanged: (val) {
-                                        setState(() => _currentVolume = val);
-                                        _videoController?.setVolume(val);
-                                        _resetHideTimer();
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                PopupMenuButton<double>(
-                                  initialValue: _videoController?.value.playbackSpeed ?? 1.0,
-                                  onSelected: _changeSpeed,
-                                  itemBuilder: (context) => [
-                                    PopupMenuItem(value: 0.5, child: Text("0.5x")),
-                                    PopupMenuItem(value: 1.0, child: Text("1.0x")),
-                                    PopupMenuItem(value: 1.5, child: Text("1.5x")),
-                                    PopupMenuItem(value: 2.0, child: Text("2.0x")),
-                                  ],
-                                  child: Container(
-                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(4)),
-                                    child: Text("${_videoController?.value.playbackSpeed}x", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // 7. BOTTOM ACTION BAR
-                if (_showOverlays && _isPostContent)
-                  Positioned(
-                    bottom: 0, left: 0, right: 0,
+              // 7. BOTTOM ACTION BAR
+              if (_showOverlays && _isPostContent)
+                Positioned(
+                  bottom: 0, left: 0, right: 0,
+                  child: AnimatedOpacity(
+                    opacity: _showOverlays ? 1.0 : 0.0,
+                    duration: Duration(milliseconds: 200),
                     child: Container(
                       padding: EdgeInsets.only(bottom: 20, top: 20, left: 16, right: 16),
                       decoration: BoxDecoration(
@@ -575,8 +604,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> with SingleTicker
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),

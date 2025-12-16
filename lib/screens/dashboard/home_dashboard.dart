@@ -333,7 +333,7 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  // --- CHECK DRAFTS BEFORE SHOWING DIALOG ---
+  // --- CHECK DRAFTS BEFORE SHOWING DIALOG WITH ANIMATION ---
   void _showPostCreationMenu(BuildContext context) async {
     final DraftService draftService = DraftService();
     final List<DraftPost> drafts = await draftService.getDrafts();
@@ -345,16 +345,17 @@ class _HomeDashboardState extends State<HomeDashboard>
       return;
     }
 
-    showDialog(
+    // Using showGeneralDialog for custom entrance animation (Scale + Fade + Blur)
+    showGeneralDialog(
       context: context,
       barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       barrierColor: Colors.black.withOpacity(0.3),
-      builder: (ctx) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: EdgeInsets.all(20),
+      transitionDuration: const Duration(milliseconds: 350),
+      pageBuilder: (ctx, anim1, anim2) {
+        return Center(
+          child: Container(
+            margin: EdgeInsets.symmetric(horizontal: 24),
             child: _DraftMenuContent(
               initialDrafts: drafts,
               onNewPost: () {
@@ -365,6 +366,19 @@ class _HomeDashboardState extends State<HomeDashboard>
                 Navigator.pop(ctx);
                 _navigateToCreatePost(draftData: draft);
               },
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        final curvedValue = Curves.easeOutBack.transform(anim1.value);
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8 * anim1.value, sigmaY: 8 * anim1.value),
+          child: Transform.scale(
+            scale: 0.8 + (0.2 * curvedValue), // Scale up from 0.8 to 1.0 with bounce
+            child: Opacity(
+              opacity: anim1.value,
+              child: child,
             ),
           ),
         );
