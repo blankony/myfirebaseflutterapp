@@ -10,7 +10,7 @@ This project is a comprehensive social platform that integrates advanced **Narro
 
 ## Core Features
 
-### 1. Artificial Intelligence Suite
+### 1. Artificial Intelligence (Narrow AI) Suite
 The application leverages various Narrow AI technologies to perform specific intelligent tasks:
 - **Generative AI Chatbot (Spirit AI):** An intelligent virtual assistant powered by `Google Gemini 2.5 Flash` capable of answering campus queries, translation, and drafting text with context retention.
 - **Visual Detector AI (Content Safety):** An automated image scanning system using AI to detect and block sensitive content (violence, adult content) before upload.
@@ -21,7 +21,7 @@ The application leverages various Narrow AI technologies to perform specific int
 - **Algorithmic Feed & Trending:** Statistical AI and heuristic algorithms (`N-gram analysis`) to detect trending topics and personalize content discovery based on engagement.
 
 ### 2. Trust & Safety System
-- **KTM Verification (Blue Badge Checkmark):** Users can upload their Student ID Card (KTM) to get a "Verified Student" badge, ensuring a trusted ecosystem.
+- **KTM Verification (Blue Badge):** Users can upload their Student ID Card (KTM) to get a "Verified Student" badge, ensuring a trusted ecosystem.
 - **Bad Word Guard:** Real-time text filtering system that prevents the posting of offensive language or hate speech.
 - **Moderation Tools:** Comprehensive reporting system and user blocking capabilities to maintain a healthy community.
 
@@ -53,7 +53,7 @@ Here is a sneak peek of the application. For the complete list of all 47 screens
 |---|---|---|---|
 | <img src="screenshots/home.jpg" width="200"/> | <img src="screenshots/community_view.jpg" width="200"/> | <img src="screenshots/spirit_ai.jpg" width="200"/> | <img src="screenshots/profile_posts.jpg" width="200"/> |
 
-👉 **[Click here to view the full Screenshot Gallery (GALLERY.md)](gallery.md)**
+**[Click here to view the full Screenshot Gallery](gallery.md)**
 
 ---
 
@@ -70,56 +70,125 @@ Firebase and API key configuration is required before running the application.
 
 ### 2. Firestore Security Rules
 Copy and paste the following rules into your Firestore rules editor:
-```txt
+```json
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // USERS: Allow user to update their own profile fields
+
+    // --- HELPER FUNCTIONS ---
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isResourceOwner() {
+      return isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Cek Admin Komunitas
+    function isCommunityAdmin(communityId) {
+       return communityId != null && 
+              exists(/databases/$(database)/documents/communities/$(communityId)) &&
+              get(/databases/$(database)/documents/communities/$(communityId)).data.admins.hasAny([request.auth.uid]);
+    }
+
+    // 1. USERS
     match /users/{userId} {
-      allow read, create: if request.auth.uid != null;
-      allow delete: if request.auth.uid == userId;
-      
-      allow update: if request.auth.uid != null && (
-        (request.auth.uid == userId) || // User updates own profile
-        (request.auth.uid != userId && 
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers'])) // Other user follows
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if isOwner(userId);
+      allow update: if isAuthenticated() && (
+        isOwner(userId) || 
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following', 'isPrivate']))
       );
+      match /bookmarks/{document=**} { allow read, write: if isOwner(userId); }
+      match /notifications/{notificationId} { 
+        allow create: if isAuthenticated();
+        allow update: if isOwner(userId);
+        allow get: if isOwner(userId) || (isAuthenticated() && resource.data.senderId == request.auth.uid);
+        allow list: if isOwner(userId) || (isAuthenticated() && resource.data.senderId == request.auth.uid);
+        allow delete: if isOwner(userId) || (isAuthenticated() && resource.data.senderId == request.auth.uid);
+      }
+      match /chat_sessions/{document=**} { allow read, write: if isOwner(userId); }
+      match /follow_requests/{requesterId} {
+        allow read: if isAuthenticated() && (request.auth.uid == userId || request.auth.uid == requesterId);
+        allow create: if isAuthenticated() && request.auth.uid == requesterId;
+        allow delete: if isAuthenticated() && (request.auth.uid == userId || request.auth.uid == requesterId);
+      }
     }
 
-    // NOTIFICATIONS
-    match /users/{userId}/notifications/{notificationId} {
-      allow create: if request.auth.uid != null;
-      allow read, update, delete: if request.auth.uid == userId;
+    // 2. COMMUNITIES
+    match /communities/{communityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      // Izinkan update (join/leave/edit info/upload image/manage roles)
+      allow update: if isAuthenticated(); 
+      // Izinkan DELETE hanya jika user adalah Owner
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
     }
 
-    // POSTS: Allow updating avatar fields on own posts
+    // 3. POSTS
     match /posts/{postId} {
-      allow read, create: if request.auth != null;
-      allow delete: if request.auth.uid == resource.data.userId;
-
-      allow update: if request.auth != null && (
-        // Allow updating profile info on old posts
-        (request.auth.uid == resource.data.userId && 
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'userName', 'avatarIconId', 'avatarHex'])) ||
-        
-        // Allow updating likes/comments count by others
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        isCommunityAdmin(resource.data.communityId)
+      );
+      allow update: if isAuthenticated() && (
+        (isResourceOwner() && 
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'userName', 'avatarIconId', 'avatarHex', 'profileImageUrl', 
+            'mediaUrl', 'mediaType', 'isUploading', 'uploadProgress', 'uploadFailed',
+            'editedAt', 'visibility', 'communityId'
+          ])) ||
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'commentCount', 'repostedBy']))
       );
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow delete: if isAuthenticated() && (
+           resource.data.userId == request.auth.uid ||
+           isCommunityAdmin(get(/databases/$(database)/documents/posts/$(postId)).data.communityId)
+        );
+        allow update: if isAuthenticated() && (
+          (isResourceOwner() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'userName', 'avatarIconId', 'avatarHex', 'profileImageUrl'])) ||
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'repostedBy']))
+        );
+      }
     }
 
-    // COMMENTS: Allow updating avatar fields on own comments
-    match /posts/{postId}/comments/{commentId} {
-      allow read, create: if request.auth != null;
-      allow delete: if request.auth.uid == resource.data.userId;
-      
-      allow update: if request.auth.uid == resource.data.userId && (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'userName', 'avatarIconId', 'avatarHex'])
-      );
+    // 4. REPORTS
+    match /reports/{reportId} {
+      allow create: if isAuthenticated();
+      allow read: if false; 
     }
     
+    // 5. COLLECTION GROUP
     match /{path=**}/comments/{commentId} {
-      allow read: if request.auth != null;
+      allow read: if isAuthenticated();
     }
   }
 }
+```
+
+### 3. Environment Configuration (.env)
+This project uses flutter_dotenv to securely manage API keys. You must create a .env file in the root directory of the project to enable AI features (Spirit AI, Content Guard) and Media Uploads.
+  1. Create a file named .env in the root of your project folder.
+  2. Copy and paste the keys below, replacing the values with your own API keys:
+
+```.env
+# Google AI Studio Key (for Spirit AI & Content Safety)
+GEMINI_API_KEY=your_google_gemini_api_key
+
+# Cloudinary Config (for Image/Video Uploads)
+CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
+CLOUDINARY_UPLOAD_PRESET=your_cloudinary_upload_preset
+
+# Optional: Required for deleting/moderating media from the app
+CLOUDINARY_API_KEY=your_cloudinary_api_key
+CLOUDINARY_API_SECRET=your_cloudinary_api_secret
+```
