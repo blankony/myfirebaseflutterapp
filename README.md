@@ -1,3 +1,5 @@
+![SAPA PNJ Header](SAPA%20PNJ.png)
+
 # SAPA PNJ (Sarana Pengguna Aplikasi Politeknik Negeri Jakarta)
 
 **SAPA PNJ** is a modern, feature-rich social media and communication platform designed exclusively for the Politeknik Negeri Jakarta (PNJ) community. Built with Flutter and backed by a powerful Firebase backend, this application serves as a central hub for students and lecturers to connect, share information, and interact in a dynamic academic environment.
@@ -13,50 +15,35 @@ The architecture emphasizes denormalized data for a fast-reading feed, a secure 
 ### 1. Authentication & Onboarding
 - **Exclusive Registration:** User registration is restricted to official PNJ student emails (`@stu.pnj.ac.id`), ensuring the community remains exclusive.
 - **Complete Auth Suite:** Full support for login, registration, and password reset.
-- **Guided Setup Flow:** A multi-step onboarding process for new users:
-    - **Profile Setup:** Set up an initial profile picture and banner.
-    - **Academic Info:** Select department and study program from official PNJ data.
-    - **Email Verification:** A dedicated step to encourage email verification for full app access.
-- **Smart Decision Gates:** After login, the app intelligently directs users to the appropriate screen, whether it's completing their profile or heading to the main dashboard.
+- **Guided Setup Flow:** A multi-step onboarding process for new users including profile setup and academic info verification.
 
 ### 2. Social & Real-time Interaction
-- **Real-time Feed:** A live home feed showing the latest posts from the community, with a "Recommended" tab for personalized content.
-- **Full CRUD:** Create, read, update, and delete posts and comments.
+- **Real-time Feed:** A live home feed showing the latest posts from the community.
+- **Community Groups:** Join and interact within specific communities.
 - **Social Actions:** Users can **Like**, **Repost**, and **Comment** on posts.
-- **Follow System:** Follow and unfollow other users to customize the feed and interactions.
 
 ### 3. AI-Powered Features (Google Gemini)
-- **AI Assistant:** A dedicated, conversational AI assistant powered by `gemini-1.5-flash` to answer questions and provide help in a friendly, casual tone. Chat history is saved per user.
-- **Predictive Text:** AI-powered text completion suggests relevant words and phrases while creating posts or comments, speeding up user input.
+- **AI Assistant:** A dedicated, conversational AI assistant powered by `gemini-1.5-flash` to answer questions and provide help.
+- **Predictive Text:** AI-powered text completion suggests relevant words while creating posts.
 
 ### 4. Media Handling
-- **Image & Video Uploads:** Users can attach images and videos to posts and comments.
-- **Cloudinary Integration:** All media is uploaded to Cloudinary for optimized storage and delivery.
-- **Image Cropper & Editor:** An integrated image editor allows users to crop, rotate, and adjust images before posting.
-- **Video Trimmer:** A built-in tool to trim videos to a maximum length before uploading.
-- **Media Viewer:** A fullscreen, immersive media viewer for photos and videos with action buttons (like, share, etc.).
+- **Image & Video Uploads:** Users can attach images and videos to posts.
+- **Cloudinary Integration:** Optimized media storage and delivery.
+- **Built-in Editor:** Integrated tools to crop images and trim videos.
 
 ### 5. Profiles & Account Management
-- **Detailed User Profiles:** Profiles display user's name, NIM, bio, department, study program, avatar, and banner.
-- **Post History:** Profile pages include tabs for a user's **Posts**, **Reposts**, and **Replies**.
-- **Pin Post to Profile:** Users can pin one of their posts to the top of their profile page.
-- **Full Account Control:** Users can edit their profile, change their password, log out, or permanently delete their account.
-
-### 6. UI & UX
-- **Theming:** Seamlessly switch between **Light and Dark** themes.
-- **Side Panel & Drawers:** An intuitive side panel for navigation and a dedicated drawer for AI chat history.
-- **In-App Notifications:** A real-time notification system with a top-down overlay for new alerts and a bottom sheet to view all activity history (likes, comments, follows, etc.).
-- **Haptic Feedback:** Subtle haptic feedback on interactions for a more tactile experience.
+- **Detailed Profiles:** Showcases user info, posts, replies, and reposts.
+- **Account Control:** Full settings to manage password, blocked users, and privacy.
 
 ## Screenshots
 
-Here is a quick look at the application. For the complete list of screenshots covering all features, please visit the **[Screenshot Gallery](GALLERY.md)**.
+Here is a sneak peek of the application. For the complete list of all 47 screenshots covering every feature, please visit the **[Screenshot Gallery](GALLERY.md)**.
 
 | Home Feed | Community | AI Assistant | User Profile |
 |---|---|---|---|
 | <img src="screenshots/home.jpg" width="200"/> | <img src="screenshots/community_view.jpg" width="200"/> | <img src="screenshots/spirit_ai.jpg" width="200"/> | <img src="screenshots/profile_posts.jpg" width="200"/> |
 
-👉 **[Click here to view the full Screenshot Gallery (GALLERY.md)](gallery.md)**
+👉 **[Click here to view the full Screenshot Gallery (GALLERY.md)](GALLERY.md)**
 
 ---
 
