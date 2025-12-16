@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
+import 'package:timeago/timeago.dart' as timeago;
 
 import '../screens/post_detail_screen.dart';
 import '../screens/dashboard/profile_page.dart';
@@ -36,7 +37,6 @@ class BlogPostCard extends StatefulWidget {
   final Function(String, bool)? onPinToggle;
   final String? currentProfileUserId;
 
-  // [OPTIMASI 1 & 2] Parameter baru untuk menghindari fetch database berulang
   final bool isCommunityAdmin;
   final List<String> blockedUserIds;
 
@@ -52,8 +52,6 @@ class BlogPostCard extends StatefulWidget {
     this.isPinned = false,
     this.onPinToggle,
     this.currentProfileUserId,
-    // Default value diberikan agar tidak error saat compile, 
-    // tapi WAJIB diisi dari parent untuk performa maksimal
     this.isCommunityAdmin = false, 
     this.blockedUserIds = const [], 
   });
@@ -81,25 +79,35 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   VideoPlayerController? _videoController;
   bool _isVideoOwner = false;
-  // [OPTIMASI 3] Flag untuk Lazy Loading Video
   bool _isVideoInitialized = false; 
   bool _isVideoLoading = false;
+
+  // [REPOST FEATURE] State Variables
+  bool _isRepostWrapper = false;
+  Map<String, dynamic>? _resolvedPostData;
+  bool _isLoadingOriginal = false;
+  String _originalError = '';
 
   @override
   void initState() {
     super.initState();
     _localIsPinned = widget.isPinned;
-    _syncState();
     
-    // [OPTIMASI 3] Jangan init video otomatis. Hanya setup jika preloaded.
-    if (widget.preloadedController != null) {
+    // [REPOST FEATURE] Check if this is a repost wrapper
+    if (widget.postData['type'] == 'repost' && widget.postData['originalPostId'] != null) {
+      _isRepostWrapper = true;
+      _fetchOriginalPost(widget.postData['originalPostId']);
+    } else {
+      _resolvedPostData = widget.postData;
+      _syncState();
+    }
+    
+    // [OPTIMASI 3] Init video hanya jika preloaded dan bukan repost wrapper
+    if (widget.preloadedController != null && !_isRepostWrapper) {
       _videoController = widget.preloadedController;
       _isVideoInitialized = true;
       _isVideoOwner = false;
     } 
-    // Jika tidak preloaded, kita tunggu user tap (Lazy Load)
-
-    // [OPTIMASI 1] Hapus _checkCommunityPermissions() karena data sudah dipass via constructor
 
     _likeController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _likeAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _likeController, curve: Curves.easeInOut));
@@ -111,12 +119,52 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
   }
 
-  // [OPTIMASI 3] Method manual untuk init video saat dibutuhkan
+  // [REPOST FEATURE] Helper Getter
+  String get effectivePostId => _isRepostWrapper ? (widget.postData['originalPostId'] ?? widget.postId) : widget.postId;
+  Map<String, dynamic> get effectivePostData => _resolvedPostData ?? {};
+
+  bool get effectiveIsOwner {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return false;
+    return effectivePostData['userId'] == currentUser.uid;
+  }
+
+  Future<void> _fetchOriginalPost(String originalId) async {
+    if (mounted) setState(() => _isLoadingOriginal = true);
+    try {
+      final doc = await _firestore.collection('posts').doc(originalId).get();
+      if (doc.exists) {
+        if (mounted) {
+          setState(() {
+            _resolvedPostData = doc.data();
+            _isLoadingOriginal = false;
+            _syncState();
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _originalError = 'Post no longer exists';
+            _isLoadingOriginal = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _originalError = 'Failed to load post';
+          _isLoadingOriginal = false;
+        });
+      }
+    }
+  }
+
   Future<void> _initializeVideo() async {
     if (_isVideoInitialized || _videoController != null || _isVideoLoading) return;
-
-    final String? singleUrl = widget.postData['mediaUrl'];
-    final List<dynamic> urls = widget.postData['mediaUrls'] ?? [];
+    
+    final data = effectivePostData;
+    final String? singleUrl = data['mediaUrl'];
+    final List<dynamic> urls = data['mediaUrls'] ?? [];
     final String? videoUrl = (urls.isNotEmpty) ? urls.first : singleUrl;
 
     if (videoUrl != null) {
@@ -125,7 +173,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       try {
         final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
         await controller.initialize();
-        controller.setLooping(true); // Optional: looping
+        controller.setLooping(true);
         
         if (mounted) {
           setState(() {
@@ -148,19 +196,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   @override
   void didUpdateWidget(covariant BlogPostCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.postData != widget.postData) {
-      _syncState();
-      
-      // Reset video jika URL berubah
-      if (oldWidget.postData['mediaUrl'] != widget.postData['mediaUrl']) {
-        if (_isVideoOwner) {
-          _videoController?.dispose();
-          _videoController = null;
-          _isVideoInitialized = false;
-        }
-        // Jangan auto-init, tunggu tap lagi
-      }
-    }
     if (oldWidget.isPinned != widget.isPinned) {
       setState(() {
         _localIsPinned = widget.isPinned;
@@ -170,8 +205,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   void _syncState() {
     final currentUser = _auth.currentUser;
-    final likes = widget.postData['likes'] as Map<String, dynamic>? ?? {};
-    final reposts = widget.postData['repostedBy'] as List? ?? [];
+    if (_resolvedPostData == null) return;
+
+    final likes = _resolvedPostData!['likes'] as Map<String, dynamic>? ?? {};
+    final reposts = _resolvedPostData!['repostedBy'] as List? ?? [];
 
     if (mounted) {
       setState(() {
@@ -185,7 +222,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   @override
   void dispose() {
-    // Tidak perlu cancel subscription community karena sudah dihapus
     _likeController.dispose();
     _shareController.dispose();
     _repostController.dispose();
@@ -202,7 +238,9 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     if (currentUser == null) return;
     _likeController.forward().then((_) => _likeController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-    final docRef = _firestore.collection('posts').doc(widget.postId);
+    
+    final docRef = _firestore.collection('posts').doc(effectivePostId);
+    
     setState(() {
       _isLiked = !_isLiked;
       if (_isLiked) {
@@ -211,24 +249,26 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         _likeCount--;
       }
     });
+    
     try {
-      final notificationId = 'like_${widget.postId}_${currentUser.uid}';
-      final notificationRef = _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').doc(notificationId);
+      final notificationId = 'like_${effectivePostId}_${currentUser.uid}';
+      final notificationRef = _firestore.collection('users').doc(effectivePostData['userId']).collection('notifications').doc(notificationId);
+      
       if (_isLiked) {
         await docRef.update({'likes.${currentUser.uid}': true});
-        if (widget.postData['userId'] != currentUser.uid) {
+        if (effectivePostData['userId'] != currentUser.uid) {
           notificationRef.set({
             'type': 'like',
             'senderId': currentUser.uid,
-            'postId': widget.postId,
-            'postTextSnippet': widget.postData['text'],
+            'postId': effectivePostId,
+            'postTextSnippet': effectivePostData['text'],
             'timestamp': FieldValue.serverTimestamp(),
             'isRead': false,
           });
         }
       } else {
         await docRef.update({'likes.${currentUser.uid}': FieldValue.delete()});
-        if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
+        if (effectivePostData['userId'] != currentUser.uid) notificationRef.delete();
       }
     } catch (e) {
       _syncState();
@@ -238,9 +278,15 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   void _toggleRepost() async {
     final currentUser = _auth.currentUser;
     if (currentUser == null) return;
+    
     _repostController.forward().then((_) => _repostController.reverse());
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-    final docRef = _firestore.collection('posts').doc(widget.postId);
+
+    final targetId = effectivePostId;
+    final targetAuthorId = effectivePostData['userId'];
+    final docRef = _firestore.collection('posts').doc(targetId);
+
+    // Optimistic UI update
     setState(() {
       _isReposted = !_isReposted;
       if (_isReposted) {
@@ -249,31 +295,71 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         _repostCount--;
       }
     });
+
     try {
-      final notificationId = 'repost_${widget.postId}_${currentUser.uid}';
-      final notificationRef = _firestore.collection('users').doc(widget.postData['userId']).collection('notifications').doc(notificationId);
+      final notificationId = 'repost_${targetId}_${currentUser.uid}';
+      final notificationRef = _firestore.collection('users').doc(targetAuthorId).collection('notifications').doc(notificationId);
+
       if (_isReposted) {
+        // [MODIFIKASI] Fetch user name agar tidak "User"
+        String reposterName = currentUser.displayName ?? 'User';
+        try {
+           final userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
+           if (userDoc.exists) {
+             final data = userDoc.data();
+             reposterName = data?['userName'] ?? data?['name'] ?? reposterName;
+           }
+        } catch (_) {}
+
+        // Create Repost Wrapper
+        await _firestore.collection('posts').add({
+          'type': 'repost',
+          'originalPostId': targetId,
+          'userId': currentUser.uid,
+          'userName': reposterName,
+          'userEmail': currentUser.email,
+          'timestamp': FieldValue.serverTimestamp(),
+          'visibility': effectivePostData['visibility'] ?? 'public',
+        });
+
         await docRef.update({
           'repostedBy': FieldValue.arrayUnion([currentUser.uid])
         });
-        if (widget.postData['userId'] != currentUser.uid) {
+
+        if (targetAuthorId != currentUser.uid) {
           notificationRef.set({
             'type': 'repost',
             'senderId': currentUser.uid,
-            'postId': widget.postId,
-            'postTextSnippet': widget.postData['text'],
+            'postId': targetId,
+            'postTextSnippet': effectivePostData['text'],
             'timestamp': FieldValue.serverTimestamp(),
             'isRead': false,
           });
         }
       } else {
+        // Delete Repost Wrapper
+        final query = await _firestore.collection('posts')
+            .where('originalPostId', isEqualTo: targetId)
+            .where('userId', isEqualTo: currentUser.uid)
+            .where('type', isEqualTo: 'repost')
+            .get();
+
+        for (var doc in query.docs) {
+          await doc.reference.delete();
+        }
+
         await docRef.update({
           'repostedBy': FieldValue.arrayRemove([currentUser.uid])
         });
-        if (widget.postData['userId'] != currentUser.uid) notificationRef.delete();
+
+        if (targetAuthorId != currentUser.uid) notificationRef.delete();
       }
     } catch (e) {
+      debugPrint("Repost Error: $e");
       _syncState();
+      if (mounted) {
+         OverlayService().showTopNotification(context, "Failed to update repost", Icons.error, () {}, color: Colors.red);
+      }
     }
   }
 
@@ -281,10 +367,9 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final user = _auth.currentUser;
     if (user == null) return;
     if (hapticNotifier.value) HapticFeedback.lightImpact();
-    
     var t = AppLocalizations.of(context)!;
 
-    final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(widget.postId);
+    final docRef = _firestore.collection('users').doc(user.uid).collection('bookmarks').doc(effectivePostId);
 
     if (!isCurrentlyBookmarked) {
       OverlayService().showTopNotification(context, t.translate('post_bookmark_saved'), Icons.bookmark, () {});
@@ -307,8 +392,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     final user = _auth.currentUser;
     if (user == null) return;
     var t = AppLocalizations.of(context)!;
-
-    final currentVis = widget.postData['visibility'] ?? 'public';
+    
+    final currentVis = effectivePostData['visibility'] ?? 'public';
     String newVis;
 
     if (currentVis == 'private') {
@@ -338,7 +423,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     if (mounted) OverlayService().showTopNotification(context, msg, icon, () {}, color: color);
 
     try {
-      await _firestore.collection('posts').doc(widget.postId).update({
+      await _firestore.collection('posts').doc(effectivePostId).update({
         'visibility': newVis,
       });
     } catch (e) {
@@ -353,11 +438,14 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     setState(() {
       _isSharing = true;
     });
+    final text = effectivePostData['text'] ?? '';
+    final name = effectivePostData['userName'] ?? 'User';
+    
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) setState(() {
         _isSharing = false;
       });
-      Share.share('Check out this post by ${widget.postData['userName']}: "${widget.postData['text']}"');
+      Share.share('Check out this post by $name: "$text"');
     });
   }
 
@@ -378,6 +466,13 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     if (confirm) {
       try {
         await _firestore.collection('posts').doc(widget.postId).delete();
+        
+        if (_isRepostWrapper && widget.postData['originalPostId'] != null) {
+             await _firestore.collection('posts').doc(widget.postData['originalPostId']).update({
+                'repostedBy': FieldValue.arrayRemove([_auth.currentUser?.uid])
+             });
+        }
+
         if (mounted) OverlayService().showTopNotification(context, t.translate('post_deleted'), Icons.delete_outline, () {});
       } catch (e) {
         if (mounted) OverlayService().showTopNotification(context, t.translate('post_delete_fail'), Icons.error, () {}, color: Colors.red);
@@ -394,21 +489,21 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       _localIsPinned = newPinState;
     });
     if (widget.onPinToggle != null) {
-      widget.onPinToggle!(widget.postId, newPinState);
+      widget.onPinToggle!(effectivePostId, newPinState);
     }
     try {
       if (!newPinState) {
         await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': FieldValue.delete()});
         if (mounted) OverlayService().showTopNotification(context, t.translate('profile_unpin_success'), Icons.push_pin_outlined, () {});
       } else {
-        await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': widget.postId});
+        await _firestore.collection('users').doc(user.uid).update({'pinnedPostId': effectivePostId});
         if (mounted) OverlayService().showTopNotification(context, t.translate('profile_pin_success'), Icons.push_pin, () {});
       }
     } catch (e) {
       setState(() {
         _localIsPinned = !newPinState;
       });
-      if (widget.onPinToggle != null) widget.onPinToggle!(widget.postId, !newPinState);
+      if (widget.onPinToggle != null) widget.onPinToggle!(effectivePostId, !newPinState);
       if (mounted) OverlayService().showTopNotification(context, t.translate('pin_fail'), Icons.error, () {}, color: Colors.red);
     }
   }
@@ -431,8 +526,8 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     Navigator.of(context).push(
       _createSlideLeftRoute(
         PostDetailScreen(
-          postId: widget.postId,
-          initialPostData: widget.postData,
+          postId: effectivePostId,
+          initialPostData: effectivePostData,
           heroContextId: widget.heroContextId,
           preloadedController: _videoController,
         ),
@@ -441,7 +536,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   }
 
   void _navigateToSource() {
-    final String? communityId = widget.postData['communityId'];
+    final String? communityId = effectivePostData['communityId'];
 
     if (communityId != null) {
       Navigator.of(context).push(
@@ -455,9 +550,10 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
       return;
     }
 
-    final postUserId = widget.postData['userId'];
+    final postUserId = effectivePostData['userId'];
     if (postUserId == null) return;
-    if (widget.isOwner) {
+    
+    if (effectiveIsOwner) {
       final scaffold = Scaffold.maybeOf(context);
       if (scaffold != null && scaffold.hasDrawer) {
         if (hapticNotifier.value) HapticFeedback.lightImpact();
@@ -476,7 +572,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   Future<void> _showEditDialog() async {
     var t = AppLocalizations.of(context)!;
-    _editController.text = widget.postData['text'] ?? '';
+    _editController.text = effectivePostData['text'] ?? '';
     await showDialog(
       context: context,
       builder: (context) {
@@ -499,7 +595,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
   Future<void> _submitEdit() async {
     var t = AppLocalizations.of(context)!;
     try {
-      await _firestore.collection('posts').doc(widget.postId).update({'text': _editController.text});
+      await _firestore.collection('posts').doc(effectivePostId).update({'text': _editController.text});
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
@@ -531,7 +627,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     var t = AppLocalizations.of(context)!;
     Navigator.pop(context);
     moderationService.reportContent(
-        targetId: widget.postId,
+        targetId: effectivePostId,
         targetType: 'post',
         reason: reason);
     OverlayService().showTopNotification(context, t.translate('report_submitted'), Icons.flag, () {});
@@ -539,7 +635,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
 
   void _reportCommunity() {
     var t = AppLocalizations.of(context)!;
-    final String? communityId = widget.postData['communityId'];
+    final String? communityId = effectivePostData['communityId'];
     if (communityId == null) return;
 
     showDialog(
@@ -583,7 +679,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
         false;
 
     if (didConfirm) {
-      await moderationService.blockUser(widget.postData['userId']);
+      await moderationService.blockUser(effectivePostData['userId']);
       if (mounted) OverlayService().showTopNotification(context, t.translate('user_blocked'), Icons.block, () {});
     }
   }
@@ -604,7 +700,6 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     );
   }
 
-  // Handle menu actions from PostHeader
   void _onMenuAction(String value) {
     if (value == 'edit') {
       _showEditDialog();
@@ -623,6 +718,61 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
+  // [MODIFIKASI UTAMA DI SINI]
+  Widget _buildRepostHeader(BuildContext context) {
+    if (!_isRepostWrapper) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final reposterId = widget.postData['userId'];
+    final timestamp = widget.postData['timestamp'] as Timestamp?;
+    final timeStr = timestamp != null ? timeago.format(timestamp.toDate(), locale: 'en_short') : 'just now';
+
+    // Nama awal dari dokumen repost (fallback jika loading)
+    final initialName = widget.postData['userName'] ?? 'User';
+
+    // Menggunakan StreamBuilder untuk memastikan nama selalu terupdate real-time dari koleksi users
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(reposterId).snapshots(),
+      builder: (context, snapshot) {
+        String displayName = initialName;
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          // Prioritaskan 'userName', lalu 'name', lalu kembali ke initialName
+          displayName = data['userName'] ?? data['name'] ?? displayName;
+        }
+
+        return Container(
+          padding: const EdgeInsets.only(left: 36.0, bottom: 6.0),
+          child: Row(
+            children: [
+              Icon(Icons.repeat, size: 14, color: theme.hintColor),
+              const SizedBox(width: 6),
+              Flexible(
+                child: GestureDetector(
+                  onTap: () {
+                    if (reposterId != null) {
+                       Navigator.of(context).push(_createSlideLeftRoute(ProfilePage(userId: reposterId, includeScaffold: true)));
+                    }
+                  },
+                  child: RichText(
+                    text: TextSpan(
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor, fontSize: 13, fontWeight: FontWeight.w600),
+                      children: [
+                        TextSpan(text: "$displayName "), // Menampilkan nama dinamis
+                        TextSpan(text: "reposted · $timeStr", style: const TextStyle(fontWeight: FontWeight.normal)),
+                      ],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
   @override
   bool get wantKeepAlive => true;
 
@@ -631,23 +781,70 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     super.build(context);
     final theme = Theme.of(context);
 
-    // [OPTIMASI 2] Cek blocked user secara langsung dari parameter, BUKAN STREAM
-    if (widget.blockedUserIds.contains(widget.postData['userId'])) {
+    // [REPOST FEATURE] Loading/Error states for wrapper
+    if (_isRepostWrapper) {
+      if (_isLoadingOriginal) {
+        return Container(
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5))),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+               _buildRepostHeader(context),
+               const SizedBox(height: 12),
+               const Center(child: CircularProgressIndicator.adaptive(strokeWidth: 2)),
+            ],
+          ),
+        );
+      }
+      if (_resolvedPostData == null || _originalError.isNotEmpty) {
+        return Container(
+           padding: const EdgeInsets.all(16.0),
+           decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5))),
+           child: Column(
+             crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
+               _buildRepostHeader(context),
+               const SizedBox(height: 12),
+               Container(
+                 padding: const EdgeInsets.all(12),
+                 decoration: BoxDecoration(
+                   color: theme.dividerColor.withOpacity(0.1),
+                   borderRadius: BorderRadius.circular(8),
+                 ),
+                 child: Row(
+                   children: [
+                     Icon(Icons.error_outline, color: theme.hintColor),
+                     const SizedBox(width: 8),
+                     Text(_originalError.isNotEmpty ? _originalError : "Original post not found", style: TextStyle(color: theme.hintColor)),
+                   ],
+                 ),
+               )
+             ],
+           ),
+        );
+      }
+    }
+
+    if (widget.blockedUserIds.contains(effectivePostData['userId'])) {
+      return const SizedBox.shrink();
+    }
+    if (_isRepostWrapper && widget.blockedUserIds.contains(widget.postData['userId'])) {
       return const SizedBox.shrink();
     }
 
-    final text = widget.postData['text'] ?? '';
-    final mediaType = widget.postData['mediaType'];
-    final isUploading = widget.postData['isUploading'] == true;
-    final uploadProgress = widget.postData['uploadProgress'] as double? ?? 0.0;
-    final uploadFailed = widget.postData['uploadFailed'] == true;
-    final int commentCount = widget.postData['commentCount'] ?? 0;
+    final text = effectivePostData['text'] ?? '';
+    final mediaType = effectivePostData['mediaType'];
+    final isUploading = effectivePostData['isUploading'] == true;
+    final uploadProgress = effectivePostData['uploadProgress'] as double? ?? 0.0;
+    final uploadFailed = effectivePostData['uploadFailed'] == true;
+    final int commentCount = effectivePostData['commentCount'] ?? 0;
 
     List<String> mediaUrls = [];
-    if (widget.postData['mediaUrls'] != null) {
-      mediaUrls = List<String>.from(widget.postData['mediaUrls']);
-    } else if (widget.postData['mediaUrl'] != null) {
-      mediaUrls = [widget.postData['mediaUrl']];
+    if (effectivePostData['mediaUrls'] != null) {
+      mediaUrls = List<String>.from(effectivePostData['mediaUrls']);
+    } else if (effectivePostData['mediaUrl'] != null) {
+      mediaUrls = [effectivePostData['mediaUrl']];
     }
 
     if (uploadFailed) {
@@ -682,18 +879,17 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- HEADER (Avatar, Name, Timestamp, Menu) ---
+                  _buildRepostHeader(context),
+
                   PostHeader(
-                    postData: widget.postData,
-                    isOwner: widget.isOwner,
-                    // [OPTIMASI 1] Gunakan parameter langsung
+                    postData: effectivePostData, 
+                    isOwner: effectiveIsOwner,
                     isCommunityAdmin: widget.isCommunityAdmin,
                     isPinned: _localIsPinned,
                     onNavigateToSource: _navigateToSource,
                     onMenuAction: _onMenuAction,
                   ),
                   
-                  // --- BODY CONTENT ---
                   Padding(
                     padding: const EdgeInsets.only(left: 60.0), 
                     child: Column(
@@ -716,25 +912,21 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                             padding: const EdgeInsets.only(top: 12.0),
                             child: Builder(
                               builder: (context) {
-                                // [OPTIMASI 3] Wrapper untuk Lazy Video Load
-                                // Jika mediaType adalah video dan controller belum init, tampilkan wrapper tap-to-play
                                 if (mediaType == 'video' && !_isVideoInitialized) {
                                     return GestureDetector(
                                       onTap: _initializeVideo,
                                       child: Stack(
                                         alignment: Alignment.center,
                                         children: [
-                                          // Tampilkan Preview tanpa controller (akan menampilkan thumbnail dari PostMediaPreview jika menghandle null)
                                           PostMediaPreview(
                                             mediaUrls: mediaUrls,
                                             mediaType: mediaType,
                                             text: text,
-                                            postData: widget.postData,
-                                            postId: widget.postId,
+                                            postData: effectivePostData,
+                                            postId: effectivePostId,
                                             heroContextId: widget.heroContextId,
-                                            videoController: null, // Pass null saat belum init
+                                            videoController: null, 
                                           ),
-                                          // Overlay tombol play atau loading
                                           Container(
                                             color: Colors.black26,
                                             child: Center(
@@ -748,13 +940,12 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                                     );
                                 }
                                 
-                                // Jika video sudah init atau bukan video, tampilkan normal
                                 return PostMediaPreview(
                                   mediaUrls: mediaUrls,
                                   mediaType: mediaType,
                                   text: text,
-                                  postData: widget.postData,
-                                  postId: widget.postId,
+                                  postData: effectivePostData,
+                                  postId: effectivePostId,
                                   heroContextId: widget.heroContextId,
                                   videoController: _videoController,
                                 );
@@ -762,10 +953,9 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
                             ),
                           ),
 
-                        // --- ACTION BAR (Likes, Reposts, etc) ---
                         if (!isUploading)
                           PostActionBar(
-                            postId: widget.postId,
+                            postId: effectivePostId,
                             commentCount: commentCount,
                             repostCount: _repostCount,
                             likeCount: _likeCount,
