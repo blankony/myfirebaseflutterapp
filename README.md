@@ -49,25 +49,14 @@ The architecture emphasizes denormalized data for a fast-reading feed, a secure 
 - **Haptic Feedback:** Subtle haptic feedback on interactions for a more tactile experience.
 
 ## Screenshots
-### Authentication & Setup
-| Welcome | Login | Register | Forgot Password | Setup Profile | Setup Department | Setup Verification |
-|---|---|---|---|---|---|---|
-| <img src="screenshots/welcome.png" width="250"/> | <img src="screenshots/login.png" width="250"/> | <img src="screenshots/register.png" width="250"/> | <img src="screenshots/forgot_password.png" width="250"/> | <img src="screenshots/setup_profile.png" width="250"/> | <img src="screenshots/setup_department.png" width="250"/> | <img src="screenshots/setup_verification.png" width="250"/> |
 
-### Main App
-| Home | AI Assistant | Search | My Profile | Other's Profile |
-|---|---|---|---|---|
-| <img src="screenshots/home.png" width="250"/> | <img src="screenshots/ai_assistant.png" width="250"/> | <img src="screenshots/search.png" width="250"/> | <img src="screenshots/profile.png" width="250"/> | <img src="screenshots/others.png" width="250"/> |
+Here is a quick look at the application. For the complete list of screenshots covering all features, please visit the **[Screenshot Gallery](GALLERY.md)**.
 
-### Content Creation & Viewing
-| Create Post | Post Detail | Image Viewer | Video Trimmer |
+| Home Feed | Community | AI Assistant | User Profile |
 |---|---|---|---|
-| <img src="screenshots/create_post.png" width="250"/> | <img src="screenshots/post_detail.png" width="250"/> | <img src="screenshots/image_viewer.png" width="250"/> | <img src="screenshots/video_trimmer.png" width="250"/> |
+| <img src="screenshots/home.jpg" width="200"/> | <img src="screenshots/community_view.jpg" width="200"/> | <img src="screenshots/spirit_ai.jpg" width="200"/> | <img src="screenshots/profile_posts.jpg" width="200"/> |
 
-### Account Management
-| Settings | Account Center | Edit Profile | Change Password | About |
-|---|---|---|---|---|
-| <img src="screenshots/settings.png" width="250"/> | <img src="screenshots/account_center.png" width="250"/> | <img src="screenshots/edit_profile.png" width="250"/> | <img src="screenshots/change_password.png" width="250"/> | <img src="screenshots/about.png" width="250"/> |
+👉 **[Click here to view the full Screenshot Gallery (GALLERY.md)](GALLERY.md)**
 
 ---
 
@@ -137,44 +126,3 @@ service cloud.firestore {
     }
   }
 }
-```
-
-### 3. Environment Setup
-The application uses AI and media upload features that require API keys.
-1. Create a file named `.env` in the root of the project.
-2. Add your secret keys to this file:
-   ```env
-   # Google AI for Gemini features
-   GEMINI_API_KEY=YOUR_GEMINI_API_KEY
-
-   # Cloudinary for media uploads
-   CLOUDINARY_CLOUD_NAME=YOUR_CLOUDINARY_CLOUD_NAME
-   CLOUDINARY_UPLOAD_PRESET=YOUR_CLOUDINARY_UPLOAD_PRESET
-   ```
-
-### 4. Local Setup
-Clone the repository:
-```sh
-git clone https://github.com/blankony/myfirebaseflutterapp
-```
-Install dependencies:
-```sh
-flutter pub get
-```
-Run the application:
-```sh
-flutter run
-```
-
----
-
-## Main Dependencies
-
-- `firebase_core`, `firebase_auth`, `cloud_firestore`
-- `google_generative_ai` for AI features.
-- `cloudinary_public` via `http` for media uploads.
-- `image_picker`, `image_cropper`, `video_player`, `video_compress` for media handling.
-- `flutter_markdown`, `cached_network_image`, `timeago` for UI.
-- `flutter_dotenv` for environment variable management.
-- `share_plus`, `url_launcher` for system integrations.
-
