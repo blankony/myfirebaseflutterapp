@@ -493,6 +493,14 @@
   "post_restricted_admin": "Posting restricted to Admins",
   "post_crop_image": "Crop Image",
   "general_community": "Community",
-  "general_anonymous": "Anonymous"
+  "general_anonymous": "Anonymous",
+
+  "verify_setup_title": "Verify your account",
+  "verify_setup_desc": "To ensure the safety of the PNJ community, verified users get full access to post and interact. Unverified accounts are read-only.",
+  "verify_email_sent_toast": "Verification email sent!",
+  "verify_already_verified": "Already verified or user not found.",
+  "verify_email_sent_banner": "Email sent! Check your inbox.",
+  "verify_send_btn": "Send Verification Email",
+  "verify_get_started": "Get Started"
 
 }

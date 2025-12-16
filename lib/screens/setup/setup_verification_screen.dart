@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../main.dart';
 import '../../auth_gate.dart'; 
-import '../../services/overlay_service.dart'; // REQUIRED
+import '../../services/overlay_service.dart'; 
+import '../../services/app_localizations.dart';
 
 class SetupVerificationScreen extends StatefulWidget {
   const SetupVerificationScreen({super.key});
@@ -38,6 +39,8 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
   Future<void> _sendVerification() async {
     setState(() { _isLoading = true; });
     final user = FirebaseAuth.instance.currentUser;
+    // Localization
+    var t = AppLocalizations.of(context)!;
     
     try {
       if (user != null && !user.emailVerified) {
@@ -46,7 +49,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
         if (mounted) {
           OverlayService().showTopNotification(
             context, 
-            "Verification email sent!", 
+            t.translate('verify_email_sent_toast'), // "Verification email sent!"
             Icons.mark_email_read, 
             (){},
             color: Colors.green
@@ -56,7 +59,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
          if (mounted) {
            OverlayService().showTopNotification(
              context, 
-             "Already verified or user not found.", 
+             t.translate('verify_already_verified'), // "Already verified..."
              Icons.info, 
              (){},
              color: TwitterTheme.blue
@@ -67,7 +70,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
       if (mounted) {
         OverlayService().showTopNotification(
           context, 
-          "Error: $e", 
+          "${t.translate('general_error')}: $e", 
           Icons.error, 
           (){},
           color: Colors.red
@@ -88,6 +91,8 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Localization
+    var t = AppLocalizations.of(context)!;
     
     return Scaffold(
       body: SafeArea(
@@ -109,7 +114,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
               ),
               SizedBox(height: 32),
               Text(
-                "Verify your account",
+                t.translate('verify_setup_title'), // "Verify your account"
                 textAlign: TextAlign.center,
                 style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w900,
@@ -118,7 +123,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
               ),
               SizedBox(height: 16),
               Text(
-                "To ensure the safety of the PNJ community, verified users get full access to post and interact. Unverified accounts are read-only.",
+                t.translate('verify_setup_desc'), // Description text
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge?.copyWith(color: theme.hintColor),
               ),
@@ -136,7 +141,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
                     ),
                     child: _isLoading 
                       ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text("Send Verification Email", style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
+                      : Text(t.translate('verify_send_btn'), style: TextStyle(color: TwitterTheme.blue, fontWeight: FontWeight.bold)),
                   ),
                 )
               else
@@ -152,7 +157,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
                     children: [
                       Icon(Icons.check_circle, color: Colors.green),
                       SizedBox(width: 8),
-                      Text("Email sent! Check your inbox.", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                      Text(t.translate('verify_email_sent_banner'), style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -169,7 +174,7 @@ class _SetupVerificationScreenState extends State<SetupVerificationScreen> with 
                     padding: EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                   ),
-                  child: Text("Get Started"),
+                  child: Text(t.translate('verify_get_started')), // "Get Started"
                 ),
               ),
             ],

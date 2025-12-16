@@ -489,6 +489,14 @@
   "post_restricted_admin": "Posting dibatasi hanya untuk Admin",
   "post_crop_image": "Potong Gambar",
   "general_community": "Komunitas",
-  "general_anonymous": "Anonim"
+  "general_anonymous": "Anonim",
+
+  "verify_setup_title": "Verifikasi Akun Anda",
+  "verify_setup_desc": "Untuk menjaga keamanan komunitas PNJ, pengguna terverifikasi mendapatkan akses penuh. Akun yang belum verifikasi hanya bisa melihat.",
+  "verify_email_sent_toast": "Email verifikasi dikirim!",
+  "verify_already_verified": "Sudah verifikasi atau user tidak ditemukan.",
+  "verify_email_sent_banner": "Email terkirim! Cek kotak masuk Anda.",
+  "verify_send_btn": "Kirim Email Verifikasi",
+  "verify_get_started": "Mulai Sekarang"
 
 }
