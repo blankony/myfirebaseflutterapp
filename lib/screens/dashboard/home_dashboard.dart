@@ -22,7 +22,6 @@ import '../../widgets/notification_sheet.dart';
 import '../../services/overlay_service.dart';
 import '../../services/notification_prefs_service.dart';
 import '../../services/ai_event_bus.dart';
-import '../../services/app_localizations.dart'; // IMPORT LOCALIZATION
 
 import '../../services/draft_service.dart';
 import '../post_detail_screen.dart';
@@ -209,29 +208,26 @@ class _HomeDashboardState extends State<HomeDashboard>
 
   void _showNotificationOverlay(
       QueryDocumentSnapshot doc, Map<String, dynamic> data) {
-    // LOCALIZATION
-    var t = AppLocalizations.of(context)!;
-    
     final String type = data['type'] ?? 'info';
-    String message = t.translate('notif_new'); // "New Notification"
+    String message = 'New Notification';
     IconData icon = Icons.notifications;
     String? postId = data['postId'];
 
     switch (type) {
       case 'like':
-        message = t.translate('notif_like'); // "Someone liked your post."
+        message = "Someone liked your post.";
         icon = Icons.favorite;
         break;
       case 'comment':
-        message = t.translate('notif_comment'); // "Someone commented on your post."
+        message = "Someone commented on your post.";
         icon = Icons.comment;
         break;
       case 'follow':
-        message = t.translate('notif_follow'); // "You have a new follower!"
+        message = "You have a new follower!";
         icon = Icons.person_add;
         break;
       case 'upload_complete':
-        message = t.translate('notif_upload_success'); // "Media uploaded successfully."
+        message = "Media uploaded successfully.";
         icon = Icons.check_circle;
         break;
     }
@@ -333,29 +329,32 @@ class _HomeDashboardState extends State<HomeDashboard>
     );
   }
 
-  // --- CHECK DRAFTS BEFORE SHOWING DIALOG WITH ANIMATION ---
+  // --- MODIFIED: CHECK DRAFTS BEFORE SHOWING DIALOG ---
   void _showPostCreationMenu(BuildContext context) async {
     final DraftService draftService = DraftService();
+    // 1. Ambil drafts terlebih dahulu
     final List<DraftPost> drafts = await draftService.getDrafts();
 
     if (!mounted) return;
 
+    // 2. Cek apakah drafts kosong
     if (drafts.isEmpty) {
+      // Jika kosong, langsung buka Create Post Screen tanpa dialog
       _navigateToCreatePost();
       return;
     }
 
-    // Using showGeneralDialog for custom entrance animation (Scale + Fade + Blur)
-    showGeneralDialog(
+    // 3. Jika ada drafts, tampilkan dialog pilihan
+    showDialog(
       context: context,
       barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       barrierColor: Colors.black.withOpacity(0.3),
-      transitionDuration: const Duration(milliseconds: 350),
-      pageBuilder: (ctx, anim1, anim2) {
-        return Center(
-          child: Container(
-            margin: EdgeInsets.symmetric(horizontal: 24),
+      builder: (ctx) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.all(20),
             child: _DraftMenuContent(
               initialDrafts: drafts,
               onNewPost: () {
@@ -370,28 +369,12 @@ class _HomeDashboardState extends State<HomeDashboard>
           ),
         );
       },
-      transitionBuilder: (ctx, anim1, anim2, child) {
-        final curvedValue = Curves.easeOutBack.transform(anim1.value);
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8 * anim1.value, sigmaY: 8 * anim1.value),
-          child: Transform.scale(
-            scale: 0.8 + (0.2 * curvedValue), // Scale up from 0.8 to 1.0 with bounce
-            child: Opacity(
-              opacity: anim1.value,
-              child: child,
-            ),
-          ),
-        );
-      },
     );
   }
 
   void _showCommunityPostSelector(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-
-    // LOCALIZATION
-    var t = AppLocalizations.of(context)!;
 
     showModalBottomSheet(
       context: context,
@@ -405,7 +388,7 @@ class _HomeDashboardState extends State<HomeDashboard>
             children: [
               Padding(
                 padding: const EdgeInsets.only(bottom: 16.0),
-                child: Text(t.translate('community_post_to'), // "Post to Community"
+                child: Text("Post to Community",
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ),
               Expanded(
@@ -421,7 +404,7 @@ class _HomeDashboardState extends State<HomeDashboard>
                     final docs = snapshot.data?.docs ?? [];
                     if (docs.isEmpty) {
                       return Center(
-                          child: Text(t.translate('community_no_joined'))); // "You haven't joined..."
+                          child: Text("You haven't joined any communities yet."));
                     }
 
                     return ListView.builder(
@@ -478,9 +461,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   // --- Build Components ---
 
   List<Widget> _buildAppBarActions() {
-    // LOCALIZATION
-    var t = AppLocalizations.of(context)!;
-
     switch (_currentTabIndex) {
       case 0: // Home
         return [_NotificationButton(onPressed: _showNotificationPopup)];
@@ -488,7 +468,7 @@ class _HomeDashboardState extends State<HomeDashboard>
         return [
           IconButton(
             icon: const Icon(Icons.history),
-            tooltip: t.translate('ai_history'), // "Chat History"
+            tooltip: 'Chat History',
             onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
           ),
         ];
@@ -606,9 +586,6 @@ class _HomeDashboardState extends State<HomeDashboard>
   }
 
   Widget _buildBottomNavigationBar(bool isDarkMode) {
-    // LOCALIZATION
-    var t = AppLocalizations.of(context)!;
-
     final navBarBgColor = isDarkMode
         ? Color(0xFF15202B).withOpacity(0.85)
         : Colors.white.withOpacity(0.85);
@@ -633,31 +610,31 @@ class _HomeDashboardState extends State<HomeDashboard>
             items: <BottomNavyBarItem>[
               BottomNavyBarItem(
                 icon: Icon(Icons.home),
-                title: Text(t.translate('nav_home')), // "Home"
+                title: Text('Home'),
                 activeColor: activeIconColor,
                 inactiveColor: inactiveIconColor,
               ),
               BottomNavyBarItem(
                 icon: Icon(Icons.groups),
-                title: Text(t.translate('nav_community')), // "Community"
+                title: Text('Community'),
                 activeColor: activeIconColor,
                 inactiveColor: inactiveIconColor,
               ),
               BottomNavyBarItem(
                 icon: Icon(Icons.assistant),
-                title: Text(t.translate('nav_ai')), // "AI Assistant"
+                title: Text('AI Assistant'),
                 activeColor: activeIconColor,
                 inactiveColor: inactiveIconColor,
               ),
               BottomNavyBarItem(
                 icon: Icon(Icons.search),
-                title: Text(t.translate('nav_search')), // "Search"
+                title: Text('Search'),
                 activeColor: activeIconColor,
                 inactiveColor: inactiveIconColor,
               ),
               BottomNavyBarItem(
                 icon: Icon(Icons.person),
-                title: Text(t.translate('nav_profile')), // "Profile"
+                title: Text('Profile'),
                 activeColor: activeIconColor,
                 inactiveColor: inactiveIconColor,
               ),
@@ -724,17 +701,17 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
   }
 
   Future<void> _deleteDraft(String id, int index) async {
+    // 1. Optimistic Update
     setState(() {
       _localDrafts.removeAt(index);
     });
+
+    // 2. Persist Change
     await DraftService().deleteDraft(id);
   }
 
   @override
   Widget build(BuildContext context) {
-    // LOCALIZATION
-    var t = AppLocalizations.of(context)!;
-
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final bgColor = isDark ? Color(0xFF15202B) : Colors.white;
@@ -754,39 +731,38 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(t.translate('post_create_title'), // "Create Post"
+          Text("Create Post",
               style: theme.textTheme.headlineSmall
                   ?.copyWith(fontWeight: FontWeight.bold),
               textAlign: TextAlign.center),
           SizedBox(height: 24),
-          _buildNewPostButton(t),
+          _buildNewPostButton(),
           if (_localDrafts.isNotEmpty) ...[
             SizedBox(height: 24),
-            _buildDraftsHeader(theme, t),
+            _buildDraftsHeader(theme),
             SizedBox(height: 8),
-            _buildDraftsList(theme, t),
+            _buildDraftsList(theme),
           ] else ...[
             SizedBox(height: 16),
             Center(
-                child: Text(t.translate('post_no_drafts'), // "No drafts saved"
+                child: Text("No drafts saved",
                     style: TextStyle(color: theme.hintColor))),
           ],
           SizedBox(height: 12),
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(t.translate('general_cancel'), // "Cancel"
-                style: TextStyle(color: theme.hintColor)),
+            child: Text("Cancel", style: TextStyle(color: theme.hintColor)),
           )
         ],
       ),
     );
   }
 
-  Widget _buildNewPostButton(AppLocalizations t) {
+  Widget _buildNewPostButton() {
     return ElevatedButton.icon(
       onPressed: widget.onNewPost,
       icon: Icon(Icons.add, color: Colors.white),
-      label: Text(t.translate('post_create_new'), style: TextStyle(fontSize: 16)), // "Create New Post"
+      label: Text("Create New Post", style: TextStyle(fontSize: 16)),
       style: ElevatedButton.styleFrom(
         backgroundColor: TwitterTheme.blue,
         foregroundColor: Colors.white,
@@ -797,9 +773,9 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
     );
   }
 
-  Widget _buildDraftsHeader(ThemeData theme, AppLocalizations t) {
+  Widget _buildDraftsHeader(ThemeData theme) {
     return Row(children: [
-      Text(t.translate('post_recent_drafts'), // "Recent Drafts"
+      Text("Recent Drafts",
           style: TextStyle(
               color: theme.hintColor,
               fontWeight: FontWeight.bold,
@@ -810,7 +786,7 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
     ]);
   }
 
-  Widget _buildDraftsList(ThemeData theme, AppLocalizations t) {
+  Widget _buildDraftsList(ThemeData theme) {
     return Container(
       decoration: BoxDecoration(
         color: theme.cardColor,
@@ -825,7 +801,7 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
             final bool isLast = index == _localDrafts.length - 1;
             return Column(
               children: [
-                _buildDraftItem(draft, index, theme, t),
+                _buildDraftItem(draft, index, theme),
                 if (!isLast) Divider(height: 1, indent: 60),
               ],
             );
@@ -835,7 +811,7 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
     );
   }
 
-  Widget _buildDraftItem(DraftPost draft, int index, ThemeData theme, AppLocalizations t) {
+  Widget _buildDraftItem(DraftPost draft, int index, ThemeData theme) {
     return Dismissible(
       key: Key(draft.id),
       direction: DismissDirection.startToEnd,
@@ -844,10 +820,10 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
         padding: EdgeInsets.only(left: 20),
         color: Colors.red,
         child: Row(
-          children: [
+          children: const [
             Icon(Icons.delete, color: Colors.white),
             SizedBox(width: 8),
-            Text(t.translate('general_delete'), // "Delete"
+            Text("Delete",
                 style: TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold))
           ],
@@ -868,7 +844,7 @@ class _DraftMenuContentState extends State<_DraftMenuContent> {
               size: 20),
         ),
         title: Text(
-          draft.text.isEmpty ? t.translate('post_untitled_draft') : draft.text, // "Untitled Draft"
+          draft.text.isEmpty ? "Untitled Draft" : draft.text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontWeight: FontWeight.bold),
