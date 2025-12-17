@@ -103,11 +103,11 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     _repostController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
     _repostAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(CurvedAnimation(parent: _repostController, curve: Curves.easeInOut));
 
-    // [FIX] Panggil setup logic utama
+    // Panggil setup logic utama
     _initializePostData();
   }
 
-  // [FIX] Logic inisialisasi dipisah agar bisa dipanggil ulang saat recycle widget
+  // Logic inisialisasi dipisah agar bisa dipanggil ulang saat recycle widget
   void _initializePostData() {
     // Reset video state
     if (_isVideoOwner) {
@@ -139,7 +139,7 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
     }
   }
 
-  // [FIX] Handle Widget Recycling (PENTING untuk ListView)
+  // Handle Widget Recycling (PENTING untuk ListView)
   @override
   void didUpdateWidget(covariant BlogPostCard oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -820,32 +820,11 @@ class _BlogPostCardState extends State<BlogPostCard> with TickerProviderStateMix
           ),
         );
       }
+      
+      // [FIXED LOGIC]: Jika data asli hilang atau error, kembalikan SizedBox.shrink()
+      // Ini akan membuat postingan "menghilang" dari feed alih-alih menampilkan error ghost post.
       if (_resolvedPostData == null || _originalError.isNotEmpty) {
-        return Container(
-           padding: const EdgeInsets.all(16.0),
-           decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.dividerColor, width: 0.5))),
-           child: Column(
-             crossAxisAlignment: CrossAxisAlignment.start,
-             children: [
-               _buildRepostHeader(context),
-               const SizedBox(height: 12),
-               Container(
-                 padding: const EdgeInsets.all(12),
-                 decoration: BoxDecoration(
-                   color: theme.dividerColor.withOpacity(0.1),
-                   borderRadius: BorderRadius.circular(8),
-                 ),
-                 child: Row(
-                   children: [
-                     Icon(Icons.error_outline, color: theme.hintColor),
-                     const SizedBox(width: 8),
-                     Text(_originalError.isNotEmpty ? _originalError : "Original post not found", style: TextStyle(color: theme.hintColor)),
-                   ],
-                 ),
-               )
-             ],
-           ),
-        );
+        return const SizedBox.shrink();
       }
     }
 
